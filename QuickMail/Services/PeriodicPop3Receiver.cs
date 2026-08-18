@@ -39,7 +39,9 @@ public sealed class PeriodicPop3Receiver : IDisposable
                 try
                 {
                     Started?.Invoke(account, index + 1, accounts.Count);
-                    var result = await _receiver.CheckAutomaticallyAsync(account, _stop.Token);
+                    var result = includeAccountsWithAutomaticCheckDisabled
+                        ? await _receiver.CheckNowAsync(account, _stop.Token)
+                        : await _receiver.CheckAutomaticallyAsync(account, _stop.Token);
                     if (_rules is not null && result.NewMessages is { Count: > 0 })
                         await _rules.ApplyRulesAsync(result.NewMessages.ToList(), account.Id, _stop.Token);
                     Completed?.Invoke(account, result);

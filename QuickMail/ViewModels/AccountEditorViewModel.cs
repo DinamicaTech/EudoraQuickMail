@@ -808,6 +808,44 @@ public abstract partial class AccountEditorViewModel : ObservableObject
             return;
         }
 
+        if (IsPop3Backend)
+        {
+            if (string.IsNullOrWhiteSpace(Pop3Host) || string.IsNullOrWhiteSpace(Username))
+            {
+                StatusText = "Fill in POP3 host and email address first.";
+                return;
+            }
+            if (string.IsNullOrEmpty(Password))
+            {
+                StatusText = "Enter the POP3 password first.";
+                return;
+            }
+
+            IsBusy = true;
+            StatusText = "Testing POP3 and SMTP connections…";
+            var popAccount = BuildProbeAccount();
+            try
+            {
+                var popResult = await ProbeAsync(async ct =>
+                {
+                    await using var transport = new MailKitPop3TransportFactory().Create(popAccount);
+                    await transport.ConnectAsync(popAccount, ct);
+                    await transport.AuthenticateAsync(popAccount.AuthUsername, Password, ct);
+                    if (!transport.SupportsUidListing)
+                        throw new NotSupportedException("The POP3 server does not support UIDL.");
+                    await transport.DisconnectAsync(commitDeletes: false, ct);
+                });
+                var smtpResult = string.IsNullOrWhiteSpace(SmtpHost)
+                    ? "SMTP not configured."
+                    : SendMailService is null
+                        ? "SMTP not checked."
+                        : await ProbeAsync(ct => SendMailService.VerifyAsync(popAccount, Password, ct));
+                StatusText = $"POP3: {popResult} SMTP: {smtpResult}";
+            }
+            finally { IsBusy = false; }
+            return;
+        }
+
         if (string.IsNullOrWhiteSpace(ImapHost) || string.IsNullOrWhiteSpace(Username))
         {
             StatusText = "Fill in IMAP host and username first.";

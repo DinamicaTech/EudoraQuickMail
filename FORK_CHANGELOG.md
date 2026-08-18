@@ -26,6 +26,8 @@ before a public release.
   long SQLite cascade off the UI thread so Manage Accounts remains responsive.
 - Added an `Active account` flag; inactive accounts remain configured and keep their data but are
   excluded from the main account tree, connection, POP3 checks, and scheduled dispatch.
+- Fixed Test Connection for POP3/SMTP accounts so it validates POP3 + SMTP (including UIDL) without
+  requiring or probing IMAP; manual Check Mail now truly includes automatic-check-disabled accounts.
 
 - Added visible local Draft and Scheduled folders; Send Later now prompts explicitly for a local
   date/time and keeps a local scheduled copy until successful delivery.
