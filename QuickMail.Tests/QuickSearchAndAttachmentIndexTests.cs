@@ -84,6 +84,8 @@ public class AttachmentExtractorTests
             Assert.Equal(hash, await store.GetCachedAttachmentHashAsync(path, info.Length, info.LastWriteTimeUtc.Ticks, TestContext.Current.CancellationToken));
             var cached = Assert.Single((await store.LoadCachedExtractionAsync(hash, key, TestContext.Current.CancellationToken))!);
             Assert.Equal("shared searchable content", cached.Text);
+            await store.ResetAttachmentSearchIndexAsync(TestContext.Current.CancellationToken);
+            Assert.NotNull(await store.LoadCachedExtractionAsync(hash, key, TestContext.Current.CancellationToken));
         }
         finally
         {
@@ -121,6 +123,8 @@ public class QuickSearchStoreTests
             Assert.Equal(1, (await store.SearchLocalMessagesAsync(new("B:cho?olate"), TestContext.Current.CancellationToken)).TotalMatches);
             Assert.Equal(1, (await store.SearchLocalMessagesAsync(new("AN:report"), TestContext.Current.CancellationToken)).TotalMatches);
             Assert.Equal(1, (await store.SearchLocalMessagesAsync(new("AC:Chocolate"), TestContext.Current.CancellationToken)).TotalMatches);
+            Assert.Equal(1, await store.RebuildMessageSearchIndexAsync(TestContext.Current.CancellationToken));
+            Assert.Equal(1, (await store.SearchLocalMessagesAsync(new("S:Annual"), TestContext.Current.CancellationToken)).TotalMatches);
         }
         finally
         {
@@ -151,6 +155,10 @@ public class AttachmentIndexSettingsTests
 
 public class ComposeLanguageDetectionTests
 {
+    [Fact]
+    public void DetectsSpanishFromFiveWords() =>
+        Assert.Equal("es-ES", ComposeWindow.DetectComposeLanguage("hola gracias por este mensaje".Split(' ')));
+
     [Fact]
     public void DetectsCatalanAgainstSpanishSharedWords()
     {

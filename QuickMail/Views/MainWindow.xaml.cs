@@ -6388,6 +6388,42 @@ public partial class MainWindow : Window
             FocusMessageListFirstItem();
     }
 
+    private async void MenuRebuildSearchIndexes_Click(object sender, RoutedEventArgs e)
+    {
+        if (_localStore is not LocalStoreService store)
+        {
+            MessageBox.Show(this, "Search index rebuilding is available for the local mailbox only.",
+                "Rebuild Search Indexes", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+        if (MessageBox.Show(this,
+                "Rebuild the message and attachment search indexes? Mail and extracted attachment caches will not be deleted.",
+                "Rebuild Search Indexes", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+            return;
+
+        _vm.IsStatusHighlighted = true;
+        _vm.StatusText = "Rebuilding message search index…";
+        var indexer = new AttachmentIndexingService(store, _configService);
+        indexer.Progress += (current, total, name) => Dispatcher.BeginInvoke(() =>
+        {
+            if (current != 1 && current % 25 != 0 && current != total) return;
+            _vm.IsStatusHighlighted = true;
+            _vm.StatusText = $"Rebuilding attachment index {current:N0}/{total:N0}: {name}";
+        });
+        try
+        {
+            var messages = await Task.Run(() => indexer.RebuildAllAsync());
+            _vm.IsStatusHighlighted = true;
+            _vm.StatusText = $"Search indexes rebuilt: {messages:N0} messages.";
+        }
+        catch (Exception ex)
+        {
+            LogService.Log("Search index rebuild", ex);
+            _vm.IsStatusHighlighted = true;
+            _vm.StatusText = $"Search index rebuild failed: {ex.Message}";
+        }
+    }
+
     private async void MessageContextMenu_ViewSource_Click(object sender, RoutedEventArgs e)
     {
         var message = GetSelectedMessages().FirstOrDefault();

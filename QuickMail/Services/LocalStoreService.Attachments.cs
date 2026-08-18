@@ -10,6 +10,40 @@ public sealed record ExtractedAttachmentText(string EntryPath, string Status, st
 
 public partial class LocalStoreService
 {
+    public async Task<int> RebuildMessageSearchIndexAsync(CancellationToken ct = default)
+    {
+        await using var conn = await OpenAsync();
+        await using var tx = (SqliteTransaction)await conn.BeginTransactionAsync(ct);
+        await using var cmd = conn.CreateCommand(); cmd.Transaction = tx;
+        cmd.CommandText = """
+            DELETE FROM LocalMessageFts;
+            DELETE FROM LocalMessageFtsKey;
+            INSERT INTO LocalMessageFts(account_id,unique_id,folder_name,from_addr,to_addr,cc_addr,subject,body_text)
+            SELECT s.account_id,s.unique_id,s.folder_name,s.from_disp,d.to_addr,d.cc,s.subject,
+                   CASE WHEN trim(COALESCE(d.plain_body,'')) <> '' THEN d.plain_body ELSE COALESCE(d.html_body,'') END
+              FROM MessageSummary s
+              LEFT JOIN MessageDetail d ON d.account_id=s.account_id AND d.unique_id=s.unique_id AND d.folder_name=s.folder_name;
+            INSERT INTO LocalMessageFtsKey(account_id,unique_id,folder_name,fts_rowid)
+            SELECT account_id,unique_id,folder_name,rowid FROM LocalMessageFts;
+            """;
+        await cmd.ExecuteNonQueryAsync(ct);
+        cmd.CommandText = "SELECT count(*) FROM LocalMessageFtsKey;";
+        var count = Convert.ToInt32(await cmd.ExecuteScalarAsync(ct));
+        await tx.CommitAsync(ct);
+        return count;
+    }
+
+    public async Task ResetAttachmentSearchIndexAsync(CancellationToken ct = default)
+    {
+        await using var conn = await OpenAsync();
+        await using var tx = (SqliteTransaction)await conn.BeginTransactionAsync(ct);
+        await using var cmd = conn.CreateCommand(); cmd.Transaction = tx;
+        // Keep both SHA caches: rebuilding message associations must not re-extract unchanged files.
+        cmd.CommandText = "DELETE FROM AttachmentContentFts; DELETE FROM AttachmentContent;";
+        await cmd.ExecuteNonQueryAsync(ct);
+        await tx.CommitAsync(ct);
+    }
+
     public async Task<IReadOnlyList<AttachmentIndexCandidate>> LoadAttachmentIndexCandidatesAsync(CancellationToken ct = default)
     {
         var result = new List<AttachmentIndexCandidate>();

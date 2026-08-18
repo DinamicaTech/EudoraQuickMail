@@ -1826,7 +1826,9 @@ public partial class ComposeWindow : Window
     private void ApplyDefaultComposeMode()
     {
         ComposeMode targetMode;
-        if (_vm.ComposeKind is ComposeKind.EditDraft or ComposeKind.NewDraft
+        if (_vm.ComposeKind == ComposeKind.NewMessage)
+            targetMode = ComposeMode.Html;
+        else if (_vm.ComposeKind is ComposeKind.EditDraft or ComposeKind.NewDraft
             || (_vm.ComposeKind is ComposeKind.Reply or ComposeKind.ReplyAll or ComposeKind.Forward
                 && _vm.SeededMode == ComposeMode.Html))
             targetMode = _vm.SeededMode;       // restore saved mode or preserve the source's rich reply/forward body
@@ -2005,7 +2007,7 @@ public partial class ComposeWindow : Window
             || !string.IsNullOrEmpty(_vm.SpellLanguage)) return;
         var words = System.Text.RegularExpressions.Regex.Matches(text.ToLowerInvariant(), @"[\p{L}']+")
             .Select(m => m.Value).Take(40).ToArray();
-        if (words.Length < 24) return;
+        if (words.Length < 5) return;
         _languageDetectionAttempted = true; // exactly one attempt per new compose
         var detected = DetectComposeLanguage(words);
         if (detected is null) return;
@@ -2025,7 +2027,7 @@ public partial class ComposeWindow : Window
         var list = words.ToArray();
         var ordered = sets.Select(k => new { Language = k.Key, Score = list.Count(k.Value.Contains) })
             .OrderByDescending(x => x.Score).ToArray();
-        return ordered[0].Score >= 3 && ordered[0].Score >= ordered[1].Score + 2 ? ordered[0].Language : null;
+        return ordered[0].Score >= 2 && ordered[0].Score >= ordered[1].Score + 1 ? ordered[0].Language : null;
     }
 
     private static string LanguageDisplayName(string language) => language switch

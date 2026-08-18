@@ -40,6 +40,8 @@ before a public release.
   with executable-file warnings, and drag-and-drop folder moves.
 - Added a compact quick-search language with field prefixes, AND/OR grouping, quoted literals,
   single-character wildcards, attachment counts, flexible dates, and in-product syntax help.
+- Added an explicit Tools command to rebuild message and attachment search indexes while retaining
+  reusable SHA-256 extraction caches.
 - Added background full-text indexing for TXT/CSV/HTML/XML/JSON, DOCX/XLSX/PPTX and text PDFs,
   including documents streamed from ZIP/RAR/7z/TAR/GZip containers. Input and expanded-size limits
   are configurable and archive depth, entry count, encryption and expansion are guarded. SHA-256

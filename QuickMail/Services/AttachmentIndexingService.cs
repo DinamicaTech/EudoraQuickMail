@@ -12,6 +12,7 @@ namespace QuickMail.Services;
 /// <summary>Extracts searchable text from local attachments without retaining expanded binaries.</summary>
 public sealed class AttachmentIndexingService
 {
+    private static readonly SemaphoreSlim IndexGate = new(1, 1);
     private readonly LocalStoreService _store;
     private readonly IConfigService _config;
     private const int MaxTextCharacters = 5_000_000;
@@ -22,6 +23,26 @@ public sealed class AttachmentIndexingService
     { _store = store; _config = config; }
 
     public async Task IndexAllAsync(CancellationToken ct = default)
+    {
+        await IndexGate.WaitAsync(ct);
+        try { await IndexAllCoreAsync(ct); }
+        finally { IndexGate.Release(); }
+    }
+
+    public async Task<int> RebuildAllAsync(CancellationToken ct = default)
+    {
+        await IndexGate.WaitAsync(ct);
+        try
+        {
+            var messages = await _store.RebuildMessageSearchIndexAsync(ct);
+            await _store.ResetAttachmentSearchIndexAsync(ct);
+            await IndexAllCoreAsync(ct);
+            return messages;
+        }
+        finally { IndexGate.Release(); }
+    }
+
+    private async Task IndexAllCoreAsync(CancellationToken ct)
     {
         var cfg = _config.Load();
         if (!cfg.IndexAttachmentContents) return;

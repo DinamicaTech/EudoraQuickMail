@@ -670,6 +670,10 @@
                           Click="MenuWatchedConversations_Click"
                           AutomationProperties.Name="Watched Conversations"/>
                 <Separator/>
+                <MenuItem Header="_Rebuild Search Indexes…"
+                          Click="MenuRebuildSearchIndexes_Click"
+                          AutomationProperties.Name="Rebuild Search Indexes"/>
+                <Separator/>
                 <MenuItem Header="Command _Palette…"
                           Click="MenuCommandPalette_Click"
                           InputGestureText="Ctrl+Shift+P"/>
