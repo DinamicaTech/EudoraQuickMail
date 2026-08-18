@@ -6793,6 +6793,16 @@ public partial class MainViewModel : ObservableObject, IDisposable
         return Task.CompletedTask;
     }
 
+    public Task MarkMessagesUnreadAsync(IReadOnlyList<MailMessageSummary> messages)
+    {
+        var read = messages.Where(m => m.IsRead).ToList();
+        if (read.Count == 0) return Task.CompletedTask;
+        foreach (var message in read) message.IsRead = false;
+        StatusText = read.Count == 1 ? "Marked message as unread." : $"Marked {read.Count} messages as unread.";
+        return _localStore.UpdateIsReadBatchAsync(
+            read.Select(m => (m.AccountId, m.FolderName, m.MessageId)), false);
+    }
+
     [RelayCommand]
     private async Task DeleteMessageAsync()
     {

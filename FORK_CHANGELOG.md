@@ -10,6 +10,11 @@ before a public release.
 
 ## Unreleased
 
+- Added a dedicated compose status bar and wait cursor for grammar checks, template-name prompting
+  with the first meaningful body line as default, and reliable dismissal of the HTML context menu.
+- Restored fast unprefixed full-text search, added the standalone `N` unread criterion, message
+  read/unread context actions, and a folder column in the message grid.
+
 ### Local-first mail
 
 - Added local-only accounts with SMTP sending and destructive POP3 retrieval: a message is removed

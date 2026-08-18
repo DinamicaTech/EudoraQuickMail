@@ -10,6 +10,15 @@ namespace QuickMail.Tests;
 public class QuickSearchParserTests
 {
     [Fact]
+    public void CombinesOrdinaryTextWithUnreadAndDateCriteria()
+    {
+        var parsed = QuickSearchParser.Parse("chocolate;N;D>2022");
+        Assert.Equal(QuickSearchField.Any, parsed.Groups[0].Alternatives[0].Field);
+        Assert.Equal(QuickSearchField.Unread, parsed.Groups[1].Alternatives[0].Field);
+        Assert.Equal(QuickSearchField.Date, parsed.Groups[2].Alternatives[0].Field);
+    }
+
+    [Fact]
     public void ParsesAndOrPrefixExample()
     {
         var parsed = QuickSearchParser.Parse("T:(@dinamica;@google);A#=2;D=3/5/2026");

@@ -6388,6 +6388,14 @@ public partial class MainWindow : Window
             FocusMessageListFirstItem();
     }
 
+    private async void MessageContextMenu_MarkRead_Click(object sender, RoutedEventArgs e) =>
+        await _vm.MarkMessagesReadAsync(MessageList.SelectedItems.Cast<MailMessageSummary>()
+            .Concat(_vm.SelectedMessage is null ? [] : [_vm.SelectedMessage]).Distinct().ToList());
+
+    private async void MessageContextMenu_MarkUnread_Click(object sender, RoutedEventArgs e) =>
+        await _vm.MarkMessagesUnreadAsync(MessageList.SelectedItems.Cast<MailMessageSummary>()
+            .Concat(_vm.SelectedMessage is null ? [] : [_vm.SelectedMessage]).Distinct().ToList());
+
     private async void MenuRebuildSearchIndexes_Click(object sender, RoutedEventArgs e)
     {
         if (_localStore is not LocalStoreService store)

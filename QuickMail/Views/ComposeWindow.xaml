@@ -192,7 +192,8 @@
         </ToolBarTray>
 
         <!-- Status / progress bar -->
-        <DockPanel DockPanel.Dock="Bottom" Margin="0,6,0,0">
+        <StackPanel DockPanel.Dock="Bottom" Margin="0,6,0,0">
+          <DockPanel>
             <!-- Order matters: DockPanel hands out space in DECLARATION order, so
                  the mode selector is declared first and takes its MinWidth before
                  the buttons see any. Previously the buttons docked Right first and
@@ -255,16 +256,21 @@
                  the half-written message and disclose its contents (issue #201).
                  Send is reachable by Alt+S, Ctrl+Enter, or Enter/Space with the
                  Send button focused. Do not re-add IsDefault. -->
-            <TextBlock DockPanel.Dock="Left"
-                       VerticalAlignment="Center"
-                       Text="{Binding AutoSaveText}"
-                       Foreground="{DynamicResource Theme.TextSecondary}"
-                       Margin="0,0,8,0"/>
-            <TextBlock VerticalAlignment="Center"
-                       Text="{Binding StatusText}"
-                       AutomationProperties.Name="Send status"
-                       Foreground="{DynamicResource Theme.Error}"/>
-        </DockPanel>
+          </DockPanel>
+          <StatusBar Margin="0,6,0,0" MinHeight="26"
+                     Background="{DynamicResource Theme.ChromeBackground}"
+                     BorderBrush="{DynamicResource Theme.Border}" BorderThickness="1,1,1,0">
+            <StatusBarItem>
+              <TextBlock Text="{Binding AutoSaveText}" Foreground="{DynamicResource Theme.TextSecondary}"
+                         Margin="0,0,12,0"/>
+            </StatusBarItem>
+            <Separator/>
+            <StatusBarItem HorizontalContentAlignment="Stretch">
+              <TextBlock Text="{Binding StatusText}" AutomationProperties.Name="Compose status"
+                         Foreground="{DynamicResource Theme.TextPrimary}" TextTrimming="CharacterEllipsis"/>
+            </StatusBarItem>
+          </StatusBar>
+        </StackPanel>
 
         <!-- Autocomplete popup — positioned below the active address field via
              code-behind. Declared BEFORE the form grid on purpose: a Popup

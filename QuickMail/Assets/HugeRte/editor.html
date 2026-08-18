@@ -209,6 +209,13 @@
             editor.focus();
             emitContent();
             editor.getBody().addEventListener('contextmenu', openQuickMailMenu);
+            editor.getBody().addEventListener('pointerdown', event => {
+              if (!event.target.closest?.('[data-quickmail-menu]')) closeQuickMailMenu();
+            });
+            editor.getDoc().addEventListener('keydown', event => {
+              if (event.key === 'Escape') { closeQuickMailMenu(); event.preventDefault(); }
+            });
+            editor.getWin().addEventListener('blur', closeQuickMailMenu);
             requestCatalanProofing();
           });
           editor.on('input change undo redo SetContent', () => { emitContent(); requestCatalanProofing(); });

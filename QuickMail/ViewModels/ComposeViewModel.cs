@@ -647,9 +647,16 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
             return;
         }
 
+        var firstLine = templateBody.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)
+            .Select(line => line.Trim()).FirstOrDefault(line => line.Length > 0) ?? "Untitled";
+        if (firstLine.Length > 80) firstLine = firstLine[..80].TrimEnd();
+        var suggestedTitle = Subject.Trim().Length > 0 ? Subject.Trim() : firstLine;
+        var title = PromptTemplateNameRequested?.Invoke(suggestedTitle)?.Trim();
+        if (string.IsNullOrWhiteSpace(title)) return;
+
         var template = new MessageTemplate
         {
-            Title = Subject.Trim().Length > 0 ? Subject.Trim() : "Untitled",
+            Title = title,
             Subject = Subject,
             Body = templateBody
         };
@@ -664,6 +671,9 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
     /// or unwired (headless/tests).
     /// </summary>
     public Func<string[]?>? OpenFilePathsRequested { get; set; }
+
+    /// <summary>View-owned prompt used to name a template before it is persisted.</summary>
+    public Func<string, string?>? PromptTemplateNameRequested { get; set; }
 
     [RelayCommand]
     private async Task AddAttachmentsAsync()

@@ -197,6 +197,11 @@ public partial class LocalStoreService
             var alternatives = new List<string>();
             foreach (var term in group.Alternatives)
             {
+                if (term.Field == QuickSearchField.Unread)
+                {
+                    alternatives.Add("s.is_read=0");
+                    continue;
+                }
                 var p = "$q" + parameterIndex++;
                 if (term.Field == QuickSearchField.AttachmentCount)
                 {
@@ -247,8 +252,8 @@ public partial class LocalStoreService
                         ? $"EXISTS(SELECT 1 FROM AttachmentContent ac WHERE ac.account_id=s.account_id AND ac.unique_id=s.unique_id AND ac.folder_name=s.folder_name AND ac.content_text LIKE {p} ESCAPE '\\' COLLATE NOCASE)"
                         : $"EXISTS(SELECT 1 FROM AttachmentContent ac JOIN AttachmentContentFts af ON af.rowid=ac.fts_rowid WHERE ac.account_id=s.account_id AND ac.unique_id=s.unique_id AND ac.folder_name=s.folder_name AND AttachmentContentFts MATCH 'content_text:' || {p})",
                     _ => wildcard
-                        ? $"(f.from_addr LIKE {p} ESCAPE '\\' COLLATE NOCASE OR f.to_addr LIKE {p} ESCAPE '\\' COLLATE NOCASE OR f.cc_addr LIKE {p} ESCAPE '\\' COLLATE NOCASE OR f.subject LIKE {p} ESCAPE '\\' COLLATE NOCASE OR f.body_text LIKE {p} ESCAPE '\\' COLLATE NOCASE OR EXISTS(SELECT 1 FROM AttachmentContent ac WHERE ac.account_id=s.account_id AND ac.unique_id=s.unique_id AND ac.folder_name=s.folder_name AND (ac.attachment_name LIKE {p} ESCAPE '\\' COLLATE NOCASE OR ac.content_text LIKE {p} ESCAPE '\\' COLLATE NOCASE)))"
-                        : $"(f.rowid IN (SELECT rowid FROM LocalMessageFts WHERE LocalMessageFts MATCH {p}) OR EXISTS(SELECT 1 FROM AttachmentContent ac JOIN AttachmentContentFts af ON af.rowid=ac.fts_rowid WHERE ac.account_id=s.account_id AND ac.unique_id=s.unique_id AND ac.folder_name=s.folder_name AND AttachmentContentFts MATCH {p}))",
+                        ? $"(f.from_addr LIKE {p} ESCAPE '\\' COLLATE NOCASE OR f.to_addr LIKE {p} ESCAPE '\\' COLLATE NOCASE OR f.cc_addr LIKE {p} ESCAPE '\\' COLLATE NOCASE OR f.subject LIKE {p} ESCAPE '\\' COLLATE NOCASE OR f.body_text LIKE {p} ESCAPE '\\' COLLATE NOCASE)"
+                        : $"f.rowid IN (SELECT rowid FROM LocalMessageFts WHERE LocalMessageFts MATCH {p})",
                 });
             }
             groups.Add("(" + string.Join(" OR ", alternatives) + ")");

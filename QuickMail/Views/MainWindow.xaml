@@ -42,6 +42,9 @@
                       Command="{Binding ForwardSenderGroupCommand}"
                       CommandParameter="{Binding PlacementTarget.SelectedItem, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
             <Separator/>
+            <MenuItem Header="Mark as _Read" Click="MessageContextMenu_MarkRead_Click"/>
+            <MenuItem Header="Mark as _Unread" Click="MessageContextMenu_MarkUnread_Click"/>
+            <Separator/>
             <MenuItem Header="_Move to Folder…"
                       AutomationProperties.Name="Move Sender Group to Folder"
                       Click="SenderGroupContextMenu_MoveToFolder_Click"/>
@@ -1620,6 +1623,14 @@
                                         <DataTemplate>
                                             <TextBlock Text="{Binding DateDisplay}" TextAlignment="Right" Margin="0,0,4,0"/>
                                         </DataTemplate>
+                                    </GridViewColumn.CellTemplate>
+                                </GridViewColumn>
+                                <GridViewColumn Width="190">
+                                    <GridViewColumn.Header>
+                                        <GridViewColumnHeader Content="Folder" Tag="FolderName" AutomationProperties.IsColumnHeader="True"/>
+                                    </GridViewColumn.Header>
+                                    <GridViewColumn.CellTemplate>
+                                        <DataTemplate><TextBlock Text="{Binding FolderName}" TextTrimming="CharacterEllipsis" ToolTip="{Binding FolderName}"/></DataTemplate>
                                     </GridViewColumn.CellTemplate>
                                 </GridViewColumn>
                                 <GridViewColumn Width="32">

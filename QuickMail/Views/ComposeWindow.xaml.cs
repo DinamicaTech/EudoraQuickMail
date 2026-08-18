@@ -215,8 +215,11 @@ public partial class ComposeWindow : Window
             }
         }
 
+        var previousCursor = Cursor;
         try
         {
+            Cursor = Cursors.Wait;
+            IsEnabled = false;
             _vm.StatusText = "Checking grammar…";
             var issues = await _languageTool.CheckAsync(selected, language);
             if (issues.Count == 0)
@@ -237,6 +240,11 @@ public partial class ComposeWindow : Window
             LogService.Log("LanguageTool grammar check failed", ex);
             _vm.StatusText = "Grammar check failed.";
             MessageBox.Show(this, ex.Message, "Grammar Check", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            IsEnabled = true;
+            Cursor = previousCursor;
         }
     }
 
@@ -325,6 +333,12 @@ public partial class ComposeWindow : Window
         {
             var dlg = new Microsoft.Win32.OpenFileDialog { Multiselect = true, Title = "Add Attachments" };
             return dlg.ShowDialog(this) == true ? dlg.FileNames : null;
+        };
+
+        vm.PromptTemplateNameRequested = suggested =>
+        {
+            var dialog = new TextPromptWindow("Save as Template", "Template name:", suggested) { Owner = this };
+            return dialog.ShowDialog() == true ? dialog.Value : null;
         };
 
         // Wire the template picker so the VM stays out of System.Windows.
