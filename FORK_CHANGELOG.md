@@ -70,6 +70,10 @@ before a public release.
   a persistent default, privacy guidance, and Windows DPAPI protection for the DeepL API key.
 - Added `Translate → English / Spanish / Catalan` to the HTML compose contextual menu; it uses the
   active correction language as the source and replaces only the selected text.
+- Added an on-demand `Grammar Check` action for selected compose text in Spanish, Catalan, and
+  English. It runs LanguageTool entirely on localhost, presents its issues and suggested corrected
+  text for review, and replaces only the selection after confirmation. The approximately 252 MB
+  LanguageTool component is downloaded once into the active profile after explicit consent.
 - Fixed asynchronous draft-close re-entry and other composition focus/keyboard issues.
 
 ### Performance and reliability

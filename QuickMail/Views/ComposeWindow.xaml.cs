@@ -67,6 +67,7 @@ public partial class ComposeWindow : Window
     private readonly IConfigService     _configService;
     private readonly ICustomDictionaryService? _customDictionary;
     private readonly CatalanSpellCheckService _catalanSpellCheck;
+    private readonly LanguageToolService _languageTool;
     private readonly IThemeService? _themeService;
     private readonly CommandRegistry    _registry = new();
     private TokenizedAddressBox? _activeAddressControl;
@@ -173,6 +174,69 @@ public partial class ComposeWindow : Window
         }
     }
 
+    private async Task CheckHtmlContextGrammarAsync(string selected)
+    {
+        if (string.IsNullOrWhiteSpace(selected)) return;
+        var language = _vm.SpellLanguage switch
+        {
+            "es-ES" => "es",
+            "ca-ES" => "ca-ES",
+            "en-US" => "en-US",
+            _ => string.Empty,
+        };
+        if (string.IsNullOrEmpty(language))
+        {
+            MessageBox.Show(this, "Select a correction language before checking grammar.", "Grammar Check",
+                MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        if (!_languageTool.IsInstalled)
+        {
+            var answer = MessageBox.Show(this,
+                "Grammar checking needs the local LanguageTool component (approximately 252 MB to download). " +
+                "It is installed once in this QuickMail profile and no message text is sent to the Internet. Install it now?",
+                "Install LanguageTool", MessageBoxButton.YesNo, MessageBoxImage.Question);
+            if (answer != MessageBoxResult.Yes) return;
+            try
+            {
+                var progress = new Progress<string>(message => _vm.StatusText = message);
+                await _languageTool.InstallAsync(progress);
+            }
+            catch (Exception ex)
+            {
+                LogService.Log("LanguageTool installation failed", ex);
+                MessageBox.Show(this, ex.Message, "LanguageTool Installation",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+                return;
+            }
+        }
+
+        try
+        {
+            _vm.StatusText = "Checking grammar…";
+            var issues = await _languageTool.CheckAsync(selected, language);
+            if (issues.Count == 0)
+            {
+                _vm.StatusText = "Grammar check complete. No issues found.";
+                MessageBox.Show(this, "No grammar issues were found in the selected text.", "Grammar Check",
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+            var dialog = new GrammarCheckWindow(selected, issues) { Owner = this };
+            if (dialog.ShowDialog() == true && HtmlBodyEditor.CoreWebView2 is not null)
+                await HtmlBodyEditor.CoreWebView2.ExecuteScriptAsync(
+                    $"window.quickmailReplaceSelection({JsonSerializer.Serialize(dialog.CorrectedText)})");
+            _vm.StatusText = $"Grammar check complete. {issues.Count} possible issue{(issues.Count == 1 ? "" : "s")} found.";
+        }
+        catch (Exception ex)
+        {
+            LogService.Log("LanguageTool grammar check failed", ex);
+            _vm.StatusText = "Grammar check failed.";
+            MessageBox.Show(this, ex.Message, "Grammar Check", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
     // Last block type announced while navigating in HTML mode (e.g. "Heading 2", "Normal text").
     // Used to suppress repeat announcements when the caret stays on the same paragraph type.
     private string? _lastAnnouncedBlockType;
@@ -204,9 +268,11 @@ public partial class ComposeWindow : Window
         _configService = configService;
         _customDictionary = customDictionary;
         _catalanSpellCheck = new CatalanSpellCheckService(customDictionary);
+        _languageTool = new LanguageToolService(TranslationProfile);
         _themeService = themeService;
         InitializeComponent();
         DataContext = vm;
+        Closed += (_, _) => _languageTool.Dispose();
 
         // Spell-check is turned on in code (not via SpellCheck.IsEnabled in XAML) and
         // deferred to Background priority — see EnableSpellCheckDeferred for why (#181).
@@ -1841,6 +1907,10 @@ public partial class ComposeWindow : Window
                                 await TranslateHtmlContextSelectionAsync(
                                     root.GetProperty("text").GetString() ?? string.Empty,
                                     root.GetProperty("target").GetString() ?? string.Empty);
+                                return;
+                            case "grammar-check":
+                                await CheckHtmlContextGrammarAsync(
+                                    root.GetProperty("text").GetString() ?? string.Empty);
                                 return;
                         }
                     }

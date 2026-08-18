@@ -123,6 +123,10 @@
           addMenuButton(menu, `Translate → ${label}`, () => chrome.webview.postMessage(JSON.stringify({
             type: 'translate-selection', text: selected, target
           }))));
+        menu.appendChild(doc.createElement('hr'));
+        addMenuButton(menu, 'Grammar Check…', () => chrome.webview.postMessage(JSON.stringify({
+          type: 'grammar-check', text: selected
+        })));
       }
       quickMailEditor.getBody().appendChild(menu);
     };
