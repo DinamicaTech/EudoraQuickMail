@@ -100,6 +100,8 @@ public partial class ComposeWindow : Window
     private bool _closeAfterDraftSave;
     private bool _languageDetectionAttempted;
     private bool _applyingDetectedLanguage;
+    private DispatcherTimer? _detectedLanguageReloadTimer;
+    private string? _detectedLanguagePendingReload;
 
     private ProfileContext TranslationProfile =>
         ((App)Application.Current).Profile ?? ProfileContext.Default();
@@ -816,6 +818,7 @@ public partial class ComposeWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
+        _detectedLanguageReloadTimer?.Stop();
         // Belt-and-suspenders: OnWindowClosing already closed the Spelling
         // dialog silently, but close paths that bypass it must not leave the
         // owned dialog to fire its completion UI against this dead window.
@@ -1981,6 +1984,10 @@ public partial class ComposeWindow : Window
         try
         {
             var snapshot = _htmlSnapshot.Html;
+            string? savedSelection = null;
+            if (_htmlEditorReady && HtmlBodyEditor.CoreWebView2 is not null)
+                savedSelection = await HtmlBodyEditor.CoreWebView2.ExecuteScriptAsync(
+                    "window.quickmailCaptureTextSelection()");
             if (HtmlBodyEditor.Parent is not Grid host) return;
             var row = Grid.GetRow(HtmlBodyEditor);
             var column = Grid.GetColumn(HtmlBodyEditor);
@@ -2000,6 +2007,10 @@ public partial class ComposeWindow : Window
             _pendingHtml = string.IsNullOrWhiteSpace(snapshot) ? null : snapshot;
             old.Dispose();
             await InitializeHtmlEditorAsync();
+            if (_htmlEditorReady && HtmlBodyEditor.CoreWebView2 is not null
+                && !string.IsNullOrWhiteSpace(savedSelection) && savedSelection != "null")
+                await HtmlBodyEditor.CoreWebView2.ExecuteScriptAsync(
+                    $"window.quickmailRestoreTextSelection({savedSelection})");
         }
         finally { _htmlEditorRecreating = false; }
     }
@@ -2175,6 +2186,11 @@ public partial class ComposeWindow : Window
     private async void SpellLanguageSelector_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         var automaticallyDetected = _applyingDetectedLanguage;
+        if (!automaticallyDetected)
+        {
+            _detectedLanguagePendingReload = null;
+            _detectedLanguageReloadTimer?.Stop();
+        }
         if (SpellLanguageSelector.SelectedValue is not string language) language = string.Empty;
         if (SpellLanguageSelector.IsKeyboardFocusWithin && string.IsNullOrEmpty(language))
             _languageDetectionAttempted = true;
@@ -2208,6 +2224,11 @@ public partial class ComposeWindow : Window
 
     private void TryAutoDetectLanguage(string text)
     {
+        if (_detectedLanguagePendingReload is not null)
+        {
+            ScheduleDetectedLanguageReload(_detectedLanguagePendingReload);
+            return;
+        }
         if (_languageDetectionAttempted || _vm.ComposeKind != ComposeKind.NewMessage
             || !string.IsNullOrEmpty(_vm.SpellLanguage)) return;
         var words = System.Text.RegularExpressions.Regex.Matches(text.ToLowerInvariant(), @"[\p{L}']+")
@@ -2219,8 +2240,33 @@ public partial class ComposeWindow : Window
         _applyingDetectedLanguage = true;
         try { _vm.SpellLanguage = detected; }
         finally { _applyingDetectedLanguage = false; }
+        ScheduleDetectedLanguageReload(detected);
         AccessibilityHelper.Announce(this, $"Language detected: {LanguageDisplayName(detected)}.",
             category: AnnouncementCategory.Result);
+    }
+
+    private void ScheduleDetectedLanguageReload(string language)
+    {
+        _detectedLanguagePendingReload = language;
+        if (_detectedLanguageReloadTimer is null)
+        {
+            _detectedLanguageReloadTimer = new DispatcherTimer
+            {
+                Interval = TimeSpan.FromMilliseconds(900),
+            };
+            _detectedLanguageReloadTimer.Tick += async (_, _) =>
+            {
+                _detectedLanguageReloadTimer.Stop();
+                var pending = _detectedLanguagePendingReload;
+                _detectedLanguagePendingReload = null;
+                if (pending is null || !_htmlEditorReady || HtmlBodyEditor.CoreWebView2 is null) return;
+                if (!string.Equals(EffectiveWebViewLanguage(pending), _htmlEnvironmentLanguage,
+                        StringComparison.OrdinalIgnoreCase))
+                    await RecreateHtmlEditorForLanguageAsync(pending);
+            };
+        }
+        _detectedLanguageReloadTimer.Stop();
+        _detectedLanguageReloadTimer.Start();
     }
 
     internal static string? DetectComposeLanguage(IEnumerable<string> words)

@@ -81,8 +81,8 @@ before a public release.
 - Fixed direct-HTML startup to bootstrap HugeRTE with an empty document instead of exposing its
   narrow fallback textarea, restoring language detection, disabled proofing for `(None)`, the
   English QuickMail contextual actions, full editor width, and content preservation across reloads.
-- Automatic language detection changes proofing in place instead of rebuilding the HTML WebView
-  under active typing, preventing stray keystrokes from reaching the compose window's close command.
+- Automatic language detection now activates the matching Chromium proofing dictionary after a
+  short typing pause, preserving both the HTML content and caret while the editor profile changes.
 - Fixed asynchronous draft-close re-entry and other composition focus/keyboard issues.
 
 ### Performance and reliability

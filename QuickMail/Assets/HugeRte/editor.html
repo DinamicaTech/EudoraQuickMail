@@ -85,6 +85,12 @@
       quickMailEditor.selection.setRng(range);
     };
 
+    window.quickmailCaptureTextSelection = () => captureTextSelection();
+    window.quickmailRestoreTextSelection = saved => {
+      restoreTextSelection(saved);
+      quickMailEditor?.focus();
+    };
+
     const addMenuButton = (menu, label, action) => {
       const item = menu.ownerDocument.createElement('button');
       item.type = 'button'; item.textContent = label;
