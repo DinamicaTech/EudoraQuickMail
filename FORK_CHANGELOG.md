@@ -38,6 +38,11 @@ before a public release.
   status feedback for long operations.
 - Added message source viewing, expanded `Bla bla bla` header/content inspection, attachment opening
   with executable-file warnings, and drag-and-drop folder moves.
+- Added a compact quick-search language with field prefixes, AND/OR grouping, quoted literals,
+  single-character wildcards, attachment counts, flexible dates, and in-product syntax help.
+- Added background full-text indexing for TXT/CSV/HTML/XML/JSON, DOCX/XLSX/PPTX and text PDFs,
+  including documents streamed from ZIP/RAR/7z/TAR/GZip containers. Input and expanded-size limits
+  are configurable and archive depth, entry count, encryption and expansion are guarded.
 
 ### Composition and rendering
 
@@ -49,6 +54,8 @@ before a public release.
   compose mode, and correct AltGr handling on European keyboards.
 - Added selectable Spanish, Catalan, and English spelling languages with live underlining, native
   contextual suggestions, ignore/add-to-dictionary actions, and draft language metadata.
+- Added `(None)` to disable proofing, forced dictionary reloads when changing language, and one-shot
+  Spanish/Catalan/English detection after the first 24 words of a new message.
 - Added selected-text translation while composing, with a local Argos Translate provider and an
   optional DeepL provider. Provider configuration includes setup/testing, local model management,
   a persistent default, privacy guidance, and Windows DPAPI protection for the DeepL API key.

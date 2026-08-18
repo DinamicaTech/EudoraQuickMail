@@ -58,5 +58,5 @@ public partial class MailMessageDetail : MailMessageSummary
     /// QuickMail draft. PlainText for messages not authored by QuickMail or authored before 0.7.2.
     /// </summary>
     public ComposeMode DraftComposeMode { get; set; } = ComposeMode.PlainText;
-    public string DraftSpellLanguage { get; set; } = "es-ES";
+    public string DraftSpellLanguage { get; set; } = string.Empty;
 }

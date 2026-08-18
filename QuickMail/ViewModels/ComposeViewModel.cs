@@ -192,7 +192,7 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
     partial void OnBccChanged(string value)     => _isDirty = true;
     partial void OnSubjectChanged(string value) => _isDirty = true;
     partial void OnBodyChanged(string value)    => _isDirty = true;
-    [ObservableProperty] private string _spellLanguage = "es-ES";
+    [ObservableProperty] private string _spellLanguage = string.Empty;
     partial void OnSpellLanguageChanged(string value) => _isDirty = true;
 
     public void Seed(ComposeModel model)
@@ -208,7 +208,7 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
         Bcc     = model.Bcc;
         Subject = model.Subject;
         Body    = model.Body;
-        SpellLanguage = string.IsNullOrWhiteSpace(model.SpellLanguage) ? "es-ES" : model.SpellLanguage;
+        SpellLanguage = model.SpellLanguage ?? string.Empty;
 
         Attachments.Clear();
         foreach (var att in model.Attachments)

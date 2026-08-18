@@ -272,6 +272,12 @@ public class ConfigModel
     /// <summary>How far back sent mail is scanned for recipient autocomplete.</summary>
     public int RecipientCacheYears { get; set; } = 2;
 
+    /// <summary>Extract text from locally available attachments into the SQLite search index.</summary>
+    public bool IndexAttachmentContents { get; set; } = true;
+    public bool IndexCompressedAttachments { get; set; } = true;
+    public int AttachmentIndexMaxFileMb { get; set; } = 10;
+    public int AttachmentIndexMaxExpandedMb { get; set; } = 20;
+
     // ── Advanced ──────────────────────────────────────────────────────────────────
 
     /// <summary>

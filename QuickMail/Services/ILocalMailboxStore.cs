@@ -13,7 +13,8 @@ public interface ILocalMailboxStore
         throw new NotSupportedException("Advanced local search is not implemented by this store.");
     Task<LocalSearchResult> LoadLocalPageAsync(Guid? accountId, string? folderName, int limit, int offset,
         LocalSearchSort sort = LocalSearchSort.NewestFirst, bool includeDescendants = false,
-        CancellationToken ct = default);
+        CancellationToken ct = default) =>
+        throw new NotSupportedException("Paged local loading is not implemented by this store.");
     Task MoveLocalMessagesAsync(Guid accountId, string sourceFolder, string destinationFolder,
         IReadOnlyCollection<string> messageIds, CancellationToken ct = default);
     Task DeleteLocalMessagesAsync(Guid accountId, string folderName,

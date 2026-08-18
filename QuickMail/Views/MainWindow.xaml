@@ -1293,6 +1293,10 @@
                                     AutomationProperties.Name="Clear search"
                                     ToolTip="Clear search (Escape)"
                                     IsTabStop="True"/>
+                            <Button DockPanel.Dock="Right" Content="?" Width="28" Margin="6,0,0,0"
+                                    Click="QuickSearchHelpButton_Click"
+                                    AutomationProperties.Name="Quick search syntax help"
+                                    ToolTip="Show quick search prefixes and examples"/>
                             <Button DockPanel.Dock="Right" Content="Search" Margin="6,0,0,0"
                                     Click="SearchButton_Click" IsDefault="True"
                                     AutomationProperties.Name="Execute message search"/>

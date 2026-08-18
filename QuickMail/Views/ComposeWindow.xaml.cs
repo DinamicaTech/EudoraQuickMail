@@ -94,6 +94,7 @@ public partial class ComposeWindow : Window
     // use to steal focus to the menu bar after our handler returns.
     private bool _suppressNextMenuActivation;
     private bool _closeAfterDraftSave;
+    private bool _languageDetectionAttempted;
 
     private ProfileContext TranslationProfile =>
         ((App)Application.Current).Profile ?? ProfileContext.Default();
@@ -1019,6 +1020,7 @@ public partial class ComposeWindow : Window
     private void EnsureSpellCheckEnabled()
     {
         if (_spellCheckEnabled) return;
+        if (string.IsNullOrEmpty(_vm.SpellLanguage)) return;
         _spellCheckEnabled = true;
         foreach (var editor in new TextBoxBase[] { SubjectBox, BodyBox, RichBodyBox })
             SpellCheck.SetIsEnabled(editor, true);
@@ -1771,6 +1773,7 @@ public partial class ComposeWindow : Window
                         root.GetProperty("plain").GetString() ?? string.Empty,
                         root.GetProperty("plain").GetString() ?? string.Empty);
                     _vm.MarkBodyDirty();
+                    TryAutoDetectLanguage(root.GetProperty("plain").GetString() ?? string.Empty);
                 }
                 catch (Exception ex) { LogService.Log("Compose HTML editor message failed", ex); }
             };
@@ -1967,15 +1970,66 @@ public partial class ComposeWindow : Window
 
     private async void SpellLanguageSelector_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (SpellLanguageSelector.SelectedValue is not string language) return;
-        var xmlLanguage = XmlLanguage.GetLanguage(language);
+        if (SpellLanguageSelector.SelectedValue is not string language) language = string.Empty;
+        if (SpellLanguageSelector.IsKeyboardFocusWithin && string.IsNullOrEmpty(language))
+            _languageDetectionAttempted = true;
+        var enabled = !string.IsNullOrEmpty(language);
+        var xmlLanguage = XmlLanguage.GetLanguage(enabled ? language : "en-US");
         foreach (var editor in new TextBoxBase[] { SubjectBox, BodyBox, RichBodyBox })
+        {
+            // WPF caches the active proofing engine. Merely changing Language leaves
+            // the first dictionary alive; disabling and re-enabling forces a reload.
+            SpellCheck.SetIsEnabled(editor, false);
             editor.Language = xmlLanguage;
+            if (enabled) SpellCheck.SetIsEnabled(editor, true);
+        }
+        _spellCheckEnabled = enabled;
+        if (enabled) RegisterCustomDictionary();
 
         if (_htmlEditorReady && HtmlBodyEditor.CoreWebView2 is not null)
+        {
             await HtmlBodyEditor.CoreWebView2.ExecuteScriptAsync(
                 $"window.quickmailSetLanguage({JsonSerializer.Serialize(language)})");
+            // Chromium also caches its proofing language. Recreating HugeRTE after
+            // setting the new lang attribute forces WebView2 to attach a fresh checker.
+            if (enabled && !string.IsNullOrWhiteSpace(_htmlSnapshot.Html))
+                await LoadHtmlIntoWebEditorAsync(_htmlSnapshot.Html);
+        }
     }
+
+    private void BodyBox_TextChanged(object sender, TextChangedEventArgs e) => TryAutoDetectLanguage(BodyBox.Text);
+
+    private void TryAutoDetectLanguage(string text)
+    {
+        if (_languageDetectionAttempted || _vm.ComposeKind != ComposeKind.NewMessage
+            || !string.IsNullOrEmpty(_vm.SpellLanguage)) return;
+        var words = System.Text.RegularExpressions.Regex.Matches(text.ToLowerInvariant(), @"[\p{L}']+")
+            .Select(m => m.Value).Take(40).ToArray();
+        if (words.Length < 24) return;
+        _languageDetectionAttempted = true; // exactly one attempt per new compose
+        var detected = DetectComposeLanguage(words);
+        if (detected is null) return;
+        _vm.SpellLanguage = detected;
+        AccessibilityHelper.Announce(this, $"Language detected: {LanguageDisplayName(detected)}.",
+            category: AnnouncementCategory.Result);
+    }
+
+    internal static string? DetectComposeLanguage(IEnumerable<string> words)
+    {
+        var sets = new Dictionary<string, HashSet<string>>
+        {
+            ["es-ES"] = new(StringComparer.OrdinalIgnoreCase) { "el","la","los","las","de","que","y","en","un","una","para","por","con","como","pero","gracias","hola","este","esta","del" },
+            ["ca-ES"] = new(StringComparer.OrdinalIgnoreCase) { "el","la","els","les","de","que","i","en","un","una","per","amb","com","però","gràcies","hola","aquest","aquesta","del" },
+            ["en-US"] = new(StringComparer.OrdinalIgnoreCase) { "the","a","an","of","that","and","in","to","for","with","as","but","thanks","hello","this","is","are","we","you" },
+        };
+        var list = words.ToArray();
+        var ordered = sets.Select(k => new { Language = k.Key, Score = list.Count(k.Value.Contains) })
+            .OrderByDescending(x => x.Score).ToArray();
+        return ordered[0].Score >= 3 && ordered[0].Score >= ordered[1].Score + 2 ? ordered[0].Language : null;
+    }
+
+    private static string LanguageDisplayName(string language) => language switch
+    { "es-ES" => "Spanish", "ca-ES" => "Catalan", "en-US" => "English", _ => language };
 
     private void ModeSelector_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {

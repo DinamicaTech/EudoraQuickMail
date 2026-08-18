@@ -421,7 +421,7 @@ public class ImapMailService : IMailService, IChangeNotifier, IConnectionProbe
                 HtmlBody      = htmlText,
                 Attachments   = attachments,
                 DraftComposeMode = ParseComposeMode(s.Headers?["X-QuickMail-Compose-Mode"]),
-                DraftSpellLanguage = s.Headers?["X-QuickMail-Spell-Language"] ?? "es-ES",
+                DraftSpellLanguage = s.Headers?["X-QuickMail-Spell-Language"] ?? string.Empty,
             };
 
             PopulateCalendar(detail, rawCalendarIcs);

@@ -29,7 +29,7 @@ public class ComposeModel
 
     /// <summary>The editing mode this message was composed in.</summary>
     public ComposeMode Mode { get; set; } = ComposeMode.PlainText;
-    public string SpellLanguage { get; set; } = "es-ES";
+    public string SpellLanguage { get; set; } = string.Empty;
 
     /// <summary>
     /// Complete HTML document for the text/html part. When non-empty the message

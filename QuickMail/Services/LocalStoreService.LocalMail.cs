@@ -129,10 +129,11 @@ public partial class LocalStoreService
     public async Task<LocalSearchResult> SearchLocalMessagesAsync(LocalSearchQuery query, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(query.Text)) return new LocalSearchResult([], 0);
+        var parsed = QuickSearchParser.Parse(query.Text);
         var limit = Math.Clamp(query.Limit, 1, LocalMailConstants.MaxRenderedMessages);
-        var accountFilter = query.AccountId.HasValue ? " AND f.account_id=$aid" : string.Empty;
+        var accountFilter = query.AccountId.HasValue ? " AND s.account_id=$aid" : string.Empty;
         var folderFilter = !string.IsNullOrWhiteSpace(query.FolderName)
-            ? query.IncludeDescendants ? " AND (f.folder_name=$fn OR (f.folder_name >= $ds AND f.folder_name < $de))" : " AND f.folder_name=$fn"
+            ? query.IncludeDescendants ? " AND (s.folder_name=$fn OR (s.folder_name >= $ds AND s.folder_name < $de))" : " AND s.folder_name=$fn"
             : string.Empty;
         var order = query.Sort switch
         {
@@ -151,11 +152,19 @@ public partial class LocalStoreService
             _ => "s.date_ticks DESC",
         };
         await using var conn = await OpenAsync();
+        await using var predicateCommand = conn.CreateCommand();
+        var predicate = BuildQuickSearchPredicate(parsed, predicateCommand);
         long total;
         await using (var count = conn.CreateCommand())
         {
-            count.CommandText = $"SELECT count(*) FROM LocalMessageFts f WHERE LocalMessageFts MATCH $q{accountFilter}{folderFilter};";
-            AddSearchParameters(count, query);
+            CopyParameters(predicateCommand, count);
+            count.CommandText = $"""
+                SELECT count(*) FROM MessageSummary s
+                JOIN LocalMessageFts f ON f.account_id=s.account_id AND f.unique_id=s.unique_id AND f.folder_name=s.folder_name
+                LEFT JOIN MessageDetail d ON d.account_id=s.account_id AND d.unique_id=s.unique_id AND d.folder_name=s.folder_name
+                WHERE ({predicate}){accountFilter}{folderFilter};
+                """;
+            AddScopeParameters(count, query);
             total = Convert.ToInt64(await count.ExecuteScalarAsync(ct) ?? 0);
         }
 
@@ -165,17 +174,96 @@ public partial class LocalStoreService
             SELECT s.unique_id,s.account_id,s.folder_name,s.internet_message_id,s.from_disp,s.to_addr,
                    s.subject,s.date_ticks,s.is_read,s.preview_text,s.is_replied,s.is_forwarded,
                    s.has_attachments,s.is_mailing_list,s.flag_id
-            FROM LocalMessageFts f
-            JOIN MessageSummary s ON s.account_id=f.account_id AND s.unique_id=f.unique_id AND s.folder_name=f.folder_name
-            WHERE LocalMessageFts MATCH $q{accountFilter}{folderFilter}
+            FROM MessageSummary s
+            JOIN LocalMessageFts f ON s.account_id=f.account_id AND s.unique_id=f.unique_id AND s.folder_name=f.folder_name
+            LEFT JOIN MessageDetail d ON d.account_id=s.account_id AND d.unique_id=s.unique_id AND d.folder_name=s.folder_name
+            WHERE ({predicate}){accountFilter}{folderFilter}
             ORDER BY {order} LIMIT $limit OFFSET $offset;
             """;
-        AddSearchParameters(cmd, query);
+        CopyParameters(predicateCommand, cmd);
+        AddScopeParameters(cmd, query);
         cmd.Parameters.AddWithValue("$limit", limit);
         cmd.Parameters.AddWithValue("$offset", Math.Max(0, query.Offset));
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct)) messages.Add(ReadLocalSummary(reader));
         return new LocalSearchResult(messages, total);
+    }
+
+    private static string BuildQuickSearchPredicate(ParsedQuickSearch query, SqliteCommand command)
+    {
+        var groups = new List<string>(); var parameterIndex = 0;
+        foreach (var group in query.Groups)
+        {
+            var alternatives = new List<string>();
+            foreach (var term in group.Alternatives)
+            {
+                var p = "$q" + parameterIndex++;
+                if (term.Field == QuickSearchField.AttachmentCount)
+                {
+                    if (!int.TryParse(term.Value, out var count) || count < 0)
+                        throw new FormatException($"Invalid attachment count '{term.Value}'.");
+                    command.Parameters.AddWithValue(p, count);
+                    alternatives.Add($"COALESCE(json_array_length(d.attachments_json),0) {term.Operator} {p}");
+                    continue;
+                }
+                if (term.Field == QuickSearchField.Date)
+                {
+                    var (start, end) = QuickSearchParser.ParseDateRange(term.Value);
+                    if (term.Operator == "=")
+                    {
+                        command.Parameters.AddWithValue(p, start.UtcTicks);
+                        command.Parameters.AddWithValue(p + "e", end.UtcTicks);
+                        alternatives.Add($"(s.date_ticks >= {p} AND s.date_ticks < {p}e)");
+                    }
+                    else
+                    {
+                        var boundary = term.Operator is ">" or "<=" ? end.UtcTicks : start.UtcTicks;
+                        command.Parameters.AddWithValue(p, boundary);
+                        var op = term.Operator switch { ">" => ">=", "<=" => "<", _ => term.Operator };
+                        alternatives.Add($"s.date_ticks {op} {p}");
+                    }
+                    continue;
+                }
+
+                var wildcard = term.Value.Contains('?');
+                var value = wildcard ? "%" + EscapeLike(term.Value).Replace("?", "_") + "%"
+                    : "\"" + term.Value.Replace("\"", "\"\"") + "\"";
+                command.Parameters.AddWithValue(p, value);
+                if (term.Field == QuickSearchField.AttachmentName)
+                    command.Parameters.AddWithValue(p + "l", "%" + EscapeLike(term.Value).Replace("?", "_") + "%");
+                string FieldPredicate(string column, string ftsColumn) => wildcard
+                    ? $"{column} LIKE {p} ESCAPE '\\' COLLATE NOCASE"
+                    : $"f.rowid IN (SELECT rowid FROM LocalMessageFts WHERE LocalMessageFts MATCH '{ftsColumn}:' || {p})";
+                alternatives.Add(term.Field switch
+                {
+                    QuickSearchField.To => FieldPredicate("f.to_addr", "to_addr"),
+                    QuickSearchField.From => FieldPredicate("f.from_addr", "from_addr"),
+                    QuickSearchField.Cc => FieldPredicate("f.cc_addr", "cc_addr"),
+                    QuickSearchField.Subject => FieldPredicate("f.subject", "subject"),
+                    QuickSearchField.Body => FieldPredicate("f.body_text", "body_text"),
+                    QuickSearchField.AttachmentName =>
+                        $"(EXISTS(SELECT 1 FROM json_each(d.attachments_json) j WHERE json_extract(j.value,'$.FileName') LIKE {p}l ESCAPE '\\' COLLATE NOCASE) OR EXISTS(SELECT 1 FROM AttachmentContent ac WHERE ac.account_id=s.account_id AND ac.unique_id=s.unique_id AND ac.folder_name=s.folder_name AND ac.entry_path LIKE {p}l ESCAPE '\\' COLLATE NOCASE))",
+                    QuickSearchField.AttachmentContent => wildcard
+                        ? $"EXISTS(SELECT 1 FROM AttachmentContent ac WHERE ac.account_id=s.account_id AND ac.unique_id=s.unique_id AND ac.folder_name=s.folder_name AND ac.content_text LIKE {p} ESCAPE '\\' COLLATE NOCASE)"
+                        : $"EXISTS(SELECT 1 FROM AttachmentContent ac JOIN AttachmentContentFts af ON af.rowid=ac.fts_rowid WHERE ac.account_id=s.account_id AND ac.unique_id=s.unique_id AND ac.folder_name=s.folder_name AND AttachmentContentFts MATCH 'content_text:' || {p})",
+                    _ => wildcard
+                        ? $"(f.from_addr LIKE {p} ESCAPE '\\' COLLATE NOCASE OR f.to_addr LIKE {p} ESCAPE '\\' COLLATE NOCASE OR f.cc_addr LIKE {p} ESCAPE '\\' COLLATE NOCASE OR f.subject LIKE {p} ESCAPE '\\' COLLATE NOCASE OR f.body_text LIKE {p} ESCAPE '\\' COLLATE NOCASE OR EXISTS(SELECT 1 FROM AttachmentContent ac WHERE ac.account_id=s.account_id AND ac.unique_id=s.unique_id AND ac.folder_name=s.folder_name AND (ac.attachment_name LIKE {p} ESCAPE '\\' COLLATE NOCASE OR ac.content_text LIKE {p} ESCAPE '\\' COLLATE NOCASE)))"
+                        : $"(f.rowid IN (SELECT rowid FROM LocalMessageFts WHERE LocalMessageFts MATCH {p}) OR EXISTS(SELECT 1 FROM AttachmentContent ac JOIN AttachmentContentFts af ON af.rowid=ac.fts_rowid WHERE ac.account_id=s.account_id AND ac.unique_id=s.unique_id AND ac.folder_name=s.folder_name AND AttachmentContentFts MATCH {p}))",
+                });
+            }
+            groups.Add("(" + string.Join(" OR ", alternatives) + ")");
+        }
+        return groups.Count == 0 ? "1=1" : string.Join(" AND ", groups);
+    }
+
+    private static string EscapeLike(string value) => value.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_");
+    private static void CopyParameters(SqliteCommand source, SqliteCommand destination)
+    { foreach (SqliteParameter p in source.Parameters) destination.Parameters.AddWithValue(p.ParameterName, p.Value); }
+    private static void AddScopeParameters(SqliteCommand command, LocalSearchQuery query)
+    {
+        if (query.AccountId.HasValue) command.Parameters.AddWithValue("$aid", query.AccountId.Value.ToString());
+        if (!string.IsNullOrWhiteSpace(query.FolderName)) command.Parameters.AddWithValue("$fn", query.FolderName);
+        if (!string.IsNullOrWhiteSpace(query.FolderName) && query.IncludeDescendants) AddDescendantRange(command, query.FolderName);
     }
 
     public async Task<LocalSearchResult> SearchLocalMessagesAdvancedAsync(AdvancedSearchQuery query, CancellationToken ct = default)
@@ -367,6 +455,9 @@ public partial class LocalStoreService
             await ExecuteKeyMutationAsync(conn, tx,
                 "UPDATE LocalMessageFtsKey SET folder_name=$dest WHERE account_id=$aid AND folder_name=$source AND unique_id=$uid;",
                 accountId, sourceFolder, id, destinationFolder, ct);
+            await ExecuteKeyMutationAsync(conn, tx,
+                "UPDATE AttachmentContent SET folder_name=$dest WHERE account_id=$aid AND folder_name=$source AND unique_id=$uid;",
+                accountId, sourceFolder, id, destinationFolder, ct);
         }
         await tx.CommitAsync(ct);
     }
@@ -391,6 +482,8 @@ public partial class LocalStoreService
             command.CommandText =
                 $"DELETE FROM LocalMessageFts WHERE rowid IN (SELECT fts_rowid FROM LocalMessageFtsKey WHERE account_id=$aid AND folder_name=$source AND unique_id IN ({placeholders}));" +
                 $"DELETE FROM LocalMessageFtsKey WHERE account_id=$aid AND folder_name=$source AND unique_id IN ({placeholders});" +
+                $"DELETE FROM AttachmentContentFts WHERE rowid IN (SELECT fts_rowid FROM AttachmentContent WHERE account_id=$aid AND folder_name=$source AND unique_id IN ({placeholders}));" +
+                $"DELETE FROM AttachmentContent WHERE account_id=$aid AND folder_name=$source AND unique_id IN ({placeholders});" +
                 $"DELETE FROM MessageDetail WHERE account_id=$aid AND folder_name=$source AND unique_id IN ({placeholders});" +
                 $"DELETE FROM MessageSummary WHERE account_id=$aid AND folder_name=$source AND unique_id IN ({placeholders});";
             command.Parameters.AddWithValue("$aid", accountId.ToString());

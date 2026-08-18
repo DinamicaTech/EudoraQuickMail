@@ -342,6 +342,14 @@ public class ConfigService : IConfigService
                     case "tabsrememberacrossrestart":
                         config.Windowing.TabsRememberAcrossRestart = ParseBool(value);
                         break;
+                    case "indexattachmentcontents": config.IndexAttachmentContents = ParseBool(value); break;
+                    case "indexcompressedattachments": config.IndexCompressedAttachments = ParseBool(value); break;
+                    case "attachmentindexmaxfilemb":
+                        if (int.TryParse(value, out var aim)) config.AttachmentIndexMaxFileMb = Math.Clamp(aim, 1, 1024);
+                        break;
+                    case "attachmentindexmaxexpandedmb":
+                        if (int.TryParse(value, out var aem)) config.AttachmentIndexMaxExpandedMb = Math.Clamp(aem, 1, 4096);
+                        break;
                     case "recipientcacheyears":
                         if (int.TryParse(value, out var rcy)) config.RecipientCacheYears = Math.Clamp(rcy, 1, 20);
                         break;
@@ -779,6 +787,16 @@ public class ConfigService : IConfigService
         sb.AppendLine($"ConfirmCloseTabWithUnsaved = {(config.Windowing.ConfirmCloseTabWithUnsaved ? "on" : "off")}");
         sb.AppendLine("# Confirm before closing a tab with unsaved changes.");
         sb.AppendLine("# Values: on, off.");
+        sb.AppendLine();
+
+        sb.AppendLine($"IndexAttachmentContents = {(config.IndexAttachmentContents ? "on" : "off")}");
+        sb.AppendLine("# Extract searchable text from locally available message attachments.");
+        sb.AppendLine($"IndexCompressedAttachments = {(config.IndexCompressedAttachments ? "on" : "off")}");
+        sb.AppendLine("# Inspect supported documents inside ZIP, RAR, 7z, TAR, and GZip containers.");
+        sb.AppendLine($"AttachmentIndexMaxFileMb = {Math.Clamp(config.AttachmentIndexMaxFileMb, 1, 1024)}");
+        sb.AppendLine("# Maximum input attachment size in MB.");
+        sb.AppendLine($"AttachmentIndexMaxExpandedMb = {Math.Clamp(config.AttachmentIndexMaxExpandedMb, 1, 4096)}");
+        sb.AppendLine("# Maximum total expanded size of a compressed attachment in MB.");
         sb.AppendLine();
 
         sb.AppendLine($"RecipientCacheYears = {Math.Clamp(config.RecipientCacheYears, 1, 20)}");

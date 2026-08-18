@@ -875,6 +875,9 @@ public partial class MainWindow : Window
 
     private void SearchButton_Click(object sender, RoutedEventArgs e) => ExecuteSearch();
 
+    private void QuickSearchHelpButton_Click(object sender, RoutedEventArgs e) =>
+        new QuickSearchHelpWindow { Owner = this }.ShowDialog();
+
     private void AdvancedSearchButton_Click(object sender, RoutedEventArgs e)
     {
         var window = new AdvancedSearchWindow { Owner = this };

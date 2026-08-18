@@ -113,12 +113,14 @@
 
     window.quickmailSetLanguage = language => {
       quickMailLanguage = language;
-      document.documentElement.lang = language;
+      document.documentElement.lang = language || '';
       if (!quickMailEditor) return;
       const body = quickMailEditor.getBody();
-      body.lang = language;
-      body.spellcheck = true;
-      body.setAttribute('spellcheck', 'true');
+      body.spellcheck = false;
+      body.removeAttribute('spellcheck');
+      body.lang = language || '';
+      body.setAttribute('spellcheck', language ? 'true' : 'false');
+      body.spellcheck = !!language;
       body.focus();
     };
   </script>

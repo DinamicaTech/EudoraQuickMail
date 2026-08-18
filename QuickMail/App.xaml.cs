@@ -516,6 +516,33 @@ public partial class App : Application
 
             mainWindow.Show();
 
+            if (!onlineMode && !probeMode && startupCfg.IndexAttachmentContents)
+            {
+                var attachmentIndexer = new AttachmentIndexingService(localStore, configService);
+                attachmentIndexer.Progress += (current, total, name) =>
+                {
+                    if (current != 1 && current % 25 != 0 && current != total) return;
+                    _ = Dispatcher.BeginInvoke(() =>
+                    {
+                        mainVm.IsStatusHighlighted = true;
+                        mainVm.StatusText = $"Indexing attachment {current:N0}/{total:N0}: {name}";
+                    });
+                };
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        await attachmentIndexer.IndexAllAsync();
+                        _ = Dispatcher.BeginInvoke(() =>
+                        {
+                            mainVm.IsStatusHighlighted = true;
+                            mainVm.StatusText = "Attachment content indexing complete.";
+                        });
+                    }
+                    catch (Exception ex) { LogService.Log("Attachment background indexing", ex); }
+                });
+            }
+
             // A second launch of the same profile signals this handle instead of starting
             // another process; restore the window (and drop the tray icon) exactly as the
             // tray icon's Open action would. The signal arrives on a thread-pool thread.

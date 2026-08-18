@@ -2,7 +2,9 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Translation Providers" Width="600" Height="500"
-        WindowStartupLocation="CenterOwner" ResizeMode="CanResizeWithGrip">
+        WindowStartupLocation="CenterOwner" ResizeMode="CanResizeWithGrip"
+        Background="{DynamicResource Theme.WindowBackground}" Foreground="{DynamicResource Theme.TextPrimary}"
+        FontFamily="{DynamicResource Theme.FontFamily}" FontSize="{DynamicResource Theme.FontSizeBase}">
   <Grid Margin="18">
     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
     <StackPanel>
@@ -18,7 +20,7 @@
           <TextBlock TextWrapping="Wrap" Text="Argos runs entirely on this computer. It needs no account or API key. Install Argos Translate and the Spanish, Catalan and English language models separately."/>
           <TextBlock Text="Command or full executable path" Margin="0,14,0,4"/>
           <TextBox x:Name="ArgosCommandBox" Text="argos-translate"/>
-          <TextBlock Margin="0,10,0,0" TextWrapping="Wrap" Foreground="Gray" Text="Typical setup: pip install argostranslate; then install the required .argosmodel packages. QuickMail never sends Argos text over the network."/>
+          <TextBlock Margin="0,10,0,0" TextWrapping="Wrap" Foreground="{DynamicResource Theme.TextSecondary}" Text="Typical setup: pip install argostranslate; then install the required .argosmodel packages. QuickMail never sends Argos text over the network."/>
           <StackPanel Orientation="Horizontal" Margin="0,16,0,0">
             <Button Content="Install / update runtime" Width="155" Click="InstallArgos_Click"/>
             <Button Content="Install ES/CA/EN models" Width="165" Margin="8,0,0,0" Click="InstallModels_Click"/>

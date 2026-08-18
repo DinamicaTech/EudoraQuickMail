@@ -65,6 +65,30 @@
                             </StackPanel>
                         </GroupBox>
 
+                        <GroupBox Header="Search _Index" Padding="10" Margin="0,10,0,0"
+                                  AutomationProperties.Name="Attachment search index settings">
+                            <StackPanel>
+                                <CheckBox Content="Index attachment _contents"
+                                          IsChecked="{Binding IndexAttachmentContents, Mode=TwoWay}"/>
+                                <CheckBox Content="Index documents inside _compressed files"
+                                          IsChecked="{Binding IndexCompressedAttachments, Mode=TwoWay}"
+                                          IsEnabled="{Binding IndexAttachmentContents}" Margin="0,6,0,8"/>
+                                <Grid>
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="90"/></Grid.ColumnDefinitions>
+                                    <TextBlock Text="Maximum file size (MB):" VerticalAlignment="Center"/>
+                                    <TextBox Grid.Column="1" Text="{Binding AttachmentIndexMaxFileMb, UpdateSourceTrigger=PropertyChanged}"/>
+                                </Grid>
+                                <Grid Margin="0,6,0,0">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="90"/></Grid.ColumnDefinitions>
+                                    <TextBlock Text="Maximum expanded size (MB):" VerticalAlignment="Center"/>
+                                    <TextBox Grid.Column="1" Text="{Binding AttachmentIndexMaxExpandedMb, UpdateSourceTrigger=PropertyChanged}"/>
+                                </Grid>
+                                <TextBlock Text="Defaults: 10 MB per attachment and 20 MB expanded. Changes apply during the next background indexing pass. OCR is not performed."
+                                           TextWrapping="Wrap" Foreground="{DynamicResource Theme.TextSecondary}"
+                                           FontSize="{DynamicResource Theme.FontSizeSmall}" Margin="0,7,0,0"/>
+                            </StackPanel>
+                        </GroupBox>
+
                         <!-- View Group -->
                         <GroupBox Header="_View" Padding="10" Margin="0,0,0,15" AutomationProperties.Name="View settings">
                             <StackPanel>

@@ -184,6 +184,11 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty]
     private int _autoSaveIntervalSeconds;
 
+    [ObservableProperty] private bool _indexAttachmentContents;
+    [ObservableProperty] private bool _indexCompressedAttachments;
+    [ObservableProperty] private int _attachmentIndexMaxFileMb = 10;
+    [ObservableProperty] private int _attachmentIndexMaxExpandedMb = 20;
+
     /// <summary>Bound to the Settings ComboBox by tag: "plain", "markdown", or "html".</summary>
     [ObservableProperty]
     private string _defaultComposeMode = "plain";
@@ -462,6 +467,10 @@ public partial class SettingsViewModel : ObservableObject
         GoogleSignIn                     = ReadFeature(cfg, FeatureFlag.GoogleAuth, false);
         AutoSaveDrafts                   = cfg.AutoSaveDrafts;
         AutoSaveIntervalSeconds          = cfg.AutoSaveIntervalSeconds;
+        IndexAttachmentContents          = cfg.IndexAttachmentContents;
+        IndexCompressedAttachments       = cfg.IndexCompressedAttachments;
+        AttachmentIndexMaxFileMb         = cfg.AttachmentIndexMaxFileMb;
+        AttachmentIndexMaxExpandedMb     = cfg.AttachmentIndexMaxExpandedMb;
         DefaultComposeMode = cfg.DefaultComposeMode switch
         {
             Models.ComposeMode.Markdown => "markdown",
@@ -567,6 +576,10 @@ public partial class SettingsViewModel : ObservableObject
         }
         cfg.AutoSaveDrafts                   = AutoSaveDrafts;
         cfg.AutoSaveIntervalSeconds          = AutoSaveIntervalSeconds;
+        cfg.IndexAttachmentContents          = IndexAttachmentContents;
+        cfg.IndexCompressedAttachments       = IndexCompressedAttachments;
+        cfg.AttachmentIndexMaxFileMb         = Math.Clamp(AttachmentIndexMaxFileMb, 1, 1024);
+        cfg.AttachmentIndexMaxExpandedMb     = Math.Clamp(AttachmentIndexMaxExpandedMb, 1, 4096);
         cfg.DefaultComposeMode = DefaultComposeMode switch
         {
             "markdown" => Models.ComposeMode.Markdown,

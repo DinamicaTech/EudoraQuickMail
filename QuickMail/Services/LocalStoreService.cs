@@ -195,6 +195,28 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
             );
             CREATE UNIQUE INDEX IF NOT EXISTS idx_local_fts_key_rowid
                 ON LocalMessageFtsKey(fts_rowid);
+
+            CREATE TABLE IF NOT EXISTS AttachmentContent (
+                account_id      TEXT NOT NULL,
+                unique_id       TEXT NOT NULL,
+                folder_name     TEXT NOT NULL,
+                attachment_name TEXT NOT NULL,
+                entry_path      TEXT NOT NULL DEFAULT '',
+                source_path     TEXT NOT NULL DEFAULT '',
+                fingerprint     TEXT NOT NULL DEFAULT '',
+                status          TEXT NOT NULL DEFAULT 'pending',
+                content_text    TEXT NOT NULL DEFAULT '',
+                fts_rowid       INTEGER,
+                PRIMARY KEY(account_id, unique_id, folder_name, attachment_name, entry_path)
+            );
+            CREATE INDEX IF NOT EXISTS idx_attachment_message
+                ON AttachmentContent(account_id, folder_name, unique_id);
+            CREATE INDEX IF NOT EXISTS idx_attachment_fingerprint
+                ON AttachmentContent(source_path, fingerprint);
+            CREATE VIRTUAL TABLE IF NOT EXISTS AttachmentContentFts USING fts5(
+                attachment_name, entry_path, content_text,
+                tokenize='unicode61 remove_diacritics 2'
+            );
             """;
         cmd.ExecuteNonQuery();
 
@@ -294,6 +316,7 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
                 DROP TABLE MessageSummary;
                 ALTER TABLE MessageSummary_v2 RENAME TO MessageSummary;
                 CREATE INDEX idx_summary_date ON MessageSummary(date_ticks DESC);
+                CREATE INDEX idx_summary_account_folder_date ON MessageSummary(account_id, folder_name, date_ticks DESC);
 
                 CREATE TABLE MessageDetail_v2 (
                     unique_id   TEXT NOT NULL,
@@ -306,11 +329,12 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
                     html_body   TEXT NOT NULL DEFAULT '',
                     attachments_json TEXT DEFAULT NULL,
                     calendar_ics TEXT DEFAULT NULL,
+                    raw_headers TEXT NOT NULL DEFAULT '',
                     PRIMARY KEY (unique_id, account_id, folder_name)
                 );
                 INSERT INTO MessageDetail_v2
                 SELECT CAST(unique_id AS TEXT), account_id, folder_name, to_addr, cc,
-                       reply_to, plain_body, html_body, attachments_json, calendar_ics
+                       reply_to, plain_body, html_body, attachments_json, calendar_ics, raw_headers
                 FROM MessageDetail;
                 DROP TABLE MessageDetail;
                 ALTER TABLE MessageDetail_v2 RENAME TO MessageDetail;

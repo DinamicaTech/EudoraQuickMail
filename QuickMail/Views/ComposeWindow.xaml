@@ -398,6 +398,7 @@
                       SelectedValuePath="Tag" Margin="0,4" TabIndex="5"
                       AutomationProperties.Name="Spelling language"
                       SelectionChanged="SpellLanguageSelector_SelectionChanged">
+                <ComboBoxItem Content="(None)" Tag=""/>
                 <ComboBoxItem Content="Español" Tag="es-ES"/>
                 <ComboBoxItem Content="Català" Tag="ca-ES"/>
                 <ComboBoxItem Content="English" Tag="en-US"/>
@@ -493,6 +494,7 @@
                          AutomationProperties.Name="Message body"
                          AutomationProperties.AcceleratorKey="Alt+Y"
                          AcceptsReturn="True" AcceptsTab="True"
+                         TextChanged="BodyBox_TextChanged"
                          TextWrapping="Wrap"
                          IsInactiveSelectionHighlightEnabled="True"
                          VerticalScrollBarVisibility="Auto"
