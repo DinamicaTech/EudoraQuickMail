@@ -42,7 +42,8 @@ before a public release.
   single-character wildcards, attachment counts, flexible dates, and in-product syntax help.
 - Added background full-text indexing for TXT/CSV/HTML/XML/JSON, DOCX/XLSX/PPTX and text PDFs,
   including documents streamed from ZIP/RAR/7z/TAR/GZip containers. Input and expanded-size limits
-  are configurable and archive depth, entry count, encryption and expansion are guarded.
+  are configurable and archive depth, entry count, encryption and expansion are guarded. SHA-256
+  and extracted-text caches reuse unchanged or duplicate files across Eudora reimports.
 
 ### Composition and rendering
 

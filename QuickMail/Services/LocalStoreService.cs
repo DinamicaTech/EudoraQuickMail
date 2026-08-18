@@ -213,6 +213,22 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
                 ON AttachmentContent(account_id, folder_name, unique_id);
             CREATE INDEX IF NOT EXISTS idx_attachment_fingerprint
                 ON AttachmentContent(source_path, fingerprint);
+            CREATE TABLE IF NOT EXISTS AttachmentFileHashCache (
+                source_path          TEXT PRIMARY KEY,
+                file_length          INTEGER NOT NULL,
+                last_write_utc_ticks INTEGER NOT NULL,
+                sha256               TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_attachment_file_hash
+                ON AttachmentFileHashCache(sha256);
+            CREATE TABLE IF NOT EXISTS AttachmentExtractionCache (
+                sha256          TEXT NOT NULL,
+                extraction_key  TEXT NOT NULL,
+                entry_path      TEXT NOT NULL DEFAULT '',
+                status          TEXT NOT NULL,
+                content_text    TEXT NOT NULL DEFAULT '',
+                PRIMARY KEY(sha256, extraction_key, entry_path)
+            );
             CREATE VIRTUAL TABLE IF NOT EXISTS AttachmentContentFts USING fts5(
                 attachment_name, entry_path, content_text,
                 tokenize='unicode61 remove_diacritics 2'

@@ -1,5 +1,6 @@
 using System.Text;
 using System.IO;
+using System.Security.Cryptography;
 using DocumentFormat.OpenXml.Packaging;
 using SharpCompress.Archives;
 using SharpCompress.Common;
@@ -14,6 +15,7 @@ public sealed class AttachmentIndexingService
     private readonly LocalStoreService _store;
     private readonly IConfigService _config;
     private const int MaxTextCharacters = 5_000_000;
+    private const string ExtractorVersion = "1";
     public event Action<int, int, string>? Progress;
 
     public AttachmentIndexingService(LocalStoreService store, IConfigService config)
@@ -37,14 +39,35 @@ public sealed class AttachmentIndexingService
                 }
                 var info = new FileInfo(item.SourcePath);
                 var fingerprint = $"{info.Length}:{info.LastWriteTimeUtc.Ticks}";
-                if (await _store.GetAttachmentFingerprintAsync(item, ct) == fingerprint) continue;
+                var alreadyIndexed = await _store.GetAttachmentFingerprintAsync(item, ct) == fingerprint;
                 if (info.Length > cfg.AttachmentIndexMaxFileMb * 1024L * 1024L)
                 { await StoreStatus(item, "too-large", ct, fingerprint); continue; }
-                await using var stream = new FileStream(item.SourcePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-                var entries = await ExtractAsync(stream, item.FileName,
-                    cfg.AttachmentIndexMaxExpandedMb * 1024L * 1024L, cfg.IndexCompressedAttachments, 0, ct);
+                var sha256 = await _store.GetCachedAttachmentHashAsync(item.SourcePath, info.Length,
+                    info.LastWriteTimeUtc.Ticks, ct);
+                if (sha256 is null)
+                {
+                    await using var hashStream = new FileStream(item.SourcePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                    sha256 = Convert.ToHexString(await SHA256.HashDataAsync(hashStream, ct));
+                    await _store.SaveAttachmentHashAsync(item.SourcePath, info.Length, info.LastWriteTimeUtc.Ticks, sha256, ct);
+                }
+                var extractionKey = $"{ExtractorVersion}:{Path.GetExtension(item.FileName).ToLowerInvariant()}:{cfg.IndexCompressedAttachments}:{cfg.AttachmentIndexMaxExpandedMb}";
+                var entries = await _store.LoadCachedExtractionAsync(sha256, extractionKey, ct);
+                if (entries is null && alreadyIndexed)
+                {
+                    entries = await _store.LoadExistingAttachmentExtractionAsync(item, ct);
+                    if (entries is not null) await _store.SaveCachedExtractionAsync(sha256, extractionKey, entries, ct);
+                }
+                if (alreadyIndexed) continue;
+                if (entries is null)
+                {
+                    await using var stream = new FileStream(item.SourcePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                    entries = await ExtractAsync(stream, item.FileName,
+                        cfg.AttachmentIndexMaxExpandedMb * 1024L * 1024L, cfg.IndexCompressedAttachments, 0, ct);
+                    if (entries.Count == 0) entries = [new(string.Empty, "unsupported", string.Empty)];
+                    await _store.SaveCachedExtractionAsync(sha256, extractionKey, entries, ct);
+                }
                 await _store.ReplaceAttachmentIndexAsync(item, fingerprint,
-                    entries.Count == 0 ? [new(string.Empty, "unsupported", string.Empty)] : entries, ct);
+                    entries, ct);
             }
             catch (Exception ex)
             {

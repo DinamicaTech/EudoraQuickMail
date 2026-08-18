@@ -43,6 +43,70 @@ public partial class LocalStoreService
         return await cmd.ExecuteScalarAsync(ct) as string;
     }
 
+    public async Task<string?> GetCachedAttachmentHashAsync(string sourcePath, long length, long lastWriteUtcTicks,
+        CancellationToken ct = default)
+    {
+        await using var conn = await OpenAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT sha256 FROM AttachmentFileHashCache WHERE source_path=$p AND file_length=$l AND last_write_utc_ticks=$t;";
+        cmd.Parameters.AddWithValue("$p", sourcePath); cmd.Parameters.AddWithValue("$l", length);
+        cmd.Parameters.AddWithValue("$t", lastWriteUtcTicks);
+        return await cmd.ExecuteScalarAsync(ct) as string;
+    }
+
+    public async Task SaveAttachmentHashAsync(string sourcePath, long length, long lastWriteUtcTicks, string sha256,
+        CancellationToken ct = default)
+    {
+        await using var conn = await OpenAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "INSERT INTO AttachmentFileHashCache(source_path,file_length,last_write_utc_ticks,sha256) VALUES($p,$l,$t,$h) ON CONFLICT(source_path) DO UPDATE SET file_length=excluded.file_length,last_write_utc_ticks=excluded.last_write_utc_ticks,sha256=excluded.sha256;";
+        cmd.Parameters.AddWithValue("$p", sourcePath); cmd.Parameters.AddWithValue("$l", length);
+        cmd.Parameters.AddWithValue("$t", lastWriteUtcTicks); cmd.Parameters.AddWithValue("$h", sha256);
+        await cmd.ExecuteNonQueryAsync(ct);
+    }
+
+    public async Task<IReadOnlyList<ExtractedAttachmentText>?> LoadCachedExtractionAsync(string sha256,
+        string extractionKey, CancellationToken ct = default)
+    {
+        var result = new List<ExtractedAttachmentText>();
+        await using var conn = await OpenAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT entry_path,status,content_text FROM AttachmentExtractionCache WHERE sha256=$h AND extraction_key=$k ORDER BY entry_path;";
+        cmd.Parameters.AddWithValue("$h", sha256); cmd.Parameters.AddWithValue("$k", extractionKey);
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct)) result.Add(new(reader.GetString(0), reader.GetString(1), reader.GetString(2)));
+        return result.Count == 0 ? null : result;
+    }
+
+    public async Task<IReadOnlyList<ExtractedAttachmentText>?> LoadExistingAttachmentExtractionAsync(
+        AttachmentIndexCandidate item, CancellationToken ct = default)
+    {
+        var result = new List<ExtractedAttachmentText>();
+        await using var conn = await OpenAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT entry_path,status,content_text FROM AttachmentContent WHERE account_id=$a AND unique_id=$u AND folder_name=$f AND attachment_name=$n ORDER BY entry_path;";
+        AddAttachmentKey(cmd, item);
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct)) result.Add(new(reader.GetString(0), reader.GetString(1), reader.GetString(2)));
+        return result.Count == 0 ? null : result;
+    }
+
+    public async Task SaveCachedExtractionAsync(string sha256, string extractionKey,
+        IReadOnlyList<ExtractedAttachmentText> entries, CancellationToken ct = default)
+    {
+        await using var conn = await OpenAsync();
+        await using var tx = (SqliteTransaction)await conn.BeginTransactionAsync(ct);
+        foreach (var entry in entries)
+        {
+            await using var cmd = conn.CreateCommand(); cmd.Transaction = tx;
+            cmd.CommandText = "INSERT OR REPLACE INTO AttachmentExtractionCache(sha256,extraction_key,entry_path,status,content_text) VALUES($h,$k,$e,$s,$t);";
+            cmd.Parameters.AddWithValue("$h", sha256); cmd.Parameters.AddWithValue("$k", extractionKey);
+            cmd.Parameters.AddWithValue("$e", entry.EntryPath); cmd.Parameters.AddWithValue("$s", entry.Status);
+            cmd.Parameters.AddWithValue("$t", entry.Text); await cmd.ExecuteNonQueryAsync(ct);
+        }
+        await tx.CommitAsync(ct);
+    }
+
     public async Task ReplaceAttachmentIndexAsync(AttachmentIndexCandidate item, string fingerprint,
         IReadOnlyList<ExtractedAttachmentText> entries, CancellationToken ct = default)
     {

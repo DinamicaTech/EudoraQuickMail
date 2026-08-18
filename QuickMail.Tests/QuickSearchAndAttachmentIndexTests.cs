@@ -66,6 +66,31 @@ public class AttachmentExtractorTests
         Assert.Equal("folder/note.txt", item.EntryPath);
         Assert.Contains("Chocolate contract", item.Text);
     }
+
+    [Fact]
+    public async Task PersistsHashAndReusesExtractionAcrossMessageIds()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "QuickMail-hash-test-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var store = new LocalStoreService(new ProfileContext(directory)); store.Initialize();
+            var path = Path.Combine(directory, "shared.txt");
+            await File.WriteAllTextAsync(path, "shared searchable content", TestContext.Current.CancellationToken);
+            var info = new FileInfo(path); const string hash = "ABC123"; const string key = "1:.txt:True:20";
+            await store.SaveAttachmentHashAsync(path, info.Length, info.LastWriteTimeUtc.Ticks, hash, TestContext.Current.CancellationToken);
+            await store.SaveCachedExtractionAsync(hash, key, [new("", "indexed", "shared searchable content")], TestContext.Current.CancellationToken);
+
+            Assert.Equal(hash, await store.GetCachedAttachmentHashAsync(path, info.Length, info.LastWriteTimeUtc.Ticks, TestContext.Current.CancellationToken));
+            var cached = Assert.Single((await store.LoadCachedExtractionAsync(hash, key, TestContext.Current.CancellationToken))!);
+            Assert.Equal("shared searchable content", cached.Text);
+        }
+        finally
+        {
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            Directory.Delete(directory, true);
+        }
+    }
 }
 
 public class QuickSearchStoreTests
