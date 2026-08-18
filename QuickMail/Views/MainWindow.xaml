@@ -1499,6 +1499,15 @@
                                         </DataTemplate>
                                     </GridViewColumn.CellTemplate>
                                 </GridViewColumn>
+                                <GridViewColumn Width="82">
+                                    <GridViewColumn.Header>
+                                        <GridViewColumnHeader Content="Time" Tag="Date" HorizontalContentAlignment="Right"
+                                                              AutomationProperties.IsColumnHeader="True"/>
+                                    </GridViewColumn.Header>
+                                    <GridViewColumn.CellTemplate>
+                                        <DataTemplate><TextBlock Text="{Binding TimeDisplay}" TextAlignment="Right" Margin="0,0,4,0"/></DataTemplate>
+                                    </GridViewColumn.CellTemplate>
+                                </GridViewColumn>
                                 <GridViewColumn Width="190">
                                     <GridViewColumn.Header>
                                         <GridViewColumnHeader Content="Folder" Tag="FolderName" AutomationProperties.IsColumnHeader="True"/>

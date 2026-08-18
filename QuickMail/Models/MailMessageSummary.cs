@@ -160,4 +160,6 @@ public partial class MailMessageSummary : ObservableObject
             return local.ToString("d", System.Globalization.CultureInfo.CurrentCulture);
         }
     }
+
+    public string TimeDisplay => Date.ToLocalTime().ToString("HH:mm:ss", System.Globalization.CultureInfo.CurrentCulture);
 }

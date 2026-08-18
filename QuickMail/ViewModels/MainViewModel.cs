@@ -7556,6 +7556,27 @@ public partial class MainViewModel : ObservableObject, IDisposable
         (SelectedFolder.Kind == SpecialFolderKind.Drafts ||
          string.Equals(SelectedFolder.FullName, AllDraftsFolder.FullName, StringComparison.Ordinal));
 
+    public bool IsSelectedFolderScheduled => SelectedFolder?.Kind == SpecialFolderKind.Scheduled;
+
+    [RelayCommand]
+    private async Task OpenScheduledAsync()
+    {
+        if (SelectedMessage is not { } summary ||
+            System.Windows.Application.Current is not App { ScheduledSender: { } scheduler }) return;
+        var item = await scheduler.FindByLocalMessageIdAsync(summary.MessageId);
+        if (item is null) { StatusText = "Scheduled message no longer exists."; return; }
+        var source = item.Message;
+        ComposeRequested?.Invoke(new ComposeModel
+        {
+            Kind = ComposeKind.EditScheduled, AccountId = source.AccountId,
+            To = source.To, Cc = source.Cc, Bcc = source.Bcc, Subject = source.Subject,
+            Body = source.Body, Mode = source.Mode, HtmlBody = source.HtmlBody,
+            SpellLanguage = source.SpellLanguage, Attachments = source.Attachments,
+            ScheduledId = item.Id, ScheduledLocalMessageId = item.LocalMessageId,
+            ScheduledAt = item.SendAtUtc,
+        });
+    }
+
     [RelayCommand]
     private async Task OpenDraftAsync()
     {

@@ -5363,6 +5363,11 @@ public partial class MainWindow : Window
     /// </summary>
     private async Task OpenMessageFromListAsync(MailMessageSummary summary)
     {
+        if (_vm.IsSelectedFolderScheduled)
+        {
+            await _vm.OpenScheduledCommand.ExecuteAsync(null);
+            return;
+        }
         if (_vm.IsSelectedFolderDrafts)
         {
             await _vm.OpenDraftCommand.ExecuteAsync(null);

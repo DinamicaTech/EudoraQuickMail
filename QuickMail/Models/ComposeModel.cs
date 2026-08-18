@@ -11,6 +11,7 @@ public enum ComposeKind
     ReplyAll,
     Forward,
     EditDraft,
+    EditScheduled,
     NewDraft,
     EditTemplate,
 }
@@ -46,6 +47,9 @@ public class ComposeModel
 
     /// <summary>Folder name of the existing draft (null when composing new).</summary>
     public string? DraftFolderName { get; set; }
+    public Guid? ScheduledId { get; set; }
+    public string? ScheduledLocalMessageId { get; set; }
+    public DateTimeOffset? ScheduledAt { get; set; }
 
     public List<AttachmentModel> Attachments { get; set; } = [];
 }

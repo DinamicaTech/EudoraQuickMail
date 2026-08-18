@@ -50,6 +50,7 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
                 ComposeKind.Forward      => "Forward",
                 ComposeKind.EditDraft    => "Draft",
                 ComposeKind.NewDraft     => "Draft",
+                ComposeKind.EditScheduled => "Scheduled Message",
                 ComposeKind.EditTemplate => "Edit Template",
                 _                        => "New Message",
             };
@@ -144,6 +145,9 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
     private string? _inReplyToMessageId;
     private string? _draftMessageId;
     private string? _draftFolderName;
+    private Guid? _scheduledId;
+    private string? _scheduledLocalMessageId;
+    private DateTimeOffset? _scheduledAt;
     private bool _isDirty;
     private bool _isSent;
     private ComposeMode _seededMode = ComposeMode.PlainText;
@@ -200,6 +204,9 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
         _inReplyToMessageId = model.InReplyToMessageId;
         _draftMessageId     = model.DraftMessageId;
         _draftFolderName    = model.DraftFolderName;
+        _scheduledId = model.ScheduledId;
+        _scheduledLocalMessageId = model.ScheduledLocalMessageId;
+        _scheduledAt = model.ScheduledAt;
         ComposeKind         = model.Kind;
         OnPropertyChanged(nameof(WindowTitle));
 
@@ -264,6 +271,7 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
         {
             await SaveDraftCoreAsync(account);
             SetStatusOutcome("Draft saved.");
+            CloseRequested?.Invoke();
         }
         catch (DraftFolderMissingException)
         {
@@ -426,6 +434,8 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
 
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
             await _smtp.SendAsync(compose, account, password, cts.Token);
+            if (_scheduledId is { } scheduledId && System.Windows.Application.Current is App { ScheduledSender: { } scheduler })
+                await scheduler.RemoveAsync(scheduledId, deleteLocalCopy: true);
             SetStatusOutcome("Message sent.");
             _isSent = true;
 
@@ -476,13 +486,16 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
     {
         if (string.IsNullOrWhiteSpace(To)) { SetStatusOutcome("Please enter at least one recipient."); return; }
         if (SenderAccount is not { } account) { SetStatusOutcome("Please select a sender account."); return; }
-        var requested = PromptScheduleTimeRequested?.Invoke(DateTime.Now.AddMinutes(10));
+        var requested = PromptScheduleTimeRequested?.Invoke(_scheduledAt?.LocalDateTime ?? DateTime.Now.AddMinutes(10));
         if (requested is not { } local) return;
         if (local <= DateTime.Now) { SetStatusOutcome("Enter a future local date and time for scheduled sending."); return; }
         if (System.Windows.Application.Current is not App { ScheduledSender: { } scheduler })
         { SetStatusOutcome("Scheduled sending is unavailable."); return; }
         var compose = BuildComposeModel(account.Id);
-        await scheduler.ScheduleAsync(compose, new DateTimeOffset(local));
+        if (_scheduledId is { } scheduledId)
+            await scheduler.ReplaceAsync(scheduledId, compose, new DateTimeOffset(local));
+        else
+            await scheduler.ScheduleAsync(compose, new DateTimeOffset(local));
         _isSent = true;
         SetStatusOutcome($"Message scheduled for {local:g}.");
         CloseRequested?.Invoke();

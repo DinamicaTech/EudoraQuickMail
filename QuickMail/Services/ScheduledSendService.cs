@@ -55,6 +55,54 @@ public sealed class ScheduledSendService : IDisposable
         finally { _gate.Release(); }
     }
 
+    public async Task<ScheduledMail?> FindByLocalMessageIdAsync(string localMessageId)
+    {
+        await _gate.WaitAsync();
+        try { return (await LoadAsync()).FirstOrDefault(x => x.LocalMessageId == localMessageId); }
+        finally { _gate.Release(); }
+    }
+
+    public async Task ReplaceAsync(Guid id, ComposeModel message, DateTimeOffset sendAtUtc)
+    {
+        if (sendAtUtc <= DateTimeOffset.Now) throw new ArgumentOutOfRangeException(nameof(sendAtUtc));
+        await _gate.WaitAsync();
+        try
+        {
+            var queue = await LoadAsync();
+            var index = queue.FindIndex(x => x.Id == id);
+            if (index < 0) throw new InvalidOperationException("Scheduled message no longer exists.");
+            var old = queue[index];
+            var account = _accounts.LoadAccounts().First(a => a.Id == message.AccountId);
+            await _store.SaveLocalMessageAsync(new MailMessageDetail
+            {
+                AccountId = message.AccountId, FolderName = "Scheduled", MessageId = old.LocalMessageId!,
+                From = account.Username, To = message.To, Cc = message.Cc, Subject = message.Subject,
+                Date = sendAtUtc, PlainTextBody = message.Body, HtmlBody = message.HtmlBody ?? string.Empty,
+                DraftComposeMode = message.Mode, DraftSpellLanguage = message.SpellLanguage,
+                Preview = message.Body.Length <= 240 ? message.Body : message.Body[..240], IsRead = true,
+            });
+            queue[index] = old with { SendAtUtc = sendAtUtc.ToUniversalTime(), Message = message, Attempts = 0, LastError = null };
+            await SaveAsync(queue);
+        }
+        finally { _gate.Release(); }
+    }
+
+    public async Task RemoveAsync(Guid id, bool deleteLocalCopy)
+    {
+        await _gate.WaitAsync();
+        try
+        {
+            var queue = await LoadAsync();
+            var item = queue.FirstOrDefault(x => x.Id == id);
+            if (item is null) return;
+            if (deleteLocalCopy && item.LocalMessageId is not null)
+                await _store.DeleteLocalMessagesAsync(item.Message.AccountId, "Scheduled", [item.LocalMessageId]);
+            queue.Remove(item);
+            await SaveAsync(queue);
+        }
+        finally { _gate.Release(); }
+    }
+
     public async Task DispatchDueAsync()
     {
         await _gate.WaitAsync(_stop.Token);

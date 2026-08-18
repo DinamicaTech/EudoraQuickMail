@@ -18,6 +18,8 @@ before a public release.
   is active, and ensured local archive accounts run their system-folder migration without credentials.
 - Preserved persisted special-folder enum values, repaired local system-folder kinds by name, and
   simplified detached preview windows so they always follow the main selection.
+- Reopened local HTML drafts in their original mode, closed compose after Save Draft, added editable
+  scheduled messages (reschedule or Send immediately), and added a regional `Time` message column.
 
 - Added visible local Draft and Scheduled folders; Send Later now prompts explicitly for a local
   date/time and keeps a local scheduled copy until successful delivery.

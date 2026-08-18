@@ -164,7 +164,8 @@ public sealed class LocalMailService : IMailService
             AccountId = accountId, FolderName = folder, MessageId = id, From = account.Username,
             To = compose.To, Cc = compose.Cc, Subject = compose.Subject, Date = DateTimeOffset.UtcNow,
             PlainTextBody = compose.Body, Preview = compose.Body.Length <= 240 ? compose.Body : compose.Body[..240],
-            IsRead = true,
+            HtmlBody = compose.HtmlBody ?? string.Empty, DraftComposeMode = compose.Mode,
+            DraftSpellLanguage = compose.SpellLanguage, IsRead = true,
         };
     }
 
