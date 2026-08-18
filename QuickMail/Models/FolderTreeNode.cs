@@ -35,6 +35,9 @@ public sealed class FolderTreeNode : INotifyPropertyChanged
     public string Label { get; init; } = string.Empty;
 
     public ObservableCollection<FolderTreeNode> Children { get; } = [];
+    public FolderTreeNode? Parent { get; set; }
+    private int RecursiveUnreadCount => (Folder?.SuppressUnreadCount == false ? Folder.UnreadCount : 0)
+        + Children.Sum(child => child.RecursiveUnreadCount);
 
     /// <summary>
     /// Accessibility name announced by screen readers (AutomationProperties.Name).
@@ -46,7 +49,7 @@ public sealed class FolderTreeNode : INotifyPropertyChanged
     /// Do not move the count back out of the Name without checking with a screen-reader user first.
     /// </summary>
     public string AutomationName =>
-        ShowUnread ? $"{Label}, {Folder!.UnreadCount} unread"
+        ShowUnread ? $"{Label}, {RecursiveUnreadCount} unread"
         : IsDefaultCalendar ? $"{Label}, default calendar"
         : IsSharedAccount ? $"{Label}, shared mailbox"
         : Label;
@@ -77,7 +80,7 @@ public sealed class FolderTreeNode : INotifyPropertyChanged
 
     // Gmail's All Mail / Important / Starred report unread counts that overlap the Inbox and include
     // archived mail, so they're hidden here to avoid a misleading count (issue #227).
-    private bool ShowUnread => Folder is { UnreadCount: > 0, SuppressUnreadCount: false };
+    private bool ShowUnread => RecursiveUnreadCount > 0;
 
     /// <summary>
     /// UIA ItemStatus string used by AutomationProperties.ItemStatus on the TreeViewItem.
@@ -85,14 +88,14 @@ public sealed class FolderTreeNode : INotifyPropertyChanged
     /// Empty for folders with no unread messages and for header/group nodes.
     /// </summary>
     public string ItemStatusLabel =>
-        ShowUnread ? $"{Folder!.UnreadCount} unread" : string.Empty;
+        ShowUnread ? $"{RecursiveUnreadCount} unread" : string.Empty;
 
     /// <summary>
     /// Visual unread badge shown next to the folder label, e.g. "(5)".
     /// Empty string for folders with no unread messages and for header/group nodes.
     /// </summary>
     public string UnreadDisplay =>
-        ShowUnread ? $"({Folder!.UnreadCount})" : string.Empty;
+        ShowUnread ? $"({RecursiveUnreadCount})" : string.Empty;
 
     private bool _isExpanded;
 
@@ -123,6 +126,7 @@ public sealed class FolderTreeNode : INotifyPropertyChanged
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(AutomationName)));
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ItemStatusLabel)));
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(UnreadDisplay)));
+        Parent?.NotifyUnreadChanged();
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;

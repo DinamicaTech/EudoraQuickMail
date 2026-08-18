@@ -807,6 +807,17 @@ public partial class MessageWindow : Window
     /// The owning code (App.xaml.cs or MainWindow) should open the message as a tab.
     /// </summary>
     public event EventHandler<MessageWindowViewModel>? MoveToMainWindowRequested;
+    public event EventHandler? FollowSelectionRequested;
+
+    private void FollowSelection_Click(object sender, RoutedEventArgs e) =>
+        FollowSelectionRequested?.Invoke(this, EventArgs.Empty);
+
+    public void FollowMessage(MailMessageSummary summary, IEnumerable<MailMessageSummary> messages)
+    {
+        _vm.MessageList.Clear();
+        foreach (var message in messages) _vm.MessageList.Add(message);
+        _vm.SelectedMessage = summary;
+    }
 
     // Message content is untrusted; only allow-listed schemes (http/https/mailto)
     // may leave the app via ShellExecute. See ExternalUriPolicy.

@@ -340,6 +340,17 @@ public partial class ComposeWindow : Window
             var dialog = new TextPromptWindow("Save as Template", "Template name:", suggested) { Owner = this };
             return dialog.ShowDialog() == true ? dialog.Value : null;
         };
+        vm.PromptScheduleTimeRequested = suggested =>
+        {
+            var dialog = new TextPromptWindow("Send Later", "Local date and time:", suggested.ToString("g"))
+            { Owner = this };
+            if (dialog.ShowDialog() != true) return null;
+            if (DateTime.TryParse(dialog.Value, System.Globalization.CultureInfo.CurrentCulture,
+                    System.Globalization.DateTimeStyles.AllowWhiteSpaces, out var value)) return value;
+            MessageBox.Show(this, "Enter a valid local date and time.", "Send Later",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+            return null;
+        };
 
         // Wire the template picker so the VM stays out of System.Windows.
         vm.InsertTemplateRequested += () =>

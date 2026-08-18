@@ -200,6 +200,7 @@ public partial class MainWindow : Window
     // compose windows: they are unowned, so WPF does not close them when the main window closes,
     // and a surviving one keeps the process (and single-instance mutex) alive — see OnClosed (#252).
     private readonly List<MessageWindow> _openMessageWindows = new();
+    private MessageWindow? _followSelectionWindow;
 
     // ── Grouped-message tree controllers ──────────────────────────────────────
     private GroupedMessageTreeController? _convTreeController;
@@ -557,6 +558,10 @@ public partial class MainWindow : Window
 
             if (e.PropertyName == nameof(MainViewModel.SearchAnnouncement) && !string.IsNullOrEmpty(vm.SearchAnnouncement))
                 QueueSearchAnnounce(vm.SearchAnnouncement);
+
+            if (e.PropertyName == nameof(MainViewModel.SelectedMessage)
+                && _followSelectionWindow is { IsLoaded: true } follower && vm.SelectedMessage is { } selected)
+                follower.FollowMessage(selected, vm.Messages);
         };
 
         PreviewKeyDown += OnWindowKeyDown;
@@ -5525,6 +5530,12 @@ public partial class MainWindow : Window
             }
         };
         _openMessageWindows.Add(win);
+        win.FollowSelectionRequested += (_, _) =>
+        {
+            _followSelectionWindow = win;
+            if (_vm.SelectedMessage is { } selected) win.FollowMessage(selected, _vm.Messages);
+            _vm.StatusText = "Detached message window now follows the main selection.";
+        };
 
         // Wire mail action delegates so the window has full message operations.
         // Each delegate syncs MainViewModel selection to the window's current message
@@ -5597,6 +5608,7 @@ public partial class MainWindow : Window
         win.Closed += (_, _) =>
         {
             _openMessageWindows.Remove(win);
+            if (ReferenceEquals(_followSelectionWindow, win)) _followSelectionWindow = null;
             _vm.IsMessageOpenInWindow = _openMessageWindows.Count > 0;
 
             // Restore focus to the originating message list item (issue 46).
@@ -6483,9 +6495,12 @@ public partial class MainWindow : Window
             return;
         }
         var confirmation = MessageBox.Show(this,
-            $"All Eudora messages from the following folder will be imported:\n\n{eudoraFolder}\n\nQuickMail will close during the import and reopen automatically when it finishes. Continue?",
+            $"All Eudora messages from the following folder will be imported:\n\n{eudoraFolder}\n\n" +
+            "Account configurations found in Eudora.ini will also be imported without passwords.\n\n" +
+            "QuickMail will close during the import and reopen automatically when it finishes. Continue?",
             "Import from Eudora", MessageBoxButton.YesNo, MessageBoxImage.Information);
         if (confirmation != MessageBoxResult.Yes) return;
+        EudoraAccountImporter.Import(Path.Combine(eudoraFolder, "Eudora.ini"), _accountService);
 
         System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(importer)
         {
@@ -6493,6 +6508,16 @@ public partial class MainWindow : Window
             Arguments = $"migrate --source \"{eudoraFolder}\" --profile \"{_profileContext.ProfileDir}\" --quickmail \"{Environment.ProcessPath}\"",
         });
         Application.Current.Shutdown();
+    }
+
+    private async void MenuUpdateAttachmentIndex_Click(object sender, RoutedEventArgs e)
+    {
+        if (_localStore is not LocalStoreService localStore) { _vm.StatusText = "Attachment indexing is unavailable."; return; }
+        var indexer = new AttachmentIndexingService(localStore, _configService);
+        indexer.Progress += (current, total, name) => Dispatcher.Invoke(() =>
+            _vm.StatusText = $"Indexing attachment {current:N0}/{total:N0}: {name}");
+        try { await indexer.IndexAllAsync(); _vm.StatusText = "Attachment content indexing complete."; }
+        catch (Exception ex) { LogService.Log("Manual attachment indexing", ex); _vm.StatusText = $"Attachment indexing failed: {ex.Message}"; }
     }
 
     // Context-menu Archive — acts on the whole selection, mirroring the Delete context-menu handler

@@ -5,7 +5,7 @@ using QuickMail.Models;
 namespace QuickMail.Services;
 
 public sealed record ScheduledMail(Guid Id, DateTimeOffset SendAtUtc, ComposeModel Message, int Attempts = 0,
-    string? LastError = null);
+    string? LastError = null, string? LocalMessageId = null);
 
 /// <summary>Durable local outbox with a short periodic dispatcher.</summary>
 public sealed class ScheduledSendService : IDisposable
@@ -14,17 +14,19 @@ public sealed class ScheduledSendService : IDisposable
     private readonly ISendMailService _sender;
     private readonly IAccountService _accounts;
     private readonly ICredentialService _credentials;
+    private readonly LocalStoreService _store;
     private readonly Timer _timer;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly CancellationTokenSource _stop = new();
 
     public ScheduledSendService(ProfileContext profile, ISendMailService sender, IAccountService accounts,
-        ICredentialService credentials)
+        ICredentialService credentials, LocalStoreService store)
     {
         _path = Path.Combine(profile.ProfileDir, "scheduled-mail.json");
         _sender = sender;
         _accounts = accounts;
         _credentials = credentials;
+        _store = store;
         _timer = new Timer(_ => _ = DispatchDueAsync(), null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(30));
     }
 
@@ -36,7 +38,17 @@ public sealed class ScheduledSendService : IDisposable
         {
             var queue = await LoadAsync();
             var id = Guid.NewGuid();
-            queue.Add(new ScheduledMail(id, sendAtUtc.ToUniversalTime(), message));
+            var localId = "scheduled-" + id.ToString("N");
+            var account = _accounts.LoadAccounts().FirstOrDefault(a => a.Id == message.AccountId)
+                ?? throw new InvalidOperationException("Sender account not found.");
+            await _store.SaveLocalMessageAsync(new MailMessageDetail
+            {
+                AccountId = message.AccountId, FolderName = "Scheduled", MessageId = localId,
+                From = account.Username, To = message.To, Cc = message.Cc, Subject = message.Subject,
+                Date = sendAtUtc, PlainTextBody = message.Body, HtmlBody = message.HtmlBody ?? string.Empty,
+                Preview = message.Body.Length <= 240 ? message.Body : message.Body[..240], IsRead = true,
+            });
+            queue.Add(new ScheduledMail(id, sendAtUtc.ToUniversalTime(), message, LocalMessageId: localId));
             await SaveAsync(queue);
             return id;
         }
@@ -58,6 +70,8 @@ public sealed class ScheduledSendService : IDisposable
                 {
                     var password = account.BackendKind == BackendKind.Pop3Smtp ? null : _credentials.GetPassword(account.Id);
                     await _sender.SendAsync(item.Message, account, password, _stop.Token);
+                    if (item.LocalMessageId is not null)
+                        await _store.DeleteLocalMessagesAsync(item.Message.AccountId, "Scheduled", [item.LocalMessageId], _stop.Token);
                     queue.Remove(item);
                     changed = true;
                 }

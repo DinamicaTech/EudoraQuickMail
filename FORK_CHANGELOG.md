@@ -10,6 +10,17 @@ before a public release.
 
 ## Unreleased
 
+- Added visible local Draft and Scheduled folders; Send Later now prompts explicitly for a local
+  date/time and keeps a local scheduled copy until successful delivery.
+- Folder unread badges now include descendants and update recursively.
+- Reduced the main toolbar to New, Reply, Reply All, and Forward; moved Empty Trash to Tools.
+- Added DeepL usage/balance lookup, repaired Argos user-install executable discovery, and condensed
+  setup output so successful `pip` diagnostics no longer overwhelm the provider window.
+- Eudora migration now imports POP3/SMTP account personalities from Eudora.ini without passwords.
+- Added a Follow Selection action to standalone message windows for a reusable second-monitor view.
+- Attachment index verification no longer runs automatically at every startup; Tools now exposes an
+  explicit Update Attachment Index action alongside full index rebuilding.
+
 - Added a dedicated compose status bar and wait cursor for grammar checks, template-name prompting
   with the first meaningful body line as default, and reliable dismissal of the HTML context menu.
 - Restored fast unprefixed full-text search, added the standalone `N` unread criterion, message

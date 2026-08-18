@@ -345,9 +345,6 @@
                 <MenuItem Header="Move to _Archive"
                           Command="{Binding ArchiveMessageCommand}"
                           InputGestureText="Ctrl+Shift+M"/>
-                <MenuItem Header="Empty _Trash"
-                          Command="{Binding EmptyTrashCommand}"
-                          InputGestureText="Ctrl+Shift+E"/>
                 <Separator/>
                 <!-- Click, not Command: the target depends on which group tree is selected, which
                      only the window can resolve (see WatchTargetSubject). Dimmed rather than
@@ -676,6 +673,11 @@
                 <MenuItem Header="_Rebuild Search Indexes…"
                           Click="MenuRebuildSearchIndexes_Click"
                           AutomationProperties.Name="Rebuild Search Indexes"/>
+                <MenuItem Header="_Update Attachment Index"
+                          Click="MenuUpdateAttachmentIndex_Click"/>
+                <MenuItem Header="Empty _Trash"
+                          Command="{Binding EmptyTrashCommand}"
+                          InputGestureText="Ctrl+Shift+E"/>
                 <Separator/>
                 <MenuItem Header="Command _Palette…"
                           Click="MenuCommandPalette_Click"
@@ -749,130 +751,9 @@
                     AutomationProperties.AcceleratorKey="Ctrl+F"
                     ToolTip="Forward (Ctrl+F)"
                     Content="Forward"/>
-            <Separator/>
-            <Button Style="{DynamicResource ToolbarButton}"
-                    Command="{Binding DeleteMessageCommand}"
-                    AutomationProperties.Name="Delete message"
-                    AutomationProperties.AcceleratorKey="Delete"
-                    ToolTip="Delete (Del)"
-                    Content="Delete"/>
-            <Separator/>
-            <Button Style="{DynamicResource ToolbarButton}"
-                    Command="{Binding RefreshCommand}"
-                    AutomationProperties.Name="Refresh"
-                    AutomationProperties.AcceleratorKey="F5"
-                    ToolTip="Refresh (F5)"
-                    Content="Refresh"/>
-            <Button x:Name="SyncRangeButton"
-                    Style="{DynamicResource ToolbarButton}"
-                    Content="{Binding SyncRangeLabel}"
-                    AutomationProperties.Name="Sync range"
-                    ToolTip="Choose how many days of mail to sync"
-                    Click="SyncRangeButton_Click">
-                <Button.ContextMenu>
-                    <ContextMenu AutomationProperties.Name="Sync range"
-                                 DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
-                        <MenuItem Header="Last _7 Days"
-                                  IsCheckable="True"
-                                  IsChecked="{Binding IsSyncDays7, Mode=OneWay}"
-                                  Command="{Binding SetSyncDaysCommand}"
-                                  CommandParameter="7"/>
-                        <MenuItem Header="Last _30 Days"
-                                  IsCheckable="True"
-                                  IsChecked="{Binding IsSyncDays30, Mode=OneWay}"
-                                  Command="{Binding SetSyncDaysCommand}"
-                                  CommandParameter="30"/>
-                        <MenuItem Header="Last _6 Months (180 Days)"
-                                  IsCheckable="True"
-                                  IsChecked="{Binding IsSyncDays180, Mode=OneWay}"
-                                  Command="{Binding SetSyncDaysCommand}"
-                                  CommandParameter="180"/>
-                        <MenuItem Header="Last _1 Year (365 Days)"
-                                  IsCheckable="True"
-                                  IsChecked="{Binding IsSyncDays365, Mode=OneWay}"
-                                  Command="{Binding SetSyncDaysCommand}"
-                                  CommandParameter="365"/>
-                        <Separator/>
-                        <MenuItem Header="_All Mail"
-                                  IsCheckable="True"
-                                  IsChecked="{Binding IsSyncDaysAll, Mode=OneWay}"
-                                  Command="{Binding SetSyncDaysCommand}"
-                                  CommandParameter="0"/>
-                    </ContextMenu>
-                </Button.ContextMenu>
-            </Button>
-            <Separator/>
-            <Button x:Name="ViewModeButton"
-                    Style="{DynamicResource ToolbarButton}"
-                    Content="{Binding ViewModeLabel}"
-                    AutomationProperties.Name="View mode"
-                    ToolTip="Select message view mode (Ctrl+Shift+V)"
-                    Click="ViewModeButton_Click">
-                <Button.ContextMenu>
-                    <ContextMenu AutomationProperties.Name="View mode"
-                                 DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
-                        <MenuItem Header="_Messages"
-                                  Visibility="{Binding IsCalendarView, Converter={StaticResource InverseBoolToVisibilityConverter}}"
-                                  IsCheckable="True"
-                                  IsChecked="{Binding IsMessagesView, Mode=OneWay}"
-                                  Command="{Binding SetViewModeCommand}"
-                                  CommandParameter="Messages"/>
-                        <MenuItem Header="_Conversations"
-                                  Visibility="{Binding IsCalendarView, Converter={StaticResource InverseBoolToVisibilityConverter}}"
-                                  IsCheckable="True"
-                                  IsChecked="{Binding IsConversationsView, Mode=OneWay}"
-                                  Command="{Binding SetViewModeCommand}"
-                                  CommandParameter="Conversations"/>
-                        <MenuItem Header="_From"
-                                  Visibility="{Binding IsCalendarView, Converter={StaticResource InverseBoolToVisibilityConverter}}"
-                                  IsCheckable="True"
-                                  IsChecked="{Binding IsFromView, Mode=OneWay}"
-                                  Command="{Binding SetViewModeCommand}"
-                                  CommandParameter="From"/>
-                        <MenuItem Header="_To"
-                                  Visibility="{Binding IsCalendarView, Converter={StaticResource InverseBoolToVisibilityConverter}}"
-                                  IsCheckable="True"
-                                  IsChecked="{Binding IsToView, Mode=OneWay}"
-                                  Command="{Binding SetViewModeCommand}"
-                                  CommandParameter="To"/>
-                        <MenuItem Header="_Agenda"
-                                  Visibility="{Binding IsCalendarView, Converter={StaticResource BoolToVisibilityConverter}}"
-                                  IsCheckable="True"
-                                  IsChecked="{Binding CalendarVm.IsAgendaView, Mode=OneWay}"
-                                  Command="{Binding CalendarVm.ShowAgendaCommand}"/>
-                        <MenuItem Header="_Day"
-                                  Visibility="{Binding IsCalendarView, Converter={StaticResource BoolToVisibilityConverter}}"
-                                  IsCheckable="True"
-                                  IsChecked="{Binding CalendarVm.IsDayView, Mode=OneWay}"
-                                  Command="{Binding CalendarVm.ShowDayCommand}"/>
-                        <MenuItem Header="_Week"
-                                  Visibility="{Binding IsCalendarView, Converter={StaticResource BoolToVisibilityConverter}}"
-                                  IsCheckable="True"
-                                  IsChecked="{Binding CalendarVm.IsWeekView, Mode=OneWay}"
-                                  Command="{Binding CalendarVm.ShowWeekCommand}"/>
-                    </ContextMenu>
-                </Button.ContextMenu>
-            </Button>
-            <Separator/>
-            <Button Style="{DynamicResource ToolbarButton}"
-                    Command="{Binding EmptyTrashCommand}"
-                    AutomationProperties.Name="Empty Trash"
-                    AutomationProperties.AcceleratorKey="Ctrl+Shift+E"
-                    ToolTip="Empty Trash (Ctrl+Shift+E)"
-                    Content="Empty Trash"/>
-            <Separator/>
-            <Button Style="{DynamicResource ToolbarButton}"
-                    Command="{Binding ManageAccountsCommand}"
-                    AutomationProperties.Name="Manage email accounts"
-                    ToolTip="Manage email accounts"
-                    Content="Accounts"/>
-            <Separator/>
-            <Button Style="{DynamicResource ToolbarButton}"
-                    Command="{Binding ViewUserGuideCommand}"
-                    AutomationProperties.Name="View User Guide"
-                    AutomationProperties.AcceleratorKey="F1"
-                    ToolTip="View User Guide (F1)"
-                    Content="User Guide"/>
+            <!-- Retained as hidden command anchors for legacy keyboard/context handlers. -->
+            <Button x:Name="SyncRangeButton" Visibility="Collapsed"/>
+            <Button x:Name="ViewModeButton" Visibility="Collapsed"/>
         </ToolBar>
 
         <!-- ── Three-pane layout (Outlook-style): Accounts+Folders left | Messages right ── -->

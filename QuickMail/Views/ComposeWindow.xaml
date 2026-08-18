@@ -214,9 +214,6 @@
                 <ComboBoxItem Content="HTML"/>
             </ComboBox>
             <WrapPanel DockPanel.Dock="Right" HorizontalAlignment="Right">
-                <TextBox Width="125" Margin="6,2,0,0" VerticalContentAlignment="Center"
-                         Text="{Binding ScheduledForLocal, UpdateSourceTrigger=PropertyChanged}"
-                         AutomationProperties.Name="Scheduled send local date and time"/>
                 <Button Content="Send later" Command="{Binding ScheduleSendCommand}"
                         AutomationProperties.Name="Schedule message" MinWidth="90" Margin="6,2,0,0"/>
                 <Button x:Name="SendButton"

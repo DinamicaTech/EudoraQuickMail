@@ -311,7 +311,7 @@ public partial class App : Application
             // Router registration runs via mainVm.RegisterAccountBackend (set below), which also
             // covers accounts added at runtime through RefreshAccountList.
             var accounts = accountService.LoadAccounts();
-            if (!probeMode) ScheduledSender = new ScheduledSendService(profile, effectiveSmtp, accountService, credentialService);
+            if (!probeMode) ScheduledSender = new ScheduledSendService(profile, effectiveSmtp, accountService, credentialService, localStore);
 
             // One-time immutable-id cache rebuild (#366): clear cached mail for Graph accounts so the
             // next sync repopulates with immutable ids (mutable and immutable ids must not be mixed).
@@ -515,33 +515,6 @@ public partial class App : Application
                 mainWindow.Dispatcher.BeginInvoke(() => mainWindow.HandleNotificationActivation(act));
 
             mainWindow.Show();
-
-            if (!onlineMode && !probeMode && startupCfg.IndexAttachmentContents)
-            {
-                var attachmentIndexer = new AttachmentIndexingService(localStore, configService);
-                attachmentIndexer.Progress += (current, total, name) =>
-                {
-                    if (current != 1 && current % 25 != 0 && current != total) return;
-                    _ = Dispatcher.BeginInvoke(() =>
-                    {
-                        mainVm.IsStatusHighlighted = true;
-                        mainVm.StatusText = $"Indexing attachment {current:N0}/{total:N0}: {name}";
-                    });
-                };
-                _ = Task.Run(async () =>
-                {
-                    try
-                    {
-                        await attachmentIndexer.IndexAllAsync();
-                        _ = Dispatcher.BeginInvoke(() =>
-                        {
-                            mainVm.IsStatusHighlighted = true;
-                            mainVm.StatusText = "Attachment content indexing complete.";
-                        });
-                    }
-                    catch (Exception ex) { LogService.Log("Attachment background indexing", ex); }
-                });
-            }
 
             // A second launch of the same profile signals this handle instead of starting
             // another process; restore the window (and drop the tray icon) exactly as the

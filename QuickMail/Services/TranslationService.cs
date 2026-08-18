@@ -93,6 +93,25 @@ public sealed class TranslationService
         return $"Connection successful. Test result: {translated}";
     }
 
+    public async Task<string> GetDeepLUsageAsync(CancellationToken token = default)
+    {
+        var settings = _store.Load();
+        var key = _store.GetDeepLKey(settings);
+        if (string.IsNullOrWhiteSpace(key)) throw new InvalidOperationException("No DeepL API key is configured.");
+        var host = key.EndsWith(":fx", StringComparison.OrdinalIgnoreCase)
+            ? "https://api-free.deepl.com/v2/usage" : "https://api.deepl.com/v2/usage";
+        using var request = new HttpRequestMessage(HttpMethod.Get, host);
+        request.Headers.Authorization = new AuthenticationHeaderValue("DeepL-Auth-Key", key);
+        using var response = await Http.SendAsync(request, token);
+        var json = await response.Content.ReadAsStringAsync(token);
+        if (!response.IsSuccessStatusCode) throw new InvalidOperationException($"DeepL usage query failed: {json}");
+        using var document = JsonDocument.Parse(json);
+        var root = document.RootElement;
+        var used = root.GetProperty("character_count").GetInt64();
+        var limit = root.GetProperty("character_limit").GetInt64();
+        return $"DeepL usage: {used:N0} of {limit:N0} characters; {Math.Max(0, limit - used):N0} available.";
+    }
+
     private async Task<string> TranslateWithArgosAsync(string text, string source, string target, CancellationToken token)
     {
         var settings = _store.Load();

@@ -35,7 +35,10 @@ public static class FolderTreeBuilder
                 IsSharedAccount = account.IsShared,  // #31: "shared mailbox" in the accessible name
             };
             foreach (var root in folderRoots)
+            {
+                root.Parent = accountNode;
                 accountNode.Children.Add(root);
+            }
             return [accountNode];
         }
 
@@ -97,7 +100,10 @@ public static class FolderTreeBuilder
             // A folder roots out when it has no parent, or its parent isn't part of this set —
             // top-level Graph folders point at the hidden msgfolderroot, which we never fetch.
             if (f.ParentId != null && byId.TryGetValue(f.ParentId, out var parent))
+            {
+                node.Parent = parent;
                 parent.Children.Add(node);
+            }
             else
                 roots.Add(node);
         }
@@ -134,7 +140,10 @@ public static class FolderTreeBuilder
             {
                 var parentPath = string.Join(sep, parts[..i]);
                 if (byPath.TryGetValue(parentPath, out var parent))
+                {
+                    node.Parent = parent;
                     parent.Children.Add(node);
+                }
                 else
                     roots.Add(node); // orphan — treat as root
             }
@@ -159,10 +168,11 @@ public static class FolderTreeBuilder
         return f.Kind switch
         {
             SpecialFolderKind.Drafts => 1,
-            SpecialFolderKind.Sent   => 2,
-            SpecialFolderKind.Trash  => 3,
-            SpecialFolderKind.Junk   => 4,
-            _ => 5,
+            SpecialFolderKind.Scheduled => 2,
+            SpecialFolderKind.Sent   => 3,
+            SpecialFolderKind.Trash  => 4,
+            SpecialFolderKind.Junk   => 5,
+            _ => 6,
         };
     }
 

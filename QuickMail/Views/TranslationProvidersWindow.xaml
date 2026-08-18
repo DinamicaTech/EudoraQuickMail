@@ -37,6 +37,7 @@
             <Button Content="Save key" Width="95" Click="SaveKey_Click"/>
             <Button Content="Remove key" Width="100" Margin="8,0,0,0" Click="RemoveKey_Click"/>
             <Button Content="Test DeepL" Width="100" Margin="8,0,0,0" Click="TestDeepL_Click"/>
+            <Button Content="Check usage" Width="105" Margin="8,0,0,0" Click="CheckDeepLUsage_Click"/>
           </StackPanel>
         </StackPanel>
       </TabItem>

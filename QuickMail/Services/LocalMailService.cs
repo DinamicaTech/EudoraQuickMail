@@ -15,17 +15,24 @@ public sealed class LocalMailService : IMailService
     public async Task ConnectAsync(AccountModel account, string? password = null, CancellationToken ct = default)
     {
         _accounts[account.Id] = account;
-        if (account.BackendKind == BackendKind.Pop3Smtp && (await GetFoldersAsync(account.Id, ct)).Count == 0)
+        if (account.BackendKind == BackendKind.Pop3Smtp)
         {
-            var root = "Mailbox";
-            await _store.SaveFoldersAsync(account.Id,
-            [
-                new() { AccountId = account.Id, FullName = root, DisplayName = root, IsContainer = true },
-                new() { AccountId = account.Id, FullName = "Inbox", DisplayName = "Inbox", ParentId = root, Kind = SpecialFolderKind.Inbox },
-                new() { AccountId = account.Id, FullName = "Sent", DisplayName = "Sent", ParentId = root, Kind = SpecialFolderKind.Sent },
-                new() { AccountId = account.Id, FullName = "Drafts", DisplayName = "Drafts", ParentId = root, Kind = SpecialFolderKind.Drafts },
-                new() { AccountId = account.Id, FullName = "Trash", DisplayName = "Trash", ParentId = root, Kind = SpecialFolderKind.Trash },
-            ]);
+            var folders = await GetFoldersAsync(account.Id, ct);
+            var root = folders.FirstOrDefault(f => f.IsContainer)?.FullName ?? "Mailbox";
+            if (folders.Count == 0) folders.Add(new() { AccountId = account.Id, FullName = root, DisplayName = root, IsContainer = true });
+            AddSpecial(SpecialFolderKind.Inbox, "Inbox");
+            AddSpecial(SpecialFolderKind.Drafts, "Draft");
+            AddSpecial(SpecialFolderKind.Scheduled, "Scheduled");
+            AddSpecial(SpecialFolderKind.Sent, "Sent");
+            AddSpecial(SpecialFolderKind.Trash, "Trash");
+            await _store.SaveFoldersAsync(account.Id, folders);
+
+            void AddSpecial(SpecialFolderKind kind, string name)
+            {
+                if (folders.Any(f => f.Kind == kind)) return;
+                folders.Add(new() { AccountId = account.Id, FullName = name, DisplayName = name,
+                    ParentId = root, Kind = kind, ExcludeFromAllMail = kind is SpecialFolderKind.Drafts or SpecialFolderKind.Scheduled or SpecialFolderKind.Sent or SpecialFolderKind.Trash });
+            }
         }
     }
     public Task DisconnectAsync(Guid accountId, CancellationToken ct = default) => Task.CompletedTask;

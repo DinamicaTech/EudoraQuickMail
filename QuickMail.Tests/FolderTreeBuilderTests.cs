@@ -125,4 +125,19 @@ public class FolderTreeBuilderTests
         var sub = Assert.Single(inbox.Children);
         Assert.Equal("Sub", sub.Folder!.DisplayName);
     }
+
+    [Fact]
+    public void Build_ParentBadgeIncludesUnreadDescendants()
+    {
+        var flat = new List<MailFolderModel>
+        {
+            new() { FullName = "Clients", DisplayName = "Clients", UnreadCount = 1 },
+            new() { FullName = "Clients/Acme", DisplayName = "Acme", UnreadCount = 3 },
+        };
+        var parent = Assert.Single(FolderTreeBuilder.Build(flat));
+        Assert.Equal("(4)", parent.UnreadDisplay);
+        parent.Children[0].Folder!.UnreadCount = 2;
+        parent.Children[0].NotifyUnreadChanged();
+        Assert.Equal("(3)", parent.UnreadDisplay);
+    }
 }

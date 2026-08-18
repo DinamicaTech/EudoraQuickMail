@@ -476,8 +476,9 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
     {
         if (string.IsNullOrWhiteSpace(To)) { SetStatusOutcome("Please enter at least one recipient."); return; }
         if (SenderAccount is not { } account) { SetStatusOutcome("Please select a sender account."); return; }
-        if (!DateTime.TryParse(ScheduledForLocal, out var local) || local <= DateTime.Now)
-        { SetStatusOutcome("Enter a future local date and time for scheduled sending."); return; }
+        var requested = PromptScheduleTimeRequested?.Invoke(DateTime.Now.AddMinutes(10));
+        if (requested is not { } local) return;
+        if (local <= DateTime.Now) { SetStatusOutcome("Enter a future local date and time for scheduled sending."); return; }
         if (System.Windows.Application.Current is not App { ScheduledSender: { } scheduler })
         { SetStatusOutcome("Scheduled sending is unavailable."); return; }
         var compose = BuildComposeModel(account.Id);
@@ -674,6 +675,7 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
 
     /// <summary>View-owned prompt used to name a template before it is persisted.</summary>
     public Func<string, string?>? PromptTemplateNameRequested { get; set; }
+    public Func<DateTime, DateTime?>? PromptScheduleTimeRequested { get; set; }
 
     [RelayCommand]
     private async Task AddAttachmentsAsync()

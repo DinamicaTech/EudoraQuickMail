@@ -35,7 +35,14 @@ public partial class TranslationProvidersWindow : Window
     private async void InstallArgos_Click(object sender, RoutedEventArgs e)
     {
         StatusText.Text = "Installing Argos Translate…";
-        await RunSetupAsync("py", "-m", "pip", "install", "--user", "--upgrade", "argostranslate");
+        if (!await RunSetupAsync("py", "-m", "pip", "install", "--user", "--upgrade", "argostranslate")) return;
+        var scripts = await FindPythonUserScriptsAsync();
+        if (scripts is not null)
+        {
+            var command = Path.Combine(scripts, "argos-translate.exe");
+            if (File.Exists(command)) { ArgosCommandBox.Text = command; PersistGeneral(); }
+        }
+        StatusText.Text = "Argos Translate runtime installed. You can now install the language models.";
     }
 
     private async void InstallModels_Click(object sender, RoutedEventArgs e)
@@ -65,18 +72,34 @@ public partial class TranslationProvidersWindow : Window
             var output = process.StandardOutput.ReadToEndAsync();
             var error = process.StandardError.ReadToEndAsync();
             await process.WaitForExitAsync();
-            var message = process.ExitCode == 0 ? (await output).Trim() : (await error).Trim();
+            var message = process.ExitCode == 0 ? "Operation completed." : (await error).Trim();
             StatusText.Text = string.IsNullOrWhiteSpace(message)
                 ? (process.ExitCode == 0 ? "Operation completed." : "Operation failed.") : message;
             return process.ExitCode == 0;
         }
         catch (Exception ex) { StatusText.Text = $"Setup failed: {ex.Message}"; return false; }
     }
+    private static async Task<string?> FindPythonUserScriptsAsync()
+    {
+        var psi = new ProcessStartInfo("py") { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true };
+        psi.ArgumentList.Add("-c"); psi.ArgumentList.Add("import sysconfig;print(sysconfig.get_path('scripts','nt_user'))");
+        using var process = Process.Start(psi); if (process is null) return null;
+        var result = (await process.StandardOutput.ReadToEndAsync()).Trim(); await process.WaitForExitAsync();
+        return process.ExitCode == 0 && result.Length > 0 ? result : null;
+    }
     private async void TestDeepL_Click(object sender, RoutedEventArgs e)
     {
         if (DeepLKeyBox.Password != "••••••••" && !string.IsNullOrWhiteSpace(DeepLKeyBox.Password))
         { _store.SetDeepLKey(_settings, DeepLKeyBox.Password); _store.Save(_settings); }
         await TestAsync(TranslationProviderKind.DeepL);
+    }
+    private async void CheckDeepLUsage_Click(object sender, RoutedEventArgs e)
+    {
+        if (DeepLKeyBox.Password != "••••••••" && !string.IsNullOrWhiteSpace(DeepLKeyBox.Password))
+        { _store.SetDeepLKey(_settings, DeepLKeyBox.Password); _store.Save(_settings); }
+        StatusText.Text = "Checking DeepL usage…";
+        try { StatusText.Text = await _service.GetDeepLUsageAsync(); }
+        catch (Exception ex) { StatusText.Text = ex.Message; }
     }
     private async Task TestAsync(TranslationProviderKind provider)
     {
