@@ -14,6 +14,7 @@
     let quickMailSelectionBookmark;
     let preservedHeadStyles = '';
     let quickMailLanguage = '';
+    let quickMailSpellTimer;
 
     const decodeUtf8Base64 = value => {
       const bytes = Uint8Array.from(atob(value), c => c.charCodeAt(0));
@@ -22,11 +23,100 @@
 
     const emitContent = () => {
       if (!quickMailEditor) return;
-      const body = quickMailEditor.getContent();
+      const clone = quickMailEditor.getBody().cloneNode(true);
+      clone.querySelectorAll('[data-quickmail-spelling]').forEach(span => span.replaceWith(...span.childNodes));
+      clone.querySelectorAll('[data-quickmail-menu]').forEach(menu => menu.remove());
+      const body = clone.innerHTML;
       const html = '<!doctype html><html><head><meta charset="utf-8">' +
         preservedHeadStyles + '</head><body>' + body + '</body></html>';
       const plain = quickMailEditor.getContent({ format: 'text' });
       chrome.webview.postMessage(JSON.stringify({ html, plain }));
+    };
+
+    const requestCatalanProofing = () => {
+      if (!quickMailEditor || quickMailLanguage !== 'ca-ES') return;
+      clearTimeout(quickMailSpellTimer);
+      quickMailSpellTimer = setTimeout(() => {
+        const body = quickMailEditor.getBody();
+        const words = new Set();
+        const walker = body.ownerDocument.createTreeWalker(body, NodeFilter.SHOW_TEXT, {
+          acceptNode: node => node.parentElement?.closest('[data-quickmail-menu]')
+            ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT
+        });
+        while (walker.nextNode())
+          for (const match of walker.currentNode.data.matchAll(/[\p{L}·'’\-]+/gu)) words.add(match[0]);
+        chrome.webview.postMessage(JSON.stringify({ type: 'catalan-spell', words: [...words] }));
+      }, 450);
+    };
+
+    const closeQuickMailMenu = () => quickMailEditor?.getBody()
+      .querySelectorAll('[data-quickmail-menu]').forEach(menu => menu.remove());
+
+    const addMenuButton = (menu, label, action) => {
+      const item = menu.ownerDocument.createElement('button');
+      item.type = 'button'; item.textContent = label;
+      item.style.cssText = 'display:block;width:100%;border:0;background:transparent;padding:6px 18px;text-align:left;color:#111';
+      item.onmouseenter = () => item.style.background = '#e8f0fe';
+      item.onmouseleave = () => item.style.background = 'transparent';
+      item.onmousedown = event => { event.preventDefault(); action(); closeQuickMailMenu(); };
+      menu.appendChild(item);
+    };
+
+    const openQuickMailMenu = event => {
+      const selected = quickMailEditor.selection.getContent({ format: 'text' });
+      const spelling = event.target.closest?.('[data-quickmail-spelling]');
+      if (!spelling && !selected.trim()) return;
+      event.preventDefault(); closeQuickMailMenu();
+      quickMailSelectionBookmark = quickMailEditor.selection.getBookmark(2, true);
+      const doc = quickMailEditor.getDoc();
+      const menu = doc.createElement('div');
+      menu.dataset.quickmailMenu = 'true'; menu.contentEditable = 'false'; menu.setAttribute('data-mce-bogus', 'all');
+      menu.style.cssText = `position:fixed;z-index:2147483647;left:${event.clientX}px;top:${event.clientY}px;min-width:180px;background:#fff;border:1px solid #999;box-shadow:0 3px 12px #0004;padding:4px 0;font:13px Segoe UI,sans-serif`;
+      if (spelling) {
+        const suggestions = JSON.parse(spelling.dataset.suggestions || '[]');
+        suggestions.forEach(value => addMenuButton(menu, value, () => {
+          spelling.replaceWith(spelling.ownerDocument.createTextNode(value)); emitContent(); requestCatalanProofing();
+        }));
+        if (suggestions.length) menu.appendChild(doc.createElement('hr'));
+        addMenuButton(menu, 'Add to Dictionary', () => chrome.webview.postMessage(JSON.stringify({
+          type: 'add-dictionary', word: spelling.textContent || ''
+        })));
+      }
+      if (selected.trim()) {
+        if (spelling) menu.appendChild(doc.createElement('hr'));
+        const title = doc.createElement('div'); title.textContent = 'Translate';
+        title.style.cssText = 'padding:5px 18px;color:#666;font-weight:600'; menu.appendChild(title);
+        [['English','en'],['Spanish','es'],['Catalan','ca']].forEach(([label,target]) =>
+          addMenuButton(menu, `Translate → ${label}`, () => chrome.webview.postMessage(JSON.stringify({
+            type: 'translate-selection', text: selected, target
+          }))));
+      }
+      quickMailEditor.getBody().appendChild(menu);
+    };
+
+    window.quickmailApplyCatalanProofing = errors => {
+      if (!quickMailEditor || quickMailLanguage !== 'ca-ES') return;
+      const body = quickMailEditor.getBody();
+      const bookmark = quickMailEditor.selection.getBookmark(2, true);
+      body.querySelectorAll('[data-quickmail-spelling]').forEach(span => span.replaceWith(...span.childNodes));
+      const lookup = new Map(Object.entries(errors).map(([word, suggestions]) => [word.toLocaleLowerCase('ca'), suggestions]));
+      const walker = body.ownerDocument.createTreeWalker(body, NodeFilter.SHOW_TEXT);
+      const nodes = []; while (walker.nextNode()) nodes.push(walker.currentNode);
+      for (const node of nodes) {
+        if (node.parentElement?.closest('[data-quickmail-menu]')) continue;
+        const fragment = body.ownerDocument.createDocumentFragment(); let last = 0; let changed = false;
+        for (const match of node.data.matchAll(/[\p{L}·'’\-]+/gu)) {
+          const suggestions = lookup.get(match[0].toLocaleLowerCase('ca'));
+          if (!suggestions) continue;
+          fragment.append(node.data.slice(last, match.index));
+          const span = body.ownerDocument.createElement('span'); span.dataset.quickmailSpelling = 'true';
+          span.dataset.suggestions = JSON.stringify(suggestions); span.textContent = match[0];
+          span.style.textDecoration = 'underline wavy #d93025'; fragment.append(span);
+          last = match.index + match[0].length; changed = true;
+        }
+        if (changed) { fragment.append(node.data.slice(last)); node.replaceWith(fragment); }
+      }
+      try { quickMailEditor.selection.moveToBookmark(bookmark); } catch { /* content may have changed */ }
     };
 
     window.quickmailLoad = sourceBase64 => {
@@ -75,8 +165,10 @@
             editor.getBody().spellcheck = !!quickMailLanguage;
             editor.focus();
             emitContent();
+            editor.getBody().addEventListener('contextmenu', openQuickMailMenu);
+            requestCatalanProofing();
           });
-          editor.on('input change undo redo SetContent', emitContent);
+          editor.on('input change undo redo SetContent', () => { emitContent(); requestCatalanProofing(); });
         }
       });
     };
@@ -122,6 +214,9 @@
       body.setAttribute('spellcheck', language ? 'true' : 'false');
       body.spellcheck = !!language;
       body.focus();
+      closeQuickMailMenu();
+      if (language === 'ca-ES') requestCatalanProofing();
+      else body.querySelectorAll('[data-quickmail-spelling]').forEach(span => span.replaceWith(...span.childNodes));
     };
   </script>
 </body>

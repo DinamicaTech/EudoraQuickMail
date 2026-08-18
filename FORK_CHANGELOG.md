@@ -61,9 +61,13 @@ before a public release.
   Spanish/Catalan/English detection after the first five words of a new message.
 - Isolated the HTML editor into per-language WebView2 profiles so selecting a proofing language
   changes Chromium's dictionary and context menu instead of merely changing the HTML `lang` tag.
+- Added reliable offline Catalan proofing with Softcatalà's Hunspell dictionary, wavy error
+  underlining, contextual suggestions, and integration with QuickMail's personal dictionary.
 - Added selected-text translation while composing, with a local Argos Translate provider and an
   optional DeepL provider. Provider configuration includes setup/testing, local model management,
   a persistent default, privacy guidance, and Windows DPAPI protection for the DeepL API key.
+- Added `Translate → English / Spanish / Catalan` to the HTML compose contextual menu; it uses the
+  active correction language as the source and replaces only the selected text.
 - Fixed asynchronous draft-close re-entry and other composition focus/keyboard issues.
 
 ### Performance and reliability
@@ -78,5 +82,9 @@ before a public release.
 
 - QuickMail original project: Copyright (c) 2026 Kelly Ford, licensed under MIT.
 - HugeRTE is redistributed under its own license in `QuickMail/Assets/HugeRte`.
+- The Catalan Hunspell dictionary is from Softcatalà's `catalan-dict-tools` v3.0.9 and is
+  redistributed under its LGPL-2.1/GPL-2.0 dual license in `QuickMail/Assets/Dictionaries/Catalan`.
+- WeCantSpell.Hunspell is used to read that dictionary; its Hunspell tri-license notice is shipped
+  in the same directory.
 
 No user mail databases, credentials, logs, generated executables, or local profiles belong in Git.

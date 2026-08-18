@@ -76,6 +76,10 @@
     <!-- HugeRTE is MIT-licensed and self-hosted: no CDN, API key, telemetry, or runtime fee. -->
     <Content Include="Assets\HugeRte\**\*" CopyToOutputDirectory="PreserveNewest"
              CopyToPublishDirectory="PreserveNewest" />
+    <!-- Offline Catalan proofing dictionary from Softcatala/catalan-dict-tools v3.0.9.
+         The distributed dictionary is dual-licensed LGPL-2.1/GPL-2.0; its notices ship beside it. -->
+    <Content Include="Assets\Dictionaries\Catalan\**\*" CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>
@@ -113,6 +117,7 @@
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
     <PackageReference Include="Velopack" Version="1.2.0" />
+    <PackageReference Include="WeCantSpell.Hunspell" Version="7.0.1" />
   </ItemGroup>
 
   <ItemGroup>

@@ -66,6 +66,7 @@ public partial class ComposeWindow : Window
     private readonly ITemplateService   _templateService;
     private readonly IConfigService     _configService;
     private readonly ICustomDictionaryService? _customDictionary;
+    private readonly CatalanSpellCheckService _catalanSpellCheck;
     private readonly IThemeService? _themeService;
     private readonly CommandRegistry    _registry = new();
     private TokenizedAddressBox? _activeAddressControl;
@@ -133,6 +134,45 @@ public partial class ComposeWindow : Window
     private void MenuTranslationProviders_Click(object sender, RoutedEventArgs e) =>
         new TranslationProvidersWindow(TranslationProfile) { Owner = this }.ShowDialog();
 
+    private async Task TranslateHtmlContextSelectionAsync(string selected, string target)
+    {
+        if (string.IsNullOrWhiteSpace(selected)) return;
+        var source = _vm.SpellLanguage switch
+        {
+            "es-ES" => "es",
+            "ca-ES" => "ca",
+            "en-US" => "en",
+            _ => string.Empty,
+        };
+        if (string.IsNullOrEmpty(source))
+        {
+            MessageBox.Show(this, "Select a correction language before translating.", "Translate Selection",
+                MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        try
+        {
+            _vm.StatusText = "Translating selected text…";
+            var store = new TranslationSettingsStore(TranslationProfile);
+            var provider = store.Load().DefaultProvider;
+            // DeepL does not expose Catalan; use the installed offline provider whenever
+            // Catalan is either side of the requested translation.
+            if (source == "ca" || target == "ca") provider = TranslationProviderKind.Argos;
+            var translated = await new TranslationService(store).TranslateAsync(selected, source, target, provider);
+            if (HtmlBodyEditor.CoreWebView2 is not null)
+                await HtmlBodyEditor.CoreWebView2.ExecuteScriptAsync(
+                    $"window.quickmailReplaceSelection({JsonSerializer.Serialize(translated)})");
+            _vm.StatusText = "Selected text translated.";
+        }
+        catch (Exception ex)
+        {
+            LogService.Log("Compose context translation failed", ex);
+            _vm.StatusText = "Translation failed.";
+            MessageBox.Show(this, ex.Message, "Translate Selection", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
     // Last block type announced while navigating in HTML mode (e.g. "Heading 2", "Normal text").
     // Used to suppress repeat announcements when the caret stays on the same paragraph type.
     private string? _lastAnnouncedBlockType;
@@ -163,6 +203,7 @@ public partial class ComposeWindow : Window
         _templateService = templateService;
         _configService = configService;
         _customDictionary = customDictionary;
+        _catalanSpellCheck = new CatalanSpellCheckService(customDictionary);
         _themeService = themeService;
         InitializeComponent();
         DataContext = vm;
@@ -1773,12 +1814,36 @@ public partial class ComposeWindow : Window
                     args.Cancel = true;
             };
             HtmlBodyEditor.CoreWebView2.NewWindowRequested += (_, args) => args.Handled = true;
-            HtmlBodyEditor.CoreWebView2.WebMessageReceived += (_, args) =>
+            HtmlBodyEditor.CoreWebView2.WebMessageReceived += async (_, args) =>
             {
                 try
                 {
                     using var json = JsonDocument.Parse(args.TryGetWebMessageAsString());
                     var root = json.RootElement;
+                    if (root.TryGetProperty("type", out var messageType))
+                    {
+                        switch (messageType.GetString())
+                        {
+                            case "catalan-spell":
+                                var words = root.GetProperty("words").EnumerateArray()
+                                    .Select(value => value.GetString() ?? string.Empty).ToArray();
+                                var errors = await Task.Run(() => _catalanSpellCheck.FindMisspellings(words));
+                                if (HtmlBodyEditor.CoreWebView2 is not null)
+                                    await HtmlBodyEditor.CoreWebView2.ExecuteScriptAsync(
+                                        $"window.quickmailApplyCatalanProofing({JsonSerializer.Serialize(errors)})");
+                                return;
+                            case "add-dictionary":
+                                if (_customDictionary?.AddWord(root.GetProperty("word").GetString() ?? string.Empty) == true
+                                    && HtmlBodyEditor.CoreWebView2 is not null)
+                                    await HtmlBodyEditor.CoreWebView2.ExecuteScriptAsync("window.quickmailSetLanguage('ca-ES')");
+                                return;
+                            case "translate-selection":
+                                await TranslateHtmlContextSelectionAsync(
+                                    root.GetProperty("text").GetString() ?? string.Empty,
+                                    root.GetProperty("target").GetString() ?? string.Empty);
+                                return;
+                        }
+                    }
                     _htmlSnapshot = new RichBodySnapshot(
                         root.GetProperty("html").GetString() ?? string.Empty,
                         root.GetProperty("plain").GetString() ?? string.Empty,
