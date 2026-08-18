@@ -9,6 +9,7 @@ public partial class QuickSearchHelpWindow : Window
         InitializeComponent();
         DataContext = new[]
         {
+            new Row("(none)", "From, To, Cc, Subject and message body", "chocolate"),
             new Row("T", "To recipients", "T:person@example.com"),
             new Row("F", "From sender", "F:@paypal.es"),
             new Row("C", "Cc recipients", "C:accounts"),
@@ -18,6 +19,7 @@ public partial class QuickSearchHelpWindow : Window
             new Row("AN", "Attachment name or internal path", "AN:invoice?.pdf"),
             new Row("AC", "Extracted attachment content", "AC:contract"),
             new Row("D", "Message date", "D=03/2015"),
+            new Row("N", "Unread messages (no operator or value)", "N"),
         };
     }
     private sealed record Row(string Prefix, string Description, string Example);

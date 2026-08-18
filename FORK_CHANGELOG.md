@@ -14,6 +14,8 @@ before a public release.
   with the first meaningful body line as default, and reliable dismissal of the HTML context menu.
 - Restored fast unprefixed full-text search, added the standalone `N` unread criterion, message
   read/unread context actions, and a folder column in the message grid.
+- Documented unprefixed and unread quick searches, fixed read/unread actions appearing in the wrong
+  context menu, and removed the unread accent bar that shifted grid rows out of column alignment.
 
 ### Local-first mail
 

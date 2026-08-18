@@ -9,12 +9,12 @@
     <ScrollViewer VerticalScrollBarVisibility="Auto">
       <StackPanel>
         <TextBlock FontSize="{DynamicResource Theme.FontSizeHeader}" FontWeight="SemiBold" Text="Quick search syntax" Margin="0,0,0,10"/>
-        <TextBlock TextWrapping="Wrap" Text="Separate criteria with semicolons; they are combined with AND. Put alternatives inside parentheses, separated with semicolons, to combine them with OR. Use double quotes to search punctuation such as a literal semicolon without interpreting it as syntax."/>
+        <TextBlock TextWrapping="Wrap" Text="Text without a prefix searches From, To, Cc, Subject and message body. Separate criteria with semicolons; they are combined with AND. Put alternatives inside parentheses, separated with semicolons, to combine them with OR. Use double quotes to search punctuation such as a literal semicolon without interpreting it as syntax."/>
         <ItemsControl Margin="0,12" ItemsSource="{Binding}">
           <ItemsControl.ItemTemplate><DataTemplate><Grid Margin="0,3"><Grid.ColumnDefinitions><ColumnDefinition Width="65"/><ColumnDefinition Width="*"/><ColumnDefinition Width="220"/></Grid.ColumnDefinitions><TextBlock Text="{Binding Prefix}" FontWeight="SemiBold"/><TextBlock Grid.Column="1" Text="{Binding Description}"/><TextBlock Grid.Column="2" Text="{Binding Example}" FontFamily="Consolas"/></Grid></DataTemplate></ItemsControl.ItemTemplate>
         </ItemsControl>
         <TextBlock FontWeight="SemiBold" Text="Examples"/>
-        <TextBlock FontFamily="Consolas" TextWrapping="Wrap" Margin="0,5,0,0"><Run Text="T:(@dinamica;@google);A#=2;D=3/5/2026"/><LineBreak/><Run Text="F:paypal;AN:invoice;D=03/2015"/><LineBreak/><Run Text="AC:cho?olate;D&gt;2025"/><LineBreak/><Run Text="&quot;text containing ; a semicolon&quot;"/></TextBlock>
+        <TextBlock FontFamily="Consolas" TextWrapping="Wrap" Margin="0,5,0,0"><Run Text="chocolate;D&gt;2022"/><LineBreak/><Run Text="N;S:invoice"/><LineBreak/><Run Text="T:(@dinamica;@google);A#=2;D=3/5/2026"/><LineBreak/><Run Text="F:paypal;AN:invoice;D=03/2015"/><LineBreak/><Run Text="AC:cho?olate;D&gt;2025"/><LineBreak/><Run Text="&quot;text containing ; a semicolon&quot;"/></TextBlock>
         <TextBlock TextWrapping="Wrap" Margin="0,12,0,0" Text="Text fields use ':'; attachment counts and dates use =, &lt;, &lt;=, &gt; or &gt;=. Date values may be a complete local date, MM/yyyy, or yyyy. '?' matches exactly one character."/>
       </StackPanel>
     </ScrollViewer>
