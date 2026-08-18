@@ -13,7 +13,7 @@
     let quickMailEditor;
     let quickMailSelectionBookmark;
     let preservedHeadStyles = '';
-    let quickMailLanguage = 'es-ES';
+    let quickMailLanguage = '';
 
     const decodeUtf8Base64 = value => {
       const bytes = Uint8Array.from(atob(value), c => c.charCodeAt(0));
@@ -72,7 +72,7 @@
           editor.on('init', () => {
             editor.setContent(parsed.body.innerHTML || source);
             editor.getBody().lang = quickMailLanguage;
-            editor.getBody().spellcheck = true;
+            editor.getBody().spellcheck = !!quickMailLanguage;
             editor.focus();
             emitContent();
           });

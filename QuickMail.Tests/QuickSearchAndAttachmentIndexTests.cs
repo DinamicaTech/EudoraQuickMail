@@ -160,6 +160,10 @@ public class ComposeLanguageDetectionTests
         Assert.Equal("es-ES", ComposeWindow.DetectComposeLanguage("hola gracias por este mensaje".Split(' ')));
 
     [Fact]
+    public void DetectsEnglishFromOrdinaryOpening() =>
+        Assert.Equal("en-US", ComposeWindow.DetectComposeLanguage("This is a long email".Split(' ')));
+
+    [Fact]
     public void DetectsCatalanAgainstSpanishSharedWords()
     {
         var language = ComposeWindow.DetectComposeLanguage(

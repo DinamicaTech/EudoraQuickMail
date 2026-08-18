@@ -59,6 +59,8 @@ before a public release.
   contextual suggestions, ignore/add-to-dictionary actions, and draft language metadata.
 - Added `(None)` to disable proofing, forced dictionary reloads when changing language, and one-shot
   Spanish/Catalan/English detection after the first five words of a new message.
+- Isolated the HTML editor into per-language WebView2 profiles so selecting a proofing language
+  changes Chromium's dictionary and context menu instead of merely changing the HTML `lang` tag.
 - Added selected-text translation while composing, with a local Argos Translate provider and an
   optional DeepL provider. Provider configuration includes setup/testing, local model management,
   a persistent default, privacy guidance, and Windows DPAPI protection for the DeepL API key.

@@ -78,6 +78,8 @@ public partial class ComposeWindow : Window
     private TextPointer? _richSpellingWordStart;
     private TextPointer? _richSpellingWordEnd;
     private bool _htmlEditorReady;
+    private string _htmlEnvironmentLanguage = string.Empty;
+    private bool _htmlEditorRecreating;
     private string? _pendingHtml;
     private RichBodySnapshot _htmlSnapshot = RichBodySnapshot.Empty;
 
@@ -1748,7 +1750,16 @@ public partial class ComposeWindow : Window
     {
         try
         {
-            await HtmlBodyEditor.EnsureCoreWebView2Async();
+            var environmentLanguage = EffectiveWebViewLanguage(_vm.SpellLanguage);
+            var userDataFolder = Path.Combine(TranslationProfile.ProfileDir, "WebView2", "Compose", environmentLanguage);
+            var options = new CoreWebView2EnvironmentOptions
+            {
+                Language = environmentLanguage,
+                AdditionalBrowserArguments = $"--lang={environmentLanguage}",
+            };
+            var environment = await CoreWebView2Environment.CreateAsync(null, userDataFolder, options);
+            await HtmlBodyEditor.EnsureCoreWebView2Async(environment);
+            _htmlEnvironmentLanguage = environmentLanguage;
             var assetFolder = Path.Combine(AppContext.BaseDirectory, "Assets", "HugeRte");
             HtmlBodyEditor.CoreWebView2.SetVirtualHostNameToFolderMapping(
                 "quickmail.local", assetFolder, CoreWebView2HostResourceAccessKind.DenyCors);
@@ -1800,6 +1811,47 @@ public partial class ComposeWindow : Window
         {
             LogService.Log("Compose HTML editor initialization failed", ex);
         }
+    }
+
+    private static string EffectiveWebViewLanguage(string? language) => language switch
+    {
+        "es-ES" => "es-ES",
+        "ca-ES" => "ca-ES",
+        "en-US" => "en-US",
+        _ => System.Globalization.CultureInfo.CurrentUICulture.Name,
+    };
+
+    private async Task RecreateHtmlEditorForLanguageAsync(string language)
+    {
+        var effective = EffectiveWebViewLanguage(language);
+        if (_htmlEditorRecreating || string.Equals(effective, _htmlEnvironmentLanguage, StringComparison.OrdinalIgnoreCase))
+            return;
+
+        _htmlEditorRecreating = true;
+        try
+        {
+            var snapshot = _htmlSnapshot.Html;
+            if (HtmlBodyEditor.Parent is not Grid host) return;
+            var row = Grid.GetRow(HtmlBodyEditor);
+            var column = Grid.GetColumn(HtmlBodyEditor);
+            var visibility = HtmlBodyEditor.Visibility;
+            var old = HtmlBodyEditor;
+            var replacement = new Microsoft.Web.WebView2.Wpf.WebView2
+            {
+                Visibility = visibility,
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                VerticalAlignment = VerticalAlignment.Stretch,
+            };
+            Grid.SetRow(replacement, row); Grid.SetColumn(replacement, column);
+            var index = host.Children.IndexOf(old);
+            host.Children.RemoveAt(index); host.Children.Insert(index, replacement);
+            HtmlBodyEditor = replacement;
+            _htmlEditorReady = false;
+            _pendingHtml = string.IsNullOrWhiteSpace(snapshot) ? null : snapshot;
+            old.Dispose();
+            await InitializeHtmlEditorAsync();
+        }
+        finally { _htmlEditorRecreating = false; }
     }
 
     private async Task LoadHtmlIntoWebEditorAsync(string html)
@@ -1990,12 +2042,14 @@ public partial class ComposeWindow : Window
 
         if (_htmlEditorReady && HtmlBodyEditor.CoreWebView2 is not null)
         {
+            if (enabled && !string.Equals(EffectiveWebViewLanguage(language), _htmlEnvironmentLanguage,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                await RecreateHtmlEditorForLanguageAsync(language);
+                return;
+            }
             await HtmlBodyEditor.CoreWebView2.ExecuteScriptAsync(
                 $"window.quickmailSetLanguage({JsonSerializer.Serialize(language)})");
-            // Chromium also caches its proofing language. Recreating HugeRTE after
-            // setting the new lang attribute forces WebView2 to attach a fresh checker.
-            if (enabled && !string.IsNullOrWhiteSpace(_htmlSnapshot.Html))
-                await LoadHtmlIntoWebEditorAsync(_htmlSnapshot.Html);
         }
     }
 
@@ -2008,9 +2062,9 @@ public partial class ComposeWindow : Window
         var words = System.Text.RegularExpressions.Regex.Matches(text.ToLowerInvariant(), @"[\p{L}']+")
             .Select(m => m.Value).Take(40).ToArray();
         if (words.Length < 5) return;
-        _languageDetectionAttempted = true; // exactly one attempt per new compose
         var detected = DetectComposeLanguage(words);
         if (detected is null) return;
+        _languageDetectionAttempted = true; // freeze after the first confident result
         _vm.SpellLanguage = detected;
         AccessibilityHelper.Announce(this, $"Language detected: {LanguageDisplayName(detected)}.",
             category: AnnouncementCategory.Result);
@@ -2020,9 +2074,9 @@ public partial class ComposeWindow : Window
     {
         var sets = new Dictionary<string, HashSet<string>>
         {
-            ["es-ES"] = new(StringComparer.OrdinalIgnoreCase) { "el","la","los","las","de","que","y","en","un","una","para","por","con","como","pero","gracias","hola","este","esta","del" },
-            ["ca-ES"] = new(StringComparer.OrdinalIgnoreCase) { "el","la","els","les","de","que","i","en","un","una","per","amb","com","però","gràcies","hola","aquest","aquesta","del" },
-            ["en-US"] = new(StringComparer.OrdinalIgnoreCase) { "the","a","an","of","that","and","in","to","for","with","as","but","thanks","hello","this","is","are","we","you" },
+            ["es-ES"] = new(StringComparer.OrdinalIgnoreCase) { "el","la","los","las","de","que","y","en","un","una","para","por","con","como","pero","gracias","hola","este","esta","esto","es","del","al","correo","mensaje","envío","buenos","días","hemos","tiene","no","se","lo","le","te","su","más" },
+            ["ca-ES"] = new(StringComparer.OrdinalIgnoreCase) { "el","la","els","les","de","que","i","en","un","una","per","amb","com","però","gràcies","hola","aquest","aquesta","això","és","del","al","correu","missatge","bon","dia","hem","hi","ho","li","et","seu","més" },
+            ["en-US"] = new(StringComparer.OrdinalIgnoreCase) { "the","a","an","of","that","and","in","to","for","with","as","but","thanks","hello","this","is","are","we","you","message","email","send","sending","good","morning","have","has","not","it","on","at","from","my","your" },
         };
         var list = words.ToArray();
         var ordered = sets.Select(k => new { Language = k.Key, Score = list.Count(k.Value.Contains) })
