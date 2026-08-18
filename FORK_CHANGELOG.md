@@ -16,6 +16,8 @@ before a public release.
 - Added visible indeterminate progress while Argos runtime and language packages are installed.
 - Fixed the total-result scrollbar layout, kept the inline preview closed while a detached follower
   is active, and ensured local archive accounts run their system-folder migration without credentials.
+- Preserved persisted special-folder enum values, repaired local system-folder kinds by name, and
+  simplified detached preview windows so they always follow the main selection.
 
 - Added visible local Draft and Scheduled folders; Send Later now prompts explicitly for a local
   date/time and keeps a local scheduled copy until successful delivery.

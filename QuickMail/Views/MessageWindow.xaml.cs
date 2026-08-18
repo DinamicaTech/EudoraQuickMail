@@ -807,11 +807,6 @@ public partial class MessageWindow : Window
     /// The owning code (App.xaml.cs or MainWindow) should open the message as a tab.
     /// </summary>
     public event EventHandler<MessageWindowViewModel>? MoveToMainWindowRequested;
-    public event EventHandler? FollowSelectionRequested;
-
-    private void FollowSelection_Click(object sender, RoutedEventArgs e) =>
-        FollowSelectionRequested?.Invoke(this, EventArgs.Empty);
-
     public void FollowMessage(MailMessageSummary summary, IEnumerable<MailMessageSummary> messages)
     {
         _vm.MessageList.Clear();

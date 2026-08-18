@@ -1038,10 +1038,10 @@
                                      IsReadOnly="True" IsReadOnlyCaretVisible="True"
                                      BorderThickness="0" Background="Transparent"
                                      AutomationProperties.Name="Date"/>
-                            <Button Content="Detach / Follow Selection" HorizontalAlignment="Right"
+                            <Button Content="Detach Preview" HorizontalAlignment="Right"
                                     Margin="0,2,0,2" Padding="10,3"
                                     Click="DetachReadingPane_Click"
-                                    ToolTip="Open this message on another screen and follow selection"/>
+                                    ToolTip="Open the preview on another screen; it follows the selected message"/>
 
                             <!-- Attachments (visible when selected message has attachments) -->
                             <ListBox x:Name="ReadingPaneAttachmentList"

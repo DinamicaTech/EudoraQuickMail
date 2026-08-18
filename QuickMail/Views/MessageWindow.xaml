@@ -118,10 +118,6 @@
                         Command="{Binding MoveToMainWindowCommand}"
                         Padding="6,2"
                         AutomationProperties.Name="Move this message to the main window as a tab"/>
-                <Button Content="Follow Selection"
-                        Margin="6,0,0,0" Padding="6,2"
-                        ToolTip="Keep this window open and show the message selected in the main window"
-                        Click="FollowSelection_Click"/>
             </ToolBar>
         </ToolBarTray>
 

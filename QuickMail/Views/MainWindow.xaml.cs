@@ -5547,13 +5547,6 @@ public partial class MainWindow : Window
             }
         };
         _openMessageWindows.Add(win);
-        win.FollowSelectionRequested += (_, _) =>
-        {
-            _followSelectionWindow = win;
-            if (_vm.SelectedMessage is { } selected) win.FollowMessage(selected, _vm.Messages);
-            _vm.StatusText = "Detached message window now follows the main selection.";
-        };
-
         // Wire mail action delegates so the window has full message operations.
         // Each delegate syncs MainViewModel selection to the window's current message
         // before invoking the command, so navigation (Prev/Next) in the window doesn't

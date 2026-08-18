@@ -18,6 +18,20 @@ public sealed class LocalMailService : IMailService
         if (account.BackendKind is BackendKind.Pop3Smtp or BackendKind.LocalArchive)
         {
             var folders = await GetFoldersAsync(account.Id, ct);
+            // Repair rows written while Scheduled temporarily occupied persisted value 4 and
+            // shifted Trash/Junk. Folder names are authoritative for these local system folders.
+            foreach (var folder in folders)
+            {
+                var leaf = folder.DisplayName.Trim().ToLowerInvariant();
+                folder.Kind = leaf switch
+                {
+                    "draft" or "drafts" => SpecialFolderKind.Drafts,
+                    "scheduled" => SpecialFolderKind.Scheduled,
+                    "trash" => SpecialFolderKind.Trash,
+                    "junk" => SpecialFolderKind.Junk,
+                    _ => folder.Kind,
+                };
+            }
             var root = account.BackendKind == BackendKind.Pop3Smtp
                 ? folders.FirstOrDefault(f => f.IsContainer)?.FullName ?? "Mailbox"
                 : null;
