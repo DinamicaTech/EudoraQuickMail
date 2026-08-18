@@ -15,15 +15,18 @@ public sealed class LocalMailService : IMailService
     public async Task ConnectAsync(AccountModel account, string? password = null, CancellationToken ct = default)
     {
         _accounts[account.Id] = account;
-        if (account.BackendKind == BackendKind.Pop3Smtp)
+        if (account.BackendKind is BackendKind.Pop3Smtp or BackendKind.LocalArchive)
         {
             var folders = await GetFoldersAsync(account.Id, ct);
-            var root = folders.FirstOrDefault(f => f.IsContainer)?.FullName ?? "Mailbox";
-            if (folders.Count == 0) folders.Add(new() { AccountId = account.Id, FullName = root, DisplayName = root, IsContainer = true });
-            AddSpecial(SpecialFolderKind.Inbox, "Inbox");
+            var root = account.BackendKind == BackendKind.Pop3Smtp
+                ? folders.FirstOrDefault(f => f.IsContainer)?.FullName ?? "Mailbox"
+                : null;
+            if (account.BackendKind == BackendKind.Pop3Smtp && folders.Count == 0)
+                folders.Add(new() { AccountId = account.Id, FullName = root!, DisplayName = root!, IsContainer = true });
+            if (account.BackendKind == BackendKind.Pop3Smtp) AddSpecial(SpecialFolderKind.Inbox, "Inbox");
             AddSpecial(SpecialFolderKind.Drafts, "Draft");
             AddSpecial(SpecialFolderKind.Scheduled, "Scheduled");
-            AddSpecial(SpecialFolderKind.Sent, "Sent");
+            if (account.BackendKind == BackendKind.Pop3Smtp) AddSpecial(SpecialFolderKind.Sent, "Sent");
             AddSpecial(SpecialFolderKind.Trash, "Trash");
             await _store.SaveFoldersAsync(account.Id, folders);
 

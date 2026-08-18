@@ -63,6 +63,7 @@ public partial class TranslationProvidersWindow : Window
 
     private async Task<bool> RunSetupAsync(string command, params string[] arguments)
     {
+        SetupProgress.Visibility = Visibility.Visible;
         try
         {
             var psi = new ProcessStartInfo(command) { UseShellExecute = false, CreateNoWindow = true,
@@ -78,6 +79,7 @@ public partial class TranslationProvidersWindow : Window
             return process.ExitCode == 0;
         }
         catch (Exception ex) { StatusText.Text = $"Setup failed: {ex.Message}"; return false; }
+        finally { SetupProgress.Visibility = Visibility.Collapsed; }
     }
     private static async Task<string?> FindPythonUserScriptsAsync()
     {

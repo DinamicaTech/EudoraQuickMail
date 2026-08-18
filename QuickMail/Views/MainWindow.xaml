@@ -294,7 +294,7 @@
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>  <!-- Menu bar -->
-            <RowDefinition Height="Auto"/>  <!-- Toolbar -->
+            <RowDefinition Height="0"/>     <!-- Toolbar now belongs to the message-list pane -->
             <RowDefinition Height="*"/>     <!-- Content -->
             <RowDefinition Height="Auto"/>  <!-- Status bar -->
         </Grid.RowDefinitions>
@@ -718,44 +718,6 @@
 
         </Menu>
 
-        <!-- ── Toolbar — Ctrl+0 only; excluded from Tab sequence ── -->
-        <ToolBar x:Name="MainToolbar"
-                 Grid.Row="1"
-                 AutomationProperties.Name="Main toolbar"
-                 KeyboardNavigation.TabNavigation="None"
-                 KeyboardNavigation.DirectionalNavigation="Cycle"
-                 PreviewKeyDown="Toolbar_PreviewKeyDown">
-            <Button x:Name="ToolbarFirstButton"
-                    Style="{DynamicResource ToolbarButton}"
-                    Command="{Binding NewMessageCommand}"
-                    AutomationProperties.Name="New Message"
-                    AutomationProperties.AcceleratorKey="Ctrl+N"
-                    ToolTip="New Message (Ctrl+N)"
-                    Content="New"/>
-            <Separator/>
-            <Button Style="{DynamicResource ToolbarButton}"
-                    Command="{Binding ReplyCommand}"
-                    AutomationProperties.Name="Reply"
-                    AutomationProperties.AcceleratorKey="Ctrl+R"
-                    ToolTip="Reply (Ctrl+R)"
-                    Content="Reply"/>
-            <Button Style="{DynamicResource ToolbarButton}"
-                    Command="{Binding ReplyAllCommand}"
-                    AutomationProperties.Name="Reply All"
-                    AutomationProperties.AcceleratorKey="Ctrl+Shift+R"
-                    ToolTip="Reply All (Ctrl+Shift+R)"
-                    Content="Reply All"/>
-            <Button Style="{DynamicResource ToolbarButton}"
-                    Command="{Binding ForwardCommand}"
-                    AutomationProperties.Name="Forward"
-                    AutomationProperties.AcceleratorKey="Ctrl+F"
-                    ToolTip="Forward (Ctrl+F)"
-                    Content="Forward"/>
-            <!-- Retained as hidden command anchors for legacy keyboard/context handlers. -->
-            <Button x:Name="SyncRangeButton" Visibility="Collapsed"/>
-            <Button x:Name="ViewModeButton" Visibility="Collapsed"/>
-        </ToolBar>
-
         <!-- ── Three-pane layout (Outlook-style): Accounts+Folders left | Messages right ── -->
         <!--  F6 pane ring: AccountList(1) → FolderList(2) → MessageList(3) → Toolbar → StatusBar → wrap -->
         <!--  Arrow keys navigate within the focused pane (TabNavigation=Once on each)      -->
@@ -1076,6 +1038,10 @@
                                      IsReadOnly="True" IsReadOnlyCaretVisible="True"
                                      BorderThickness="0" Background="Transparent"
                                      AutomationProperties.Name="Date"/>
+                            <Button Content="Detach / Follow Selection" HorizontalAlignment="Right"
+                                    Margin="0,2,0,2" Padding="10,3"
+                                    Click="DetachReadingPane_Click"
+                                    ToolTip="Open this message on another screen and follow selection"/>
 
                             <!-- Attachments (visible when selected message has attachments) -->
                             <ListBox x:Name="ReadingPaneAttachmentList"
@@ -1135,6 +1101,24 @@
                 <!-- Message list — fills row 0; collapses entirely when a message tab fills the pane -->
                 <DockPanel Grid.Row="0"
                            Visibility="{Binding IsMessageListAreaVisible, Converter={StaticResource BoolToVisibilityConverter}}">
+                    <ToolBar x:Name="MainToolbar" DockPanel.Dock="Top"
+                             AutomationProperties.Name="Message toolbar"
+                             KeyboardNavigation.TabNavigation="None"
+                             KeyboardNavigation.DirectionalNavigation="Cycle"
+                             PreviewKeyDown="Toolbar_PreviewKeyDown">
+                        <Button x:Name="ToolbarFirstButton" Style="{DynamicResource ToolbarButton}"
+                                Command="{Binding NewMessageCommand}" Content="New"
+                                AutomationProperties.Name="New Message" ToolTip="New Message (Ctrl+N)"/>
+                        <Separator/>
+                        <Button Style="{DynamicResource ToolbarButton}" Command="{Binding ReplyCommand}"
+                                Content="Reply" AutomationProperties.Name="Reply" ToolTip="Reply (Ctrl+R)"/>
+                        <Button Style="{DynamicResource ToolbarButton}" Command="{Binding ReplyAllCommand}"
+                                Content="Reply All" AutomationProperties.Name="Reply All" ToolTip="Reply All (Ctrl+Shift+R)"/>
+                        <Button Style="{DynamicResource ToolbarButton}" Command="{Binding ForwardCommand}"
+                                Content="Forward" AutomationProperties.Name="Forward" ToolTip="Forward (Ctrl+F)"/>
+                        <Button x:Name="SyncRangeButton" Visibility="Collapsed"/>
+                        <Button x:Name="ViewModeButton" Visibility="Collapsed"/>
+                    </ToolBar>
                     <TextBlock DockPanel.Dock="Top"
                                Text="{Binding SelectedFolder.DisplayName, FallbackValue='No folder selected'}"
                                FontWeight="SemiBold" Padding="6,4"
@@ -1400,6 +1384,14 @@
                                  Margin="4"/>
                     </Grid>
 
+                    <!-- Represents the complete result set, not merely the loaded 2,000-row page. -->
+                    <ScrollBar x:Name="TotalMessageScrollBar" DockPanel.Dock="Right"
+                               Panel.ZIndex="5" Orientation="Vertical" Width="16"
+                               Minimum="0" Maximum="{Binding LocalMaximumMessageIndex}"
+                               ViewportSize="2000" SmallChange="3" LargeChange="25"
+                               Visibility="{Binding IsMessagesView, Converter={StaticResource BoolToVisibilityConverter}}"
+                               Scroll="TotalMessageScrollBar_Scroll"/>
+
                     <ListView x:Name="MessageList"
                               AutomationProperties.Name="Messages"
                               ContextMenu="{StaticResource MessageContextMenu}"
@@ -1419,7 +1411,7 @@
                               PreviewMouseMove="MessageList_PreviewMouseMove"
                               PreviewMouseWheel="MessageList_PreviewMouseWheel"
                               ScrollViewer.VerticalScrollBarVisibility="Hidden"
-                              Margin="0,0,16,0"
+                              Margin="0"
                               MouseLeftButtonUp="MessageList_MouseLeftButtonUp">
                         <ListView.Resources>
                             <!-- With a bounded 500-row page, pixel scrolling keeps the thumb
@@ -1599,21 +1591,6 @@
                             </Style>
                         </ListView.ItemContainerStyle>
                     </ListView>
-
-                    <!-- The list keeps only one bounded page in memory, while this scrollbar
-                         represents every matching message and loads the required page on demand. -->
-                    <ScrollBar x:Name="TotalMessageScrollBar"
-                               Panel.ZIndex="5"
-                               Orientation="Vertical"
-                               HorizontalAlignment="Right"
-                               Width="16"
-                               Minimum="0"
-                               Maximum="{Binding LocalMaximumMessageIndex}"
-                               ViewportSize="2000"
-                               SmallChange="3"
-                               LargeChange="25"
-                               Visibility="{Binding IsMessagesView, Converter={StaticResource BoolToVisibilityConverter}}"
-                               Scroll="TotalMessageScrollBar_Scroll"/>
 
                     <!-- Conversation tree view: one root node per subject group, children are individual messages. -->
                     <TreeView x:Name="ConversationTree"

@@ -10,6 +10,11 @@ before a public release.
 
 ## Unreleased
 
+- Added local `Draft` and `Scheduled` system folders to imported Eudora/archive accounts.
+- Moved the New/Reply/Reply All/Forward toolbar above the message list.
+- Restored the full-result vertical scrollbar and added a reading-pane `Detach / Follow Selection` action.
+- Added visible indeterminate progress while Argos runtime and language packages are installed.
+
 - Added visible local Draft and Scheduled folders; Send Later now prompts explicitly for a local
   date/time and keeps a local scheduled copy until successful delivery.
 - Folder unread badges now include descendants and update recursively.

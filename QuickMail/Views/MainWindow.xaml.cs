@@ -5628,6 +5628,15 @@ public partial class MainWindow : Window
         win.Show();
     }
 
+    private void DetachReadingPane_Click(object sender, RoutedEventArgs e)
+    {
+        if (_vm.SelectedMessage is not { } selected) return;
+        OpenMessageInNewWindow(selected);
+        _followSelectionWindow = _openMessageWindows.LastOrDefault();
+        if (_followSelectionWindow != null)
+            _vm.StatusText = "Detached message window now follows the main selection.";
+    }
+
     private void PromoteTabToWindow(MessageTabViewModel tab)
     {
         _vm.CloseTab(tab);
