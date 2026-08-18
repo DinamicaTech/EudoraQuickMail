@@ -99,6 +99,7 @@ public partial class ComposeWindow : Window
     private bool _suppressNextMenuActivation;
     private bool _closeAfterDraftSave;
     private bool _languageDetectionAttempted;
+    private bool _applyingDetectedLanguage;
 
     private ProfileContext TranslationProfile =>
         ((App)Application.Current).Profile ?? ProfileContext.Default();
@@ -270,8 +271,13 @@ public partial class ComposeWindow : Window
         _catalanSpellCheck = new CatalanSpellCheckService(customDictionary);
         _languageTool = new LanguageToolService(TranslationProfile);
         _themeService = themeService;
+        // Decide the real initial editor before XAML is displayed. The old Loaded-time
+        // switch briefly showed Plain Text and then replaced it with the HTML WebView.
+        if (vm.ComposeKind == ComposeKind.NewMessage)
+            vm.CurrentMode = ComposeMode.Html;
         InitializeComponent();
         DataContext = vm;
+        ApplyComposeMode();
         Closed += (_, _) => _languageTool.Dispose();
 
         // Spell-check is turned on in code (not via SpellCheck.IsEnabled in XAML) and
@@ -2159,6 +2165,7 @@ public partial class ComposeWindow : Window
 
     private async void SpellLanguageSelector_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
+        var automaticallyDetected = _applyingDetectedLanguage;
         if (SpellLanguageSelector.SelectedValue is not string language) language = string.Empty;
         if (SpellLanguageSelector.IsKeyboardFocusWithin && string.IsNullOrEmpty(language))
             _languageDetectionAttempted = true;
@@ -2177,7 +2184,7 @@ public partial class ComposeWindow : Window
 
         if (_htmlEditorReady && HtmlBodyEditor.CoreWebView2 is not null)
         {
-            if (enabled && !string.Equals(EffectiveWebViewLanguage(language), _htmlEnvironmentLanguage,
+            if (!automaticallyDetected && enabled && !string.Equals(EffectiveWebViewLanguage(language), _htmlEnvironmentLanguage,
                     StringComparison.OrdinalIgnoreCase))
             {
                 await RecreateHtmlEditorForLanguageAsync(language);
@@ -2200,7 +2207,9 @@ public partial class ComposeWindow : Window
         var detected = DetectComposeLanguage(words);
         if (detected is null) return;
         _languageDetectionAttempted = true; // freeze after the first confident result
-        _vm.SpellLanguage = detected;
+        _applyingDetectedLanguage = true;
+        try { _vm.SpellLanguage = detected; }
+        finally { _applyingDetectedLanguage = false; }
         AccessibilityHelper.Announce(this, $"Language detected: {LanguageDisplayName(detected)}.",
             category: AnnouncementCategory.Result);
     }

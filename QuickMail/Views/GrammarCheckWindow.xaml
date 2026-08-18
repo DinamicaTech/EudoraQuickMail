@@ -7,18 +7,28 @@
   <Grid Margin="16">
     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="2*"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
     <TextBlock x:Name="SummaryText" FontWeight="SemiBold" Margin="0,0,0,8"/>
-    <ListBox Grid.Row="1" x:Name="IssuesList" ItemsSource="{Binding}">
-      <ListBox.ItemTemplate><DataTemplate><StackPanel Margin="4">
-        <TextBlock Text="{Binding Message}" TextWrapping="Wrap" FontWeight="SemiBold"/>
-        <TextBlock Text="{Binding ReplacementSummary}" TextWrapping="Wrap" Foreground="{DynamicResource Theme.TextSecondary}"/>
-      </StackPanel></DataTemplate></ListBox.ItemTemplate>
+    <ListBox Grid.Row="1" x:Name="IssuesList" ItemsSource="{Binding}" SelectionMode="Multiple"
+             SelectionChanged="IssuesList_SelectionChanged">
+      <ListBox.ItemTemplate><DataTemplate><Grid Margin="4">
+        <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+        <CheckBox VerticalAlignment="Top" Margin="0,3,8,0"
+                  IsChecked="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=ListBoxItem}}"/>
+        <StackPanel Grid.Column="1">
+          <TextBlock Text="{Binding Message}" TextWrapping="Wrap" FontWeight="SemiBold"/>
+          <ComboBox ItemsSource="{Binding Replacements}" SelectedItem="{Binding SelectedReplacement}"
+                    IsEnabled="{Binding HasReplacements}" MinWidth="220" HorizontalAlignment="Left" Margin="0,4,0,0"/>
+          <TextBlock Text="No automatic replacement" Visibility="{Binding NoReplacementVisibility}"
+                     Foreground="{DynamicResource Theme.TextSecondary}"/>
+        </StackPanel>
+      </Grid></DataTemplate></ListBox.ItemTemplate>
     </ListBox>
     <TextBlock Grid.Row="2" Text="Corrected text preview" FontWeight="SemiBold" Margin="0,12,0,5"/>
     <TextBox Grid.Row="3" x:Name="CorrectedBox" AcceptsReturn="True" TextWrapping="Wrap"
              VerticalScrollBarVisibility="Auto"/>
     <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
       <Button Content="Cancel" Width="90" IsCancel="True"/>
-      <Button Content="Apply corrections" Width="135" Margin="8,0,0,0" IsDefault="True" Click="Apply_Click"/>
+      <Button Content="Apply selected" Width="120" Margin="8,0,0,0" IsDefault="True" Click="ApplySelected_Click"/>
+      <Button Content="Apply all corrections" Width="150" Margin="8,0,0,0" Click="ApplyAll_Click"/>
     </StackPanel>
   </Grid>
 </Window>

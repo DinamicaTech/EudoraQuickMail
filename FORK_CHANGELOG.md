@@ -74,6 +74,12 @@ before a public release.
   English. It runs LanguageTool entirely on localhost, presents its issues and suggested corrected
   text for review, and replaces only the selection after confirmation. The approximately 252 MB
   LanguageTool component is downloaded once into the active profile after explicit consent.
+- Grammar review now supports selecting multiple issues, choosing among alternative replacements,
+  applying only the selected corrections, or applying every correction in one action.
+- New-message windows now enter HTML mode before their XAML is displayed, avoiding the visible
+  Plain Text → HTML editor swap; their initial size is larger to leave useful body-editing space.
+- Automatic language detection changes proofing in place instead of rebuilding the HTML WebView
+  under active typing, preventing stray keystrokes from reaching the compose window's close command.
 - Fixed asynchronous draft-close re-entry and other composition focus/keyboard issues.
 
 ### Performance and reliability
