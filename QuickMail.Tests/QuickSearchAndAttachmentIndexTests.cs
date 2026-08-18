@@ -173,6 +173,10 @@ public class ComposeLanguageDetectionTests
     }
 
     [Fact]
+    public void DetectsCatalanFromShortOrdinaryPhrase() =>
+        Assert.Equal("ca-ES", ComposeWindow.DetectComposeLanguage("Anem a fer una prova".Split(' ')));
+
+    [Fact]
     public void AmbiguousTextDoesNotForceLanguage() =>
         Assert.Null(ComposeWindow.DetectComposeLanguage("project budget Ronald Monday August".Split(' ')));
 }

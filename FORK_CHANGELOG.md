@@ -83,6 +83,8 @@ before a public release.
   English QuickMail contextual actions, full editor width, and content preservation across reloads.
 - Automatic language detection now activates the matching Chromium proofing dictionary after a
   short typing pause, preserving both the HTML content and caret while the editor profile changes.
+- Improved short-text language detection with weighted language-specific vocabulary, avoiding
+  shared words such as `a` and `una` overriding clear Catalan phrases such as `Anem a fer una prova`.
 - Fixed asynchronous draft-close re-entry and other composition focus/keyboard issues.
 
 ### Performance and reliability

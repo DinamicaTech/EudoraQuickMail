@@ -2273,14 +2273,26 @@ public partial class ComposeWindow : Window
     {
         var sets = new Dictionary<string, HashSet<string>>
         {
-            ["es-ES"] = new(StringComparer.OrdinalIgnoreCase) { "el","la","los","las","de","que","y","en","un","una","para","por","con","como","pero","gracias","hola","este","esta","esto","es","del","al","correo","mensaje","envío","buenos","días","hemos","tiene","no","se","lo","le","te","su","más" },
-            ["ca-ES"] = new(StringComparer.OrdinalIgnoreCase) { "el","la","els","les","de","que","i","en","un","una","per","amb","com","però","gràcies","hola","aquest","aquesta","això","és","del","al","correu","missatge","bon","dia","hem","hi","ho","li","et","seu","més" },
-            ["en-US"] = new(StringComparer.OrdinalIgnoreCase) { "the","a","an","of","that","and","in","to","for","with","as","but","thanks","hello","this","is","are","we","you","message","email","send","sending","good","morning","have","has","not","it","on","at","from","my","your" },
+            ["es-ES"] = new(StringComparer.OrdinalIgnoreCase) { "el","la","los","las","de","que","y","en","un","una","para","por","con","como","pero","gracias","hola","este","esta","esto","es","del","al","correo","mensaje","envío","buenos","días","hemos","tiene","no","se","lo","le","te","su","más","vamos","hacer","prueba","quiero","puedo","ser","está","son","muy","también" },
+            ["ca-ES"] = new(StringComparer.OrdinalIgnoreCase) { "el","la","els","les","de","que","i","en","un","una","per","amb","com","però","gràcies","hola","aquest","aquesta","això","és","del","al","correu","missatge","bon","dia","hem","hi","ho","li","et","seu","més","anem","fer","prova","vull","puc","ser","està","són","molt","també","aquí","avui","aquesta","aquestes","nostre","nostra" },
+            ["en-US"] = new(StringComparer.OrdinalIgnoreCase) { "the","a","an","of","that","and","in","to","for","with","as","but","thanks","hello","this","is","are","we","you","message","email","send","sending","good","morning","have","has","not","it","on","at","from","my","your","will","can","would","should","please","test","want","very","also" },
+        };
+        var distinctive = new Dictionary<string, HashSet<string>>
+        {
+            ["es-ES"] = new(StringComparer.OrdinalIgnoreCase) { "los","las","y","para","pero","gracias","este","esta","esto","correo","mensaje","envío","buenos","días","hemos","vamos","hacer","prueba","quiero","también" },
+            ["ca-ES"] = new(StringComparer.OrdinalIgnoreCase) { "els","les","i","per","amb","però","gràcies","aquest","aquesta","això","és","correu","missatge","hem","anem","fer","prova","vull","també","són" },
+            ["en-US"] = new(StringComparer.OrdinalIgnoreCase) { "the","and","that","with","but","thanks","this","email","sending","we","you","have","from","your","will","would","should","please" },
         };
         var list = words.ToArray();
-        var ordered = sets.Select(k => new { Language = k.Key, Score = list.Count(k.Value.Contains) })
+        // Distinctive words count twice. This prevents shared short words such as
+        // "a" and "una" from outweighing clear evidence such as "anem" and "fer".
+        var ordered = sets.Select(k => new
+            {
+                Language = k.Key,
+                Score = list.Count(k.Value.Contains) + list.Count(distinctive[k.Key].Contains),
+            })
             .OrderByDescending(x => x.Score).ToArray();
-        return ordered[0].Score >= 2 && ordered[0].Score >= ordered[1].Score + 1 ? ordered[0].Language : null;
+        return ordered[0].Score >= 3 && ordered[0].Score >= ordered[1].Score + 2 ? ordered[0].Language : null;
     }
 
     private static string LanguageDisplayName(string language) => language switch
