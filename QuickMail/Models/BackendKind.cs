@@ -11,4 +11,10 @@ public enum BackendKind
 
     /// <summary>Microsoft Graph for receive + send. Used for M365 / Outlook.com.</summary>
     MicrosoftGraph,
+
+    /// <summary>POP3 for receive, SMTP for send, with SQLite as the authoritative mail store.</summary>
+    Pop3Smtp,
+
+    /// <summary>Local archive account (for example an Eudora import), with no network transport.</summary>
+    LocalArchive,
 }

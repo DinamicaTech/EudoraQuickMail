@@ -10,11 +10,18 @@ public class SmtpService : ISendMailService
 {
     private readonly IOAuthService _oauth;
     private readonly ISendMailService _graphSmtp;
+    private readonly IAccountSecretProtector? _accountSecrets;
 
     public SmtpService(IOAuthService oauth, ISendMailService graphSmtp)
+        : this(oauth, graphSmtp, null)
+    {
+    }
+
+    public SmtpService(IOAuthService oauth, ISendMailService graphSmtp, IAccountSecretProtector? accountSecrets)
     {
         _oauth = oauth;
         _graphSmtp = graphSmtp;
+        _accountSecrets = accountSecrets;
     }
 
     public async Task SendAsync(ComposeModel compose, AccountModel account, string? password, CancellationToken ct = default)
@@ -25,6 +32,7 @@ public class SmtpService : ISendMailService
             return;
         }
 
+        password ??= account.BackendKind == BackendKind.Pop3Smtp ? _accountSecrets?.GetSmtpPassword(account) : null;
         var message = MimeMessageBuilder.Build(compose, account, MimeMessageBuilder.AppUserAgent);
 
         using var client = new SmtpClient();
@@ -101,6 +109,7 @@ public class SmtpService : ISendMailService
             return;
         }
 
+        password ??= account.BackendKind == BackendKind.Pop3Smtp ? _accountSecrets?.GetSmtpPassword(account) : null;
         using var client = new SmtpClient();
 
         if (account.SmtpAcceptInvalidCert)
@@ -142,6 +151,7 @@ public class SmtpService : ISendMailService
             return;
         }
 
+        password ??= account.BackendKind == BackendKind.Pop3Smtp ? _accountSecrets?.GetSmtpPassword(account) : null;
         var message = MimeMessageBuilder.BuildIcsReply(account, icsReplyContent, organizerEmail);
 
         using var client = new SmtpClient();

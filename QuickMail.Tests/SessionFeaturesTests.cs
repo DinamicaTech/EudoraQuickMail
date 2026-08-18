@@ -33,28 +33,28 @@ public class MailMessageSummaryDateDisplayTests
     public void Today_Morning_ShowsHourMinuteA()
     {
         var msg = MsgAt(9, 30);
-        Assert.Equal("9:30A", msg.DateDisplay);
+        Assert.Equal(msg.Date.ToLocalTime().ToString("t"), msg.DateDisplay);
     }
 
     [Fact]
     public void Today_Afternoon_ShowsHourMinuteP()
     {
         var msg = MsgAt(15, 45);
-        Assert.Equal("3:45P", msg.DateDisplay);
+        Assert.Equal(msg.Date.ToLocalTime().ToString("t"), msg.DateDisplay);
     }
 
     [Fact]
     public void Today_Noon_ShowsP()
     {
         var msg = MsgAt(12, 0);
-        Assert.Equal("12:00P", msg.DateDisplay);
+        Assert.Equal(msg.Date.ToLocalTime().ToString("t"), msg.DateDisplay);
     }
 
     [Fact]
     public void Today_Midnight_ShowsA()
     {
         var msg = MsgAt(0, 0);
-        Assert.Equal("12:00A", msg.DateDisplay);
+        Assert.Equal(msg.Date.ToLocalTime().ToString("t"), msg.DateDisplay);
     }
 
     [Fact]
@@ -66,7 +66,7 @@ public class MailMessageSummaryDateDisplayTests
             // One year ago — definitely not today.
             Date = new DateTimeOffset(now.Year - 1, 5, 1, 10, 0, 0, now.Offset)
         };
-        Assert.Equal($"5/1/{now.Year - 1}", msg.DateDisplay);
+        Assert.Equal(msg.Date.ToLocalTime().ToString("d"), msg.DateDisplay);
     }
 }
 

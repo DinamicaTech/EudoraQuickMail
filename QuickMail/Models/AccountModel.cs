@@ -81,6 +81,21 @@ public partial class AccountModel : ObservableObject
     public bool SmtpUseSsl { get; set; } = false; // STARTTLS on 587
     public bool SmtpAcceptInvalidCert { get; set; } = false;
 
+    // POP3 (local-first backend). POP3 is an ingress queue only: a message is deleted from the
+    // server after its body and UIDL have committed to SQLite.
+    public string Pop3Host { get; set; } = string.Empty;
+    public int Pop3Port { get; set; } = 995;
+    public bool Pop3UseSsl { get; set; } = true;
+    public bool Pop3AcceptInvalidCert { get; set; } = false;
+
+    /// <summary>Whether the periodic receiver includes this account. Manual checking remains available.</summary>
+    public bool CheckIncomingMail { get; set; } = true;
+
+    /// <summary>DPAPI-protected password payloads, Base64 encoded. Empty for OAuth and local archives.</summary>
+    public string EncryptedPop3Password { get; set; } = string.Empty;
+    public bool SmtpUsesPop3Credentials { get; set; } = true;
+    public string EncryptedSmtpPassword { get; set; } = string.Empty;
+
     /// <summary>
     /// Encryption is mandatory on this account, not merely preferred.
     ///

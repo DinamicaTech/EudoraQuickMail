@@ -1,5 +1,6 @@
 using System;
 using System.Net;
+using System.IO;
 using System.Text.RegularExpressions;
 using QuickMail.Models;
 using QuickMail.Services;
@@ -97,6 +98,33 @@ public static class MessageBodyHtmlBuilder
             && TryBuildSanitizedHtmlDocument(detail.Subject, htmlBody, themeCss, out var sanitized))
             return sanitized;
 
+        // Eudora represents some inline pictures as a MIME-looking text stub plus an
+        // "Attachment Converted" path. The importer deliberately keeps that path as
+        // a reference; materialize it only for display so the database still contains
+        // no duplicate attachment bytes.
+        if (string.IsNullOrWhiteSpace(htmlBody) &&
+            detail.PlainTextBody.Contains("Content-Type: image/", StringComparison.OrdinalIgnoreCase))
+        {
+            var images = detail.Attachments
+                .Where(a => a.ContentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase)
+                         && !string.IsNullOrWhiteSpace(a.PartSpecifier)
+                         && File.Exists(a.PartSpecifier))
+                .Take(8)
+                .Select(a =>
+                {
+                    try
+                    {
+                        var bytes = File.ReadAllBytes(a.PartSpecifier!);
+                        if (bytes.Length > 12 * 1024 * 1024) return string.Empty;
+                        return $"<figure><img style=\"max-width:100%;height:auto\" alt=\"{WebUtility.HtmlEncode(a.FileName)}\" src=\"data:{a.ContentType};base64,{Convert.ToBase64String(bytes)}\"><figcaption>{WebUtility.HtmlEncode(a.FileName)}</figcaption></figure>";
+                    }
+                    catch { return string.Empty; }
+                });
+            var imageHtml = string.Concat(images);
+            if (imageHtml.Length > 0 && TryBuildSanitizedHtmlDocument(detail.Subject, imageHtml, themeCss, out var imageDocument))
+                return imageDocument;
+        }
+
         var text = !string.IsNullOrWhiteSpace(detail.PlainTextBody)
             ? detail.PlainTextBody
             : HtmlToText(htmlBody);
@@ -125,7 +153,7 @@ public static class MessageBodyHtmlBuilder
     internal static bool TryBuildSanitizedHtmlDocument(
         string? subject, string html, string? themeCss, TimeSpan timeout, out string document)
     {
-        if (!TryStripHeavyHtml(html, timeout, out var body))
+        if (!TryStripHeavyHtml(html, timeout, out var body, preserveImages: true))
         {
             document = string.Empty;
             return false;
@@ -147,7 +175,7 @@ public static class MessageBodyHtmlBuilder
         const string cspTag =
             "<meta http-equiv=\"Content-Security-Policy\" " +
             "content=\"default-src 'none'; script-src 'none'; object-src 'none'; " +
-            "frame-src 'none'; img-src 'none'; media-src 'none'; connect-src 'none'; " +
+            "frame-src 'none'; img-src https: http: data:; media-src 'none'; connect-src 'none'; " +
             "form-action 'none'; base-uri 'none'; style-src 'unsafe-inline';\">";
         // Defaults only — sender-styled HTML still wins unless the user opts into
         // force-theme (which arrives inside themeCss as !important rules). The
@@ -244,6 +272,10 @@ public static class MessageBodyHtmlBuilder
     /// must not be rendered.
     /// </summary>
     internal static bool TryStripHeavyHtml(string html, TimeSpan timeout, out string stripped)
+        => TryStripHeavyHtml(html, timeout, out stripped, preserveImages: false);
+
+    private static bool TryStripHeavyHtml(
+        string html, TimeSpan timeout, out string stripped, bool preserveImages)
     {
         var complete = true;
         string Step(string input, string pattern, RegexOptions options, string replacement = "")
@@ -268,7 +300,10 @@ public static class MessageBodyHtmlBuilder
             RegexOptions.IgnoreCase | RegexOptions.Singleline);
         body = Step(body, "<!--.*?-->", RegexOptions.Singleline);
         body = Step(body, "<script\\b.*?</script>", RegexOptions.IgnoreCase | RegexOptions.Singleline);
-        body = Step(body, "<style\\b.*?</style>", RegexOptions.IgnoreCase | RegexOptions.Singleline);
+        // Preserve the sender's CSS. Removing <style> and inline style attributes
+        // destroyed table layouts and made imported Eudora HTML look unlike the same
+        // document opened in a browser. The CSP still blocks scripts, navigation,
+        // remote resources and active content.
         body = Step(body, "<svg\\b.*?</svg>", RegexOptions.IgnoreCase | RegexOptions.Singleline);
         body = Step(body, "<(iframe|object|embed|video|audio|canvas|form)\\b.*?</\\1>", RegexOptions.IgnoreCase | RegexOptions.Singleline);
         // Substitute each image's alt text before images are removed (issue #163). Removing the
@@ -277,14 +312,21 @@ public static class MessageBodyHtmlBuilder
         // image is the whole content of a link — the anchor is left empty, has no accessible name,
         // and is announced from its href instead, so a row of social icons reads as whatever the
         // tracking URLs happen to spell ("redirect", "c/1pfGAI30…") rather than "Facebook".
-        body = StepEval(body, ImgWithAltText, ImageAltReplacement);
-        body = Step(body, "<(img|link|base|input|button|meta)\\b[^>]*>", RegexOptions.IgnoreCase | RegexOptions.Singleline);
+        if (!preserveImages)
+            body = StepEval(body, ImgWithAltText, ImageAltReplacement);
+        body = Step(body, preserveImages
+                ? "<(link|base|input|button|meta)\\b[^>]*>"
+                : "<(img|link|base|input|button|meta)\\b[^>]*>",
+            RegexOptions.IgnoreCase | RegexOptions.Singleline);
         // target is stripped so that anchors navigate in-place: a target="_blank" link raises
         // WebView2's NewWindowRequested rather than NavigationStarting, and any host that
         // forgets to handle that event silently opens the link in an in-app popup instead of
         // the user's default browser (issue #483). Hosts handle both events; this keeps the
         // rendered document from depending on that.
-        body = Step(body, "\\s(on\\w+|style|src|srcset|background|target)\\s*=\\s*(\"[^\"]*\"|'[^']*'|[^\\s>]+)", RegexOptions.IgnoreCase | RegexOptions.Singleline);
+        var unsafeAttributes = preserveImages
+            ? "\\s(on\\w+|target)\\s*=\\s*(\"[^\"]*\"|'[^']*'|[^\\s>]+)"
+            : "\\s(on\\w+|src|srcset|background|target)\\s*=\\s*(\"[^\"]*\"|'[^']*'|[^\\s>]+)";
+        body = Step(body, unsafeAttributes, RegexOptions.IgnoreCase | RegexOptions.Singleline);
         stripped = body;
         return complete;
     }

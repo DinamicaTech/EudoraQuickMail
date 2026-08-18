@@ -93,6 +93,7 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
     public bool IsSpellNavAvailable => true;
 #pragma warning restore CA1822
     [ObservableProperty] private string _statusText = string.Empty;
+    [ObservableProperty] private string _scheduledForLocal = DateTime.Now.AddMinutes(10).ToString("g");
 
     /// <summary>
     /// Which announcement category the View reads the accompanying <see cref="StatusText"/> under.
@@ -191,6 +192,8 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
     partial void OnBccChanged(string value)     => _isDirty = true;
     partial void OnSubjectChanged(string value) => _isDirty = true;
     partial void OnBodyChanged(string value)    => _isDirty = true;
+    [ObservableProperty] private string _spellLanguage = "es-ES";
+    partial void OnSpellLanguageChanged(string value) => _isDirty = true;
 
     public void Seed(ComposeModel model)
     {
@@ -205,6 +208,7 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
         Bcc     = model.Bcc;
         Subject = model.Subject;
         Body    = model.Body;
+        SpellLanguage = string.IsNullOrWhiteSpace(model.SpellLanguage) ? "es-ES" : model.SpellLanguage;
 
         Attachments.Clear();
         foreach (var att in model.Attachments)
@@ -405,8 +409,10 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
             return;
         }
 
-        var password = _credentials.GetPassword(account.Id);
-        if (string.IsNullOrEmpty(password) && account.AuthType == Models.AuthType.Password)
+        var password = account.BackendKind == BackendKind.Pop3Smtp
+            ? null : _credentials.GetPassword(account.Id);
+        if (string.IsNullOrEmpty(password) && account.AuthType == Models.AuthType.Password
+            && account.BackendKind != BackendKind.Pop3Smtp)
         {
             SetStatusOutcome("No password stored for this account.");
             return;
@@ -463,6 +469,22 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
         {
             IsBusy = false;
         }
+    }
+
+    [RelayCommand]
+    private async Task ScheduleSendAsync()
+    {
+        if (string.IsNullOrWhiteSpace(To)) { SetStatusOutcome("Please enter at least one recipient."); return; }
+        if (SenderAccount is not { } account) { SetStatusOutcome("Please select a sender account."); return; }
+        if (!DateTime.TryParse(ScheduledForLocal, out var local) || local <= DateTime.Now)
+        { SetStatusOutcome("Enter a future local date and time for scheduled sending."); return; }
+        if (System.Windows.Application.Current is not App { ScheduledSender: { } scheduler })
+        { SetStatusOutcome("Scheduled sending is unavailable."); return; }
+        var compose = BuildComposeModel(account.Id);
+        await scheduler.ScheduleAsync(compose, new DateTimeOffset(local));
+        _isSent = true;
+        SetStatusOutcome($"Message scheduled for {local:g}.");
+        CloseRequested?.Invoke();
     }
 
     [RelayCommand]
@@ -741,13 +763,24 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
                 var snapshot = RichBodyProvider.Invoke();
                 if (!snapshot.IsEmpty)
                 {
-                    body     = snapshot.PlainText;
-                    htmlBody = _markdown.WrapDocument(snapshot.Html, Subject);
+                    // Sanitize again at the trust boundary: pasted HTML enters the
+                    // contenteditable DOM after the initial load and may contain active
+                    // elements or event attributes. Preserve mail CSS/tables/images but
+                    // never send scripts or handlers onward.
+                    htmlBody = MessageBodyHtmlBuilder.BuildMessageHtml(new MailMessageDetail
+                    {
+                        Subject = Subject,
+                        HtmlBody = snapshot.Html,
+                        PlainTextBody = snapshot.PlainText,
+                    });
+                    body     = MessageBodyHtmlBuilder.HtmlToText(htmlBody);
+                    // The WebView editor supplies a complete HTML document so do not
+                    // wrap it again and discard its original head/CSS.
                 }
                 break;
         }
 
-        return new ComposeModel
+        var model = new ComposeModel
         {
             AccountId           = accountId,
             To                  = To,
@@ -756,12 +789,14 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
             Subject             = Subject,
             Body                = body,
             Mode                = CurrentMode,
+            SpellLanguage       = SpellLanguage,
             HtmlBody            = htmlBody,
             InReplyToMessageId  = _inReplyToMessageId,
             DraftMessageId      = _draftMessageId,
             DraftFolderName     = _draftFolderName,
             Attachments         = Attachments.ToList(),
         };
+        return model;
     }
 
     // ── Factory helpers ────────────────────────────────────────────────────────
@@ -785,7 +820,7 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
             plainBody.Split('\n'),
             line => "> " + line));
 
-        return new ComposeModel
+        var model = new ComposeModel
         {
             Kind      = ComposeKind.Reply,
             AccountId = accountId,
@@ -794,6 +829,18 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
             Body = attribution + quoted,
             InReplyToMessageId = detail.InternetMessageId
         };
+
+        // Keep the original rich body for HTML replies. Previously Reply always
+        // flattened the message to quoted plain text, so selecting HTML mode could
+        // only turn that already-damaged text back into a few paragraphs. Body stays
+        // populated as the safe/plain alternative for explicit Plain Text mode.
+        if (!string.IsNullOrEmpty(detail.HtmlBody))
+        {
+            model.HtmlBody = BuildReplyHtmlDocument(detail);
+            model.Mode = ComposeMode.Html;
+        }
+
+        return model;
     }
 
     /// <param name="ownAddress">The sender's own email address; excluded from the Cc list to avoid self-addressing.</param>
@@ -884,6 +931,21 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
             {body}
             </blockquote>
             """;
+    }
+
+    private static string BuildReplyHtmlDocument(MailMessageDetail detail)
+    {
+        var html = detail.HtmlBody ?? string.Empty;
+        var attribution = WebUtility.HtmlEncode(
+            $"On {detail.Date.ToLocalTime():f}, {detail.From} wrote:");
+        var prefix = $"<p><br></p><p>{attribution}</p>";
+        var bodyStart = html.IndexOf("<body", StringComparison.OrdinalIgnoreCase);
+        if (bodyStart >= 0)
+        {
+            var tagEnd = IndexOfTagClose(html, bodyStart);
+            if (tagEnd >= 0) return html.Insert(tagEnd + 1, prefix);
+        }
+        return $"<!doctype html><html><head><meta charset=\"utf-8\"></head><body>{prefix}{html}</body></html>";
     }
 
     private static string StripHtmlWrappers(string html)

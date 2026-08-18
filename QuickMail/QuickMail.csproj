@@ -73,6 +73,9 @@
   <ItemGroup>
     <!-- Built-in themes ship inside the assembly; ThemeStore parses them with the same loader as user theme files. -->
     <EmbeddedResource Include="Themes\BuiltIn\*.json" />
+    <!-- HugeRTE is MIT-licensed and self-hosted: no CDN, API key, telemetry, or runtime fee. -->
+    <Content Include="Assets\HugeRte\**\*" CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>

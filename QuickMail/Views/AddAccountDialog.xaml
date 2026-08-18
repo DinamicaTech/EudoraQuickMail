@@ -144,7 +144,7 @@
                         </StackPanel>
 
                         <!-- Authentication — hidden for Microsoft 365 (Graph), which is always OAuth. -->
-                        <StackPanel Visibility="{Binding IsImapBackend, Converter={StaticResource BoolToVisibility}}">
+                        <StackPanel Visibility="{Binding IsMailServerBackend, Converter={StaticResource BoolToVisibility}}">
                             <Label x:Name="LblAuthType" Content="_Authentication:" Target="{Binding ElementName=AuthTypeCombo}" Padding="0" Margin="0,0,0,2"/>
                             <ComboBox x:Name="AuthTypeCombo"
                                       SelectedIndex="{Binding AuthTypeIndex, Mode=TwoWay}"
@@ -159,7 +159,7 @@
 
                         <!-- IMAP + SMTP — collapsed for Microsoft Graph accounts, which authenticate
                              via OAuth and need no host configuration. -->
-                        <StackPanel Visibility="{Binding IsImapBackend, Converter={StaticResource BoolToVisibility}}">
+                        <StackPanel Visibility="{Binding IsMailServerBackend, Converter={StaticResource BoolToVisibility}}">
                             <Separator Margin="0,12"/>
 
                             <!-- Only for servers whose login is not the email address. Advanced,
@@ -178,6 +178,7 @@
 
                             <Separator Margin="0,12"/>
 
+                            <StackPanel Visibility="{Binding IsImapBackend, Converter={StaticResource BoolToVisibility}}">
                             <TextBlock Text="Incoming Mail (IMAP)" FontWeight="SemiBold" Margin="0,0,0,6"/>
 
                             <Label x:Name="LblImapHost" Content="IMAP _host:" Target="{Binding ElementName=ImapHostBox}" Padding="0" Margin="0,4,0,2"/>
@@ -201,6 +202,23 @@
                                       IsChecked="{Binding ImapAcceptInvalidCert}"
                                       AutomationProperties.Name="IMAP accept invalid SSL certificates"
                                       Margin="0,0,0,6"/>
+                            </StackPanel>
+
+                            <StackPanel Visibility="{Binding IsPop3Backend, Converter={StaticResource BoolToVisibility}}">
+                                <TextBlock Text="Incoming Mail (POP3)" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                                <Label Content="POP3 host:" Padding="0" Margin="0,4,0,2"/>
+                                <TextBox Text="{Binding Pop3Host, UpdateSourceTrigger=PropertyChanged}"
+                                         AutomationProperties.Name="POP3 host"/>
+                                <Label Content="POP3 port:" Padding="0" Margin="0,6,0,2"/>
+                                <TextBox Text="{Binding Pop3Port, UpdateSourceTrigger=PropertyChanged}"
+                                         AutomationProperties.Name="POP3 port"/>
+                                <CheckBox Content="Use SSL (port 995)" IsChecked="{Binding Pop3UseSsl}"
+                                          AutomationProperties.Name="POP3 use SSL" Margin="0,6"/>
+                                <CheckBox Content="Accept invalid certificates" IsChecked="{Binding Pop3AcceptInvalidCert}"
+                                          AutomationProperties.Name="POP3 accept invalid SSL certificates" Margin="0,0,0,6"/>
+                                <CheckBox Content="Comprobar correo entrante" IsChecked="{Binding CheckIncomingMail}"
+                                          AutomationProperties.Name="Comprobar correo entrante" Margin="0,4,0,6"/>
+                            </StackPanel>
 
                             <Separator Margin="0,6"/>
 

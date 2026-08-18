@@ -2,8 +2,11 @@
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics.CodeAnalysis;
+using System.IO;
 using System.Linq;
+using System.Net;
 using System.Net.Mail;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
@@ -11,8 +14,10 @@ using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Documents;
 using System.Windows.Input;
+using System.Windows.Markup;
 using System.Windows.Media;
 using System.Windows.Threading;
+using Microsoft.Web.WebView2.Core;
 using QuickMail.Controls;
 using QuickMail.Helpers;
 using QuickMail.Models;
@@ -72,6 +77,9 @@ public partial class ComposeWindow : Window
     private int _lastAnnouncedSpellingIndex = -1;
     private TextPointer? _richSpellingWordStart;
     private TextPointer? _richSpellingWordEnd;
+    private bool _htmlEditorReady;
+    private string? _pendingHtml;
+    private RichBodySnapshot _htmlSnapshot = RichBodySnapshot.Empty;
 
     // Track the current spelling error so Alt+1/2/3 can replace it with a suggestion.
     private int _currentSpellingWordStart = -1;
@@ -85,6 +93,7 @@ public partial class ComposeWindow : Window
     // after suppressing the SC_KEYMENU message that WPF's AccessKeyManager would otherwise
     // use to steal focus to the menu bar after our handler returns.
     private bool _suppressNextMenuActivation;
+    private bool _closeAfterDraftSave;
 
     // Last block type announced while navigating in HTML mode (e.g. "Heading 2", "Normal text").
     // Used to suppress repeat announcements when the caret stays on the same paragraph type.
@@ -201,11 +210,12 @@ public partial class ComposeWindow : Window
         FromCombo.DropDownClosed    += (_, _) => AnnounceSenderAccount(onlyIfChanged: true);
         FromCombo.LostKeyboardFocus += (_, _) => AnnounceSenderAccount(onlyIfChanged: true);
 
-        Loaded += (_, _) =>
+        Loaded += async (_, _) =>
         {
             // Whatever account the window opened on is already the baseline, so leaving
             // the From combo without changing anything stays silent.
             _announcedSenderAccountId = _vm.SenderAccount?.Id;
+            await InitializeHtmlEditorAsync();
             ApplyDefaultComposeMode();
             if (string.IsNullOrWhiteSpace(_vm.To))
             {
@@ -669,6 +679,8 @@ public partial class ComposeWindow : Window
 
     private async void OnWindowClosing(object? sender, CancelEventArgs e)
     {
+        if (_closeAfterDraftSave)
+            return;
         _vm.CancelAutoSave();
         _previewWindow?.Close();
         CloseSpellCheckDialogSilently();
@@ -699,8 +711,10 @@ public partial class ComposeWindow : Window
         if (_vm.StatusText.Contains("failed", StringComparison.OrdinalIgnoreCase))
             return;
 
-        Closing -= OnWindowClosing;
-        Close();
+        // WPF forbids calling Close while an asynchronous Closing handler from the
+        // same close request is still unwinding. Queue a fresh close operation.
+        _closeAfterDraftSave = true;
+        _ = Dispatcher.BeginInvoke(DispatcherPriority.Normal, new Action(Close));
     }
 
     // Alt+A (compose.focusAttachments, issue #439): move focus to this draft's attachment list,
@@ -779,6 +793,13 @@ public partial class ComposeWindow : Window
     // Ctrl+Enter → Send message (secondary shortcut alongside Alt+S).
     private async void Window_PreviewKeyDown(object sender, KeyEventArgs e)
     {
+        // On many European layouts AltGr is reported by WPF as Ctrl+Alt. It is a
+        // character modifier (not a QuickMail shortcut), so leave @ and similar
+        // characters to the focused text editor/address field.
+        var pressedModifiers = Keyboard.Modifiers;
+        if ((pressedModifiers & (ModifierKeys.Control | ModifierKeys.Alt)) ==
+            (ModifierKeys.Control | ModifierKeys.Alt))
+            return;
         // Ctrl+Shift+P: open the command palette
         if (e.Key == Key.P && Keyboard.Modifiers == (ModifierKeys.Control | ModifierKeys.Shift))
         {
@@ -1646,7 +1667,9 @@ public partial class ComposeWindow : Window
 
     private void WireRichCompose()
     {
-        _vm.RichBodyProvider = () => RichTextDocumentConverter.Snapshot(RichBodyBox.Document);
+        _vm.RichBodyProvider = () => _vm.CurrentMode == ComposeMode.Html
+            ? _htmlSnapshot
+            : RichTextDocumentConverter.Snapshot(RichBodyBox.Document);
 
         // The editor keeps its original FlowDocument for the window's lifetime.
         // Replacing RichTextBox.Document breaks UIA: the automation peer stays
@@ -1657,28 +1680,15 @@ public partial class ComposeWindow : Window
         RichBodyBox.Document.FontSize = 13;
         RichBodyBox.Document.PagePadding = new Thickness(4);
 
-        _vm.LoadHtmlIntoEditorRequested += html =>
-        {
-            // Programmatic load is not a user edit — don't mark the draft dirty.
-            // finally: a stuck suppress flag would silently stop dirty-tracking
-            // for the window's lifetime.
-            _suppressRichTextChanged = true;
-            _suppressFormattingAnnouncement = true;
-            _lastAnnouncedBlockType = null;
-            try
-            {
-                RichTextDocumentConverter.LoadInto(RichBodyBox, html);
-                RichBodyBox.CaretPosition = RichBodyBox.Document.ContentStart;
-            }
-            finally
-            {
-                _suppressRichTextChanged = false;
-                _suppressFormattingAnnouncement = false;
-            }
-        };
+        _vm.LoadHtmlIntoEditorRequested += html => _ = LoadHtmlIntoWebEditorAsync(html);
 
         _vm.InsertTextIntoEditorRequested += text =>
         {
+            if (_vm.CurrentMode == ComposeMode.Html)
+            {
+                _ = ExecuteHtmlEditorCommandAsync("insertText", text);
+                return;
+            }
             RichBodyBox.Selection.Select(RichBodyBox.CaretPosition, RichBodyBox.CaretPosition);
             RichBodyBox.Selection.Text = text;
             RichBodyBox.Selection.Select(RichBodyBox.Selection.End, RichBodyBox.Selection.End);
@@ -1697,6 +1707,80 @@ public partial class ComposeWindow : Window
         SyncModeSelector();
     }
 
+    private async Task InitializeHtmlEditorAsync()
+    {
+        try
+        {
+            await HtmlBodyEditor.EnsureCoreWebView2Async();
+            var assetFolder = Path.Combine(AppContext.BaseDirectory, "Assets", "HugeRte");
+            HtmlBodyEditor.CoreWebView2.SetVirtualHostNameToFolderMapping(
+                "quickmail.local", assetFolder, CoreWebView2HostResourceAccessKind.DenyCors);
+            HtmlBodyEditor.CoreWebView2.Settings.AreDefaultContextMenusEnabled = true;
+            HtmlBodyEditor.CoreWebView2.Settings.AreDevToolsEnabled = false;
+            HtmlBodyEditor.CoreWebView2.Settings.IsStatusBarEnabled = false;
+            HtmlBodyEditor.CoreWebView2.NavigationStarting += (_, args) =>
+            {
+                if (!args.Uri.StartsWith("https://quickmail.local/", StringComparison.OrdinalIgnoreCase)
+                    && !args.Uri.StartsWith("about:blank", StringComparison.OrdinalIgnoreCase))
+                    args.Cancel = true;
+            };
+            HtmlBodyEditor.CoreWebView2.NewWindowRequested += (_, args) => args.Handled = true;
+            HtmlBodyEditor.CoreWebView2.WebMessageReceived += (_, args) =>
+            {
+                try
+                {
+                    using var json = JsonDocument.Parse(args.TryGetWebMessageAsString());
+                    var root = json.RootElement;
+                    _htmlSnapshot = new RichBodySnapshot(
+                        root.GetProperty("html").GetString() ?? string.Empty,
+                        root.GetProperty("plain").GetString() ?? string.Empty,
+                        root.GetProperty("plain").GetString() ?? string.Empty);
+                    _vm.MarkBodyDirty();
+                }
+                catch (Exception ex) { LogService.Log("Compose HTML editor message failed", ex); }
+            };
+            var ready = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            HtmlBodyEditor.CoreWebView2.NavigationCompleted += (_, args) =>
+            {
+                if (args.IsSuccess) ready.TrySetResult();
+                else ready.TrySetException(new InvalidOperationException(
+                    $"HugeRTE host navigation failed: {args.WebErrorStatus}"));
+            };
+            HtmlBodyEditor.CoreWebView2.Navigate("https://quickmail.local/editor.html");
+            await ready.Task;
+            _htmlEditorReady = true;
+            if (_pendingHtml is not null)
+            {
+                var pending = _pendingHtml;
+                _pendingHtml = null;
+                await LoadHtmlIntoWebEditorAsync(pending);
+            }
+            await HtmlBodyEditor.CoreWebView2.ExecuteScriptAsync(
+                $"window.quickmailSetLanguage({JsonSerializer.Serialize(_vm.SpellLanguage)})");
+        }
+        catch (Exception ex)
+        {
+            LogService.Log("Compose HTML editor initialization failed", ex);
+        }
+    }
+
+    private async Task LoadHtmlIntoWebEditorAsync(string html)
+    {
+        if (!_htmlEditorReady || HtmlBodyEditor.CoreWebView2 is null)
+        {
+            _pendingHtml = html;
+            return;
+        }
+        var detail = new MailMessageDetail { HtmlBody = html };
+        var document = await Task.Run(() =>
+            MessageBodyHtmlBuilder.BuildMessageHtml(detail, null, false, _themeService));
+        _htmlSnapshot = new RichBodySnapshot(document, string.Empty,
+            MessageBodyHtmlBuilder.HtmlToText(document));
+        var base64 = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(document));
+        await HtmlBodyEditor.CoreWebView2.ExecuteScriptAsync(
+            $"window.quickmailLoad({JsonSerializer.Serialize(base64)})");
+    }
+
     /// <summary>
     /// Applies the initial editing mode after the View's event handlers are wired:
     /// drafts restore their saved mode; templates stay plain text; new composes use the configured default.
@@ -1705,8 +1789,9 @@ public partial class ComposeWindow : Window
     {
         ComposeMode targetMode;
         if (_vm.ComposeKind is ComposeKind.EditDraft or ComposeKind.NewDraft
-            || (_vm.ComposeKind == ComposeKind.Forward && _vm.SeededMode == ComposeMode.Html))
-            targetMode = _vm.SeededMode;       // restore saved mode (drafts) or honour HTML forward body
+            || (_vm.ComposeKind is ComposeKind.Reply or ComposeKind.ReplyAll or ComposeKind.Forward
+                && _vm.SeededMode == ComposeMode.Html))
+            targetMode = _vm.SeededMode;       // restore saved mode or preserve the source's rich reply/forward body
         else if (_vm.ComposeKind is ComposeKind.EditTemplate)
             targetMode = ComposeMode.PlainText; // templates are plain-text only
         else
@@ -1756,7 +1841,7 @@ public partial class ComposeWindow : Window
     private void FocusActiveEditor()
     {
         if (_vm.CurrentMode == ComposeMode.Html)
-            RichBodyBox.Focus();
+            HtmlBodyEditor.Focus();
         else
             BodyBox.Focus();
     }
@@ -1765,12 +1850,16 @@ public partial class ComposeWindow : Window
     private void ApplyComposeMode()
     {
         var mode = _vm.CurrentMode;
-        var bodyHadFocus = BodyBox.IsKeyboardFocusWithin || RichBodyBox.IsKeyboardFocusWithin;
+        var bodyHadFocus = BodyBox.IsKeyboardFocusWithin || RichBodyBox.IsKeyboardFocusWithin
+                           || HtmlBodyEditor.IsKeyboardFocusWithin;
         _suppressFormattingAnnouncement = true;
         _lastAnnouncedBlockType = null;
 
-        FormattingToolbarTray.Visibility = mode == ComposeMode.Html ? Visibility.Visible : Visibility.Collapsed;
-        RichBodyBox.Visibility           = mode == ComposeMode.Html ? Visibility.Visible : Visibility.Collapsed;
+        // HugeRTE owns the HTML toolbar inside WebView2. The WPF toolbar remains
+        // available to the legacy converter but must not duplicate the active editor UI.
+        FormattingToolbarTray.Visibility = Visibility.Collapsed;
+        RichBodyBox.Visibility           = Visibility.Collapsed;
+        HtmlBodyEditor.Visibility        = mode == ComposeMode.Html ? Visibility.Visible : Visibility.Collapsed;
         BodyBox.Visibility               = mode == ComposeMode.Html ? Visibility.Collapsed : Visibility.Visible;
         BodyBox.FontFamily = mode == ComposeMode.Markdown ? new FontFamily("Consolas") : new FontFamily("Segoe UI");
 
@@ -1840,6 +1929,18 @@ public partial class ComposeWindow : Window
     private void MenuToggleSpelling_Click(object sender, RoutedEventArgs e)  => ToggleSpellingAnnouncements();
     private void MenuCommandPalette_Click(object sender, RoutedEventArgs e)  => OpenCommandPalette();
     private void MenuOpenPreview_Click(object sender, RoutedEventArgs e) => OpenPreview();
+
+    private async void SpellLanguageSelector_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (SpellLanguageSelector.SelectedValue is not string language) return;
+        var xmlLanguage = XmlLanguage.GetLanguage(language);
+        foreach (var editor in new TextBoxBase[] { SubjectBox, BodyBox, RichBodyBox })
+            editor.Language = xmlLanguage;
+
+        if (_htmlEditorReady && HtmlBodyEditor.CoreWebView2 is not null)
+            await HtmlBodyEditor.CoreWebView2.ExecuteScriptAsync(
+                $"window.quickmailSetLanguage({JsonSerializer.Serialize(language)})");
+    }
 
     private void ModeSelector_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
@@ -1989,6 +2090,34 @@ public partial class ComposeWindow : Window
             RichBodyBox.Focus();
     }
 
+    private async Task ExecuteHtmlEditorCommandAsync(string command, string? value = null)
+    {
+        if (HtmlBodyEditor.CoreWebView2 is null) return;
+        if (command == "insertText")
+        {
+            await HtmlBodyEditor.CoreWebView2.ExecuteScriptAsync(
+                $"window.quickmailInsertText({JsonSerializer.Serialize(value ?? string.Empty)})");
+            return;
+        }
+        var hugeCommand = command switch
+        {
+            "bold" => "Bold",
+            "italic" => "Italic",
+            "underline" => "Underline",
+            "strikeThrough" => "Strikethrough",
+            "formatBlock" => "FormatBlock",
+            "insertOrderedList" => "InsertOrderedList",
+            "insertUnorderedList" => "InsertUnorderedList",
+            "insertHTML" => "mceInsertContent",
+            "removeFormat" => "RemoveFormat",
+            _ => command,
+        };
+        var commandJson = JsonSerializer.Serialize(hugeCommand);
+        var valueJson = JsonSerializer.Serialize(value);
+        await HtmlBodyEditor.CoreWebView2.ExecuteScriptAsync(
+            $"window.quickmailExec({commandJson}, {valueJson})");
+    }
+
     private void ApplyMarkdownEdit(MarkdownEdit edit)
     {
         _suppressSpellingAnnouncement = true;
@@ -2011,6 +2140,7 @@ public partial class ComposeWindow : Window
     private void ToggleBold()
     {
         if (_vm.CurrentMode == ComposeMode.Markdown) { ToggleMarkdownInline("**", "Bold"); return; }
+        if (_vm.CurrentMode == ComposeMode.Html) { _ = ExecuteHtmlEditorCommandAsync("bold"); AnnounceFormatting("Bold toggled"); return; }
         EnsureRichEditorFocused();
         EditingCommands.ToggleBold.Execute(null, RichBodyBox);
         var on = Equals(RichBodyBox.Selection.GetPropertyValue(TextElement.FontWeightProperty), FontWeights.Bold);
@@ -2020,6 +2150,7 @@ public partial class ComposeWindow : Window
     private void ToggleItalic()
     {
         if (_vm.CurrentMode == ComposeMode.Markdown) { ToggleMarkdownInline("*", "Italic"); return; }
+        if (_vm.CurrentMode == ComposeMode.Html) { _ = ExecuteHtmlEditorCommandAsync("italic"); AnnounceFormatting("Italic toggled"); return; }
         EnsureRichEditorFocused();
         EditingCommands.ToggleItalic.Execute(null, RichBodyBox);
         var on = Equals(RichBodyBox.Selection.GetPropertyValue(TextElement.FontStyleProperty), FontStyles.Italic);
@@ -2034,6 +2165,7 @@ public partial class ComposeWindow : Window
             AnnounceFormatting("Underline is not available in Markdown. Use HTML mode for underline.");
             return;
         }
+        if (_vm.CurrentMode == ComposeMode.Html) { _ = ExecuteHtmlEditorCommandAsync("underline"); AnnounceFormatting("Underline toggled"); return; }
         EnsureRichEditorFocused();
         EditingCommands.ToggleUnderline.Execute(null, RichBodyBox);
         var on = SelectionHasDecoration(TextDecorationLocation.Underline);
@@ -2043,6 +2175,7 @@ public partial class ComposeWindow : Window
     private void ToggleStrikethrough()
     {
         if (_vm.CurrentMode == ComposeMode.Markdown) { ToggleMarkdownInline("~~", "Strikethrough"); return; }
+        if (_vm.CurrentMode == ComposeMode.Html) { _ = ExecuteHtmlEditorCommandAsync("strikeThrough"); AnnounceFormatting("Strikethrough toggled"); return; }
         EnsureRichEditorFocused();
         var selection = RichBodyBox.Selection;
         var current = selection.GetPropertyValue(Inline.TextDecorationsProperty) as TextDecorationCollection;
@@ -2074,6 +2207,13 @@ public partial class ComposeWindow : Window
             var edit = MarkdownEditing.ToggleHeading(BodyBox.Text, BodyBox.CaretIndex, level);
             ApplyMarkdownEdit(edit);
             AnnounceFormatting(edit.TurnedOn ? $"Heading {level}" : "Normal text");
+            return;
+        }
+
+        if (_vm.CurrentMode == ComposeMode.Html)
+        {
+            _ = ExecuteHtmlEditorCommandAsync("formatBlock", $"H{level}");
+            AnnounceFormatting($"Heading {level}");
             return;
         }
 
@@ -2207,6 +2347,13 @@ public partial class ComposeWindow : Window
             return;
         }
 
+        if (_vm.CurrentMode == ComposeMode.Html)
+        {
+            _ = ExecuteHtmlEditorCommandAsync(ordered ? "insertOrderedList" : "insertUnorderedList");
+            AnnounceFormatting($"{name} toggled");
+            return;
+        }
+
         EnsureRichEditorFocused();
         var command = ordered ? EditingCommands.ToggleNumbering : EditingCommands.ToggleBullets;
         command.Execute(null, RichBodyBox);
@@ -2219,7 +2366,7 @@ public partial class ComposeWindow : Window
         var inMarkdown = _vm.CurrentMode == ComposeMode.Markdown;
         var selectionText = inMarkdown
             ? BodyBox.SelectedText.Trim()
-            : RichBodyBox.Selection.Text.Trim();
+            : _vm.CurrentMode == ComposeMode.Html ? string.Empty : RichBodyBox.Selection.Text.Trim();
         var dialog = new InsertLinkDialog(selectionText) { Owner = this };
         if (dialog.ShowDialog() != true)
         {
@@ -2233,6 +2380,15 @@ public partial class ComposeWindow : Window
                 BodyBox.Text, BodyBox.SelectionStart, BodyBox.SelectionLength,
                 dialog.DisplayText, dialog.Url);
             ApplyMarkdownEdit(edit);
+            AnnounceFormatting("Link inserted");
+            return;
+        }
+
+        if (_vm.CurrentMode == ComposeMode.Html)
+        {
+            var display = WebUtility.HtmlEncode(dialog.DisplayText);
+            var url = WebUtility.HtmlEncode(dialog.Url);
+            _ = ExecuteHtmlEditorCommandAsync("insertHTML", $"<a href=\"{url}\">{display}</a>");
             AnnounceFormatting("Link inserted");
             return;
         }
@@ -2258,6 +2414,13 @@ public partial class ComposeWindow : Window
             var edit = MarkdownEditing.ClearFormatting(
                 BodyBox.Text, BodyBox.SelectionStart, BodyBox.SelectionLength);
             ApplyMarkdownEdit(edit);
+            AnnounceFormatting("Formatting cleared");
+            return;
+        }
+
+        if (_vm.CurrentMode == ComposeMode.Html)
+        {
+            _ = ExecuteHtmlEditorCommandAsync("removeFormat");
             AnnounceFormatting("Formatting cleared");
             return;
         }
@@ -2288,6 +2451,8 @@ public partial class ComposeWindow : Window
     {
         if (_vm.CurrentMode == ComposeMode.Markdown)
             return MarkdownEditing.DescribeFormattingParts(BodyBox.Text, BodyBox.CaretIndex);
+        if (_vm.CurrentMode == ComposeMode.Html)
+            return ["HTML content", "Use the formatting toolbar to change the current selection"];
 
         var selection = RichBodyBox.Selection;
 

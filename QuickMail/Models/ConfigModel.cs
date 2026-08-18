@@ -262,13 +262,15 @@ public class ConfigModel
     // ── Compose ───────────────────────────────────────────────────────────────────
 
     /// <summary>Editing mode new compose windows start in. Drafts reopen in the mode they were saved in; templates always reopen in plain text.</summary>
-    public ComposeMode DefaultComposeMode { get; set; } = ComposeMode.PlainText;
+    public ComposeMode DefaultComposeMode { get; set; } = ComposeMode.Html;
 
     /// <summary>Automatically save composes as drafts while editing.</summary>
     public bool AutoSaveDrafts { get; set; } = true;
 
     /// <summary>Seconds between automatic draft saves. Clamped to 30–600.</summary>
     public int AutoSaveIntervalSeconds { get; set; } = 120;
+    /// <summary>How far back sent mail is scanned for recipient autocomplete.</summary>
+    public int RecipientCacheYears { get; set; } = 2;
 
     // ── Advanced ──────────────────────────────────────────────────────────────────
 
@@ -489,6 +491,12 @@ public class ConfigModel
         "countdesc"    => MessageSort.CountDescending,
         "countasc"     => MessageSort.CountAscending,
         "flaggedfirst" => MessageSort.FlaggedFirst,
+        "fromasc" => MessageSort.FromAscending,
+        "fromdesc" => MessageSort.FromDescending,
+        "readasc" => MessageSort.ReadStateAscending,
+        "readdesc" => MessageSort.ReadStateDescending,
+        "attachmentsfirst" => MessageSort.AttachmentsFirst,
+        "attachmentslast" => MessageSort.AttachmentsLast,
         _              => MessageSort.DateDescending,
     };
 
@@ -501,6 +509,12 @@ public class ConfigModel
         MessageSort.CountDescending => "countDesc",
         MessageSort.CountAscending  => "countAsc",
         MessageSort.FlaggedFirst    => "flaggedFirst",
+        MessageSort.FromAscending => "fromAsc",
+        MessageSort.FromDescending => "fromDesc",
+        MessageSort.ReadStateAscending => "readAsc",
+        MessageSort.ReadStateDescending => "readDesc",
+        MessageSort.AttachmentsFirst => "attachmentsFirst",
+        MessageSort.AttachmentsLast => "attachmentsLast",
         _                           => "dateDesc",
     };
 }

@@ -19,7 +19,7 @@ namespace QuickMail.Services;
 
 public class ImapMailService : IMailService, IChangeNotifier, IConnectionProbe
 {
-    private static readonly string[] ComposeModeHeaders = ["X-QuickMail-Compose-Mode"];
+    private static readonly string[] ComposeModeHeaders = ["X-QuickMail-Compose-Mode", "X-QuickMail-Spell-Language"];
 
     private const int DefaultMaxConnectionsPerAccount = 6;
     private const int AbsoluteMaxConnectionsPerAccount = 15;
@@ -421,6 +421,7 @@ public class ImapMailService : IMailService, IChangeNotifier, IConnectionProbe
                 HtmlBody      = htmlText,
                 Attachments   = attachments,
                 DraftComposeMode = ParseComposeMode(s.Headers?["X-QuickMail-Compose-Mode"]),
+                DraftSpellLanguage = s.Headers?["X-QuickMail-Spell-Language"] ?? "es-ES",
             };
 
             PopulateCalendar(detail, rawCalendarIcs);

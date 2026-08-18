@@ -1157,6 +1157,7 @@
                         <Thumb x:Name="PART_HeaderGripper"
                                HorizontalAlignment="Right"
                                Width="6" Margin="0,2"
+                               Panel.ZIndex="2"
                                Cursor="SizeWE">
                             <Thumb.Template>
                                 <ControlTemplate TargetType="Thumb">

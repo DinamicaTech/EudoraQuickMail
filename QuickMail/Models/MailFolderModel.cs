@@ -12,6 +12,8 @@ public class MailFolderModel
 {
     public Guid AccountId { get; set; }
     public bool IsHeader { get; set; }
+    /// <summary>Local-only virtual node. It can contain folders but never messages.</summary>
+    public bool IsContainer { get; set; }
     public string FullName { get; set; } = string.Empty;
     /// <summary>
     /// Parent folder identifier for backends that model hierarchy by parent reference rather than

@@ -38,6 +38,7 @@ public partial class AddAccountViewModel : AccountEditorViewModel, IDisposable
         var backends = new List<BackendKindOption>
         {
             new(BackendKind.ImapSmtp, "Standard IMAP/SMTP"),
+            new(BackendKind.Pop3Smtp, "Local mail (POP3/SMTP)"),
         };
         if (gate.IsEnabled(FeatureFlag.GraphBackend))
             backends.Add(new(BackendKind.MicrosoftGraph, "Microsoft 365 (Graph)"));
@@ -104,8 +105,7 @@ public partial class AddAccountViewModel : AccountEditorViewModel, IDisposable
     /// The IMAP-versus-Graph choice, shown only for Microsoft accounts and only inside Advanced
     /// settings. Every other provider has exactly one connection method, so asking would be noise.
     /// </summary>
-    public bool ShowConnectionMethod =>
-        AvailableBackends.Count > 1 && SelectedProvider?.Id == ProviderCatalog.MicrosoftId;
+    public bool ShowConnectionMethod => AvailableBackends.Count > 1;
 
     protected override bool IsGoogleAuthEnabled => _gate.IsEnabled(FeatureFlag.GoogleAuth);
 
@@ -400,8 +400,10 @@ public partial class AddAccountViewModel : AccountEditorViewModel, IDisposable
         }
     }
 
-    public AccountModel ToAccountModel() => new()
+    public AccountModel ToAccountModel()
     {
+        var account = new AccountModel
+        {
         AccountName = AccountName,
         DisplayName = DisplayName,
         // The NORMALIZED address where one can be parsed out, not the raw box: a pasted
@@ -420,6 +422,11 @@ public partial class AddAccountViewModel : AccountEditorViewModel, IDisposable
         ImapPort = ImapPort,
         ImapUseSsl = ImapUseSsl,
         ImapAcceptInvalidCert = ImapAcceptInvalidCert,
+        Pop3Host = Pop3Host,
+        Pop3Port = Pop3Port,
+        Pop3UseSsl = Pop3UseSsl,
+        Pop3AcceptInvalidCert = Pop3AcceptInvalidCert,
+        CheckIncomingMail = CheckIncomingMail,
         SmtpHost = SmtpHost,
         SmtpPort = SmtpPort,
         SmtpUseSsl = SmtpUseSsl,
@@ -430,7 +437,11 @@ public partial class AddAccountViewModel : AccountEditorViewModel, IDisposable
         Signature = Signature,
         SyncContacts = SyncContacts && ShowContactSyncOption,
         SyncCalendar = SyncCalendar && ShowCalendarSyncOption,
-    };
+        };
+        if (account.BackendKind == BackendKind.Pop3Smtp && !string.IsNullOrEmpty(Password))
+            new DpapiAccountSecretProtector().SetPop3Password(account, Password);
+        return account;
+    }
 
     /// <summary>
     /// Called from AddAccountDialog.OnClosed. Cancels before disposing so an in-flight lookup gets a

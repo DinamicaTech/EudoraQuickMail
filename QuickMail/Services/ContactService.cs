@@ -6,6 +6,8 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using QuickMail.Models;
+using Microsoft.Data.Sqlite;
+using MimeKit;
 
 namespace QuickMail.Services;
 
@@ -18,11 +20,15 @@ public class ContactService : IContactService, IDisposable
     private List<ContactModel> _contactsCache = [];
     private List<GroupModel>   _groupsCache   = [];
     private bool _loaded = false;
+    private readonly string _mailDbPath;
+    private readonly int _recipientCacheYears;
 
-    public ContactService(ProfileContext profile)
+    public ContactService(ProfileContext profile, int recipientCacheYears = 2)
     {
         _contactsFilePath = Path.Combine(profile.ProfileDir, "contacts.json");
         _groupsFilePath   = Path.Combine(profile.ProfileDir, "groups.json");
+        _mailDbPath       = Path.Combine(profile.ProfileDir, "mail.db");
+        _recipientCacheYears = Math.Clamp(recipientCacheYears, 1, 20);
     }
 
     // ── Contacts ─────────────────────────────────────────────────────────────
@@ -463,6 +469,7 @@ public class ContactService : IContactService, IDisposable
             // Check again after acquiring lock in case another thread loaded while we were waiting
             if (_loaded) return;
             _contactsCache = await LoadJsonAsync(_contactsFilePath, () => new List<ContactModel>());
+            _contactsCache.AddRange(await LoadSentRecipientsAsync());
             _groupsCache   = await LoadGroupsWithRecoveryAsync();
             _loaded = true;
         }
@@ -470,6 +477,43 @@ public class ContactService : IContactService, IDisposable
         {
             _loadLock.Release();
         }
+    }
+
+    private async Task<List<ContactModel>> LoadSentRecipientsAsync()
+    {
+        var result = new Dictionary<string, ContactModel>(StringComparer.OrdinalIgnoreCase);
+        if (!File.Exists(_mailDbPath)) return [];
+        try
+        {
+            await using var connection = new SqliteConnection($"Data Source={_mailDbPath};Mode=ReadOnly");
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = """
+                SELECT to_addr, date_ticks FROM MessageSummary
+                WHERE date_ticks >= $cutoff AND to_addr <> '' AND
+                      (lower(folder_name) LIKE '%sent%' OR lower(folder_name) = 'out' OR lower(folder_name) LIKE '%/out')
+                ORDER BY date_ticks DESC LIMIT 50000;
+                """;
+            command.Parameters.AddWithValue("$cutoff", DateTimeOffset.UtcNow.AddYears(-_recipientCacheYears).UtcTicks);
+            await using var reader = await command.ExecuteReaderAsync();
+            var nextId = -1;
+            while (await reader.ReadAsync())
+            {
+                if (!InternetAddressList.TryParse(reader.GetString(0), out var addresses)) continue;
+                foreach (var mailbox in addresses.OfType<MailboxAddress>())
+                {
+                    if (result.ContainsKey(mailbox.Address)) continue;
+                    result[mailbox.Address] = new ContactModel
+                    {
+                        Id = nextId--, DisplayName = mailbox.Name ?? string.Empty,
+                        EmailAddress = mailbox.Address, LastUsedTicks = reader.GetInt64(1),
+                        Source = ContactSource.SentHistory, IsPriorRecipient = true,
+                    };
+                }
+            }
+        }
+        catch (Exception ex) { LogService.Debug($"ContactService: sent-recipient cache unavailable: {ex.Message}"); }
+        return result.Values.ToList();
     }
 
     private static async Task<List<T>> LoadJsonAsync<T>(string path, Func<List<T>> emptyFactory) where T : class

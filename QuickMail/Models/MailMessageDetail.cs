@@ -11,6 +11,7 @@ public partial class MailMessageDetail : MailMessageSummary
     public string PlainTextBody { get; set; } = string.Empty;
     /// <summary>HTML body from the message, if the sender included one. Preferred over PlainTextBody for display.</summary>
     public string HtmlBody { get; set; } = string.Empty;
+    public string RawHeaders { get; set; } = string.Empty;
 
     /// <summary>
     /// Attachment parts of this message. Assigning this list also updates the inherited
@@ -57,4 +58,5 @@ public partial class MailMessageDetail : MailMessageSummary
     /// QuickMail draft. PlainText for messages not authored by QuickMail or authored before 0.7.2.
     /// </summary>
     public ComposeMode DraftComposeMode { get; set; } = ComposeMode.PlainText;
+    public string DraftSpellLanguage { get; set; } = "es-ES";
 }

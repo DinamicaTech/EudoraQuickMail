@@ -149,15 +149,15 @@ public partial class MailMessageSummary : ObservableObject
         }
     }
 
-    /// <summary>Display-friendly date: "h:mmA/P" for today, "M/d/yyyy" otherwise.</summary>
+    /// <summary>Display-friendly date using the current Windows regional settings.</summary>
     public string DateDisplay
     {
         get
         {
             var local = Date.ToLocalTime();
             if (local.Date == DateTimeOffset.Now.Date)
-                return local.ToString("h:mm") + (local.Hour < 12 ? "A" : "P");
-            return local.ToString("M/d/yyyy");
+                return local.ToString("t", System.Globalization.CultureInfo.CurrentCulture);
+            return local.ToString("d", System.Globalization.CultureInfo.CurrentCulture);
         }
     }
 }

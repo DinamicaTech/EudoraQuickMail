@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>QuickMail HTML editor</title>
+  <script src="hugerte.min.js"></script>
+  <style>html,body,#editor{height:100%;margin:0}body{overflow:hidden}</style>
+</head>
+<body>
+  <textarea id="editor" aria-label="HTML message body"></textarea>
+  <script>
+    let quickMailEditor;
+    let preservedHeadStyles = '';
+    let quickMailLanguage = 'es-ES';
+
+    const decodeUtf8Base64 = value => {
+      const bytes = Uint8Array.from(atob(value), c => c.charCodeAt(0));
+      return new TextDecoder().decode(bytes);
+    };
+
+    const emitContent = () => {
+      if (!quickMailEditor) return;
+      const body = quickMailEditor.getContent();
+      const html = '<!doctype html><html><head><meta charset="utf-8">' +
+        preservedHeadStyles + '</head><body>' + body + '</body></html>';
+      const plain = quickMailEditor.getContent({ format: 'text' });
+      chrome.webview.postMessage(JSON.stringify({ html, plain }));
+    };
+
+    window.quickmailLoad = sourceBase64 => {
+      const source = decodeUtf8Base64(sourceBase64);
+      const parsed = new DOMParser().parseFromString(source, 'text/html');
+      preservedHeadStyles = Array.from(parsed.head.querySelectorAll('style'))
+        .map(style => style.outerHTML).join('');
+      const contentCss = Array.from(parsed.head.querySelectorAll('style'))
+        .map(style => style.textContent || '').join('\n');
+
+      if (quickMailEditor) {
+        quickMailEditor.remove();
+        quickMailEditor = null;
+      }
+
+      hugerte.init({
+        selector: '#editor',
+        base_url: 'https://quickmail.local',
+        suffix: '.min',
+        height: '100%',
+        resize: false,
+        menubar: false,
+        statusbar: false,
+        branding: false,
+        promotion: false,
+        plugins: 'lists link image table code searchreplace',
+        toolbar: 'undo redo | bold italic underline strikethrough | ' +
+          'blocks | bullist numlist | link image table | removeformat code',
+        toolbar_mode: 'wrap',
+        browser_spellcheck: true,
+        // Let Chromium own the context menu so its spelling suggestions and
+        // "Add to dictionary" action appear directly under a misspelled word.
+        contextmenu: false,
+        convert_urls: false,
+        relative_urls: false,
+        remove_script_host: false,
+        verify_html: false,
+        valid_elements: '*[*]',
+        extended_valid_elements: 'style[type|media]',
+        content_style: contentCss + '\nbody{padding:10px;box-sizing:border-box}',
+        setup: editor => {
+          quickMailEditor = editor;
+          editor.on('init', () => {
+            editor.setContent(parsed.body.innerHTML || source);
+            editor.getBody().lang = quickMailLanguage;
+            editor.getBody().spellcheck = true;
+            editor.focus();
+            emitContent();
+          });
+          editor.on('input change undo redo SetContent', emitContent);
+        }
+      });
+    };
+
+    window.quickmailExec = (command, value) => {
+      if (!quickMailEditor) return;
+      quickMailEditor.execCommand(command, false, value ?? null);
+      quickMailEditor.focus();
+      emitContent();
+    };
+
+    window.quickmailInsertText = text => {
+      if (!quickMailEditor) return;
+      quickMailEditor.insertContent(quickMailEditor.dom.encode(text));
+      quickMailEditor.focus();
+      emitContent();
+    };
+
+    window.quickmailSetLanguage = language => {
+      quickMailLanguage = language;
+      document.documentElement.lang = language;
+      if (!quickMailEditor) return;
+      const body = quickMailEditor.getBody();
+      body.lang = language;
+      body.spellcheck = true;
+      body.setAttribute('spellcheck', 'true');
+      body.focus();
+    };
+  </script>
+</body>
+</html>

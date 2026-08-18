@@ -9,4 +9,12 @@ public enum MessageSort
     CountDescending,
     CountAscending,
     FlaggedFirst,
+    FromAscending,
+    FromDescending,
+    ToAscending,
+    ToDescending,
+    ReadStateAscending,
+    ReadStateDescending,
+    AttachmentsFirst,
+    AttachmentsLast,
 }

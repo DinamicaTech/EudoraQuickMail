@@ -161,6 +161,18 @@ public class RuleService : IRuleService
         LogService.Debug($"ApplyRulesAsync: {enabledRules.Count} enabled rules, {incoming.Count} incoming messages for account {accountId}");
         if (enabledRules.Count == 0) return (0, []);
 
+        var bodies = new Dictionary<(Guid, string, string), string>();
+        if (enabledRules.Any(r => r.UseBodyCondition && !string.IsNullOrEmpty(r.BodyContains)))
+        {
+            foreach (var message in incoming)
+            {
+                var detail = await _store.LoadDetailAsync(message.AccountId, message.FolderName, message.MessageId);
+                bodies[(message.AccountId, message.FolderName, message.MessageId)] = detail is null
+                    ? message.Preview ?? string.Empty
+                    : string.IsNullOrWhiteSpace(detail.PlainTextBody) ? detail.HtmlBody ?? string.Empty : detail.PlainTextBody;
+            }
+        }
+
         var affectedKeys = new HashSet<(string MessageId, Guid AccountId, string FolderName)>();
         var removedMessages = new List<MailMessageSummary>();
 
@@ -175,7 +187,8 @@ public class RuleService : IRuleService
                 continue;
             }
 
-            var matched = incoming.Where(m => MatchesRule(rule, m)).ToList();
+            var matched = incoming.Where(m => MatchesRule(rule, m,
+                bodies.GetValueOrDefault((m.AccountId, m.FolderName, m.MessageId)))).ToList();
             LogService.Debug($"  Rule '{rule.Name}': {matched.Count} matched (action={rule.Action}, from='{rule.FromContains}', subject='{rule.SubjectContains}')");
             if (matched.Count > 0)
             {
@@ -219,7 +232,7 @@ public class RuleService : IRuleService
 
     // ── Condition Matching ──────────────────────────────────────────────────
 
-    private static bool MatchesRule(MailRule rule, MailMessageSummary msg)
+    private static bool MatchesRule(MailRule rule, MailMessageSummary msg, string? completeBody = null)
     {
         if (rule.UseFromCondition
             && !string.IsNullOrEmpty(rule.FromContains)
@@ -238,7 +251,7 @@ public class RuleService : IRuleService
 
         if (rule.UseBodyCondition
             && !string.IsNullOrEmpty(rule.BodyContains)
-            && (msg.Preview == null || !msg.Preview.Contains(rule.BodyContains, StringComparison.OrdinalIgnoreCase)))
+            && !(completeBody ?? msg.Preview ?? string.Empty).Contains(rule.BodyContains, StringComparison.OrdinalIgnoreCase))
             return false;
 
         if (rule.MustHaveAttachments && !msg.HasAttachments)

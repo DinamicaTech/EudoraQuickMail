@@ -7,7 +7,9 @@ public class AddressChipModel
     public bool IsInvalid { get; set; }
 
     // Text shown on the chip face
-    public string Label => string.IsNullOrWhiteSpace(DisplayName) ? EmailAddress : DisplayName;
+    // Keep the actual destination visible while composing; a display name alone can
+    // conceal an obsolete or unexpected address.
+    public string Label => FullAddress;
 
     // Full RFC-style address used for accessibility name, tooltip, and clipboard copy
     public string FullAddress => string.IsNullOrWhiteSpace(DisplayName)

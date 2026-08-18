@@ -10,7 +10,7 @@ using QuickMail.Models;
 
 namespace QuickMail.Services;
 
-public class LocalStoreService : ILocalStoreService
+public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
 {
     private readonly string _connectionString;
     private readonly string _dbPath;
@@ -59,6 +59,8 @@ public class LocalStoreService : ILocalStoreService
             );
             CREATE INDEX IF NOT EXISTS idx_summary_date
                 ON MessageSummary(date_ticks DESC);
+            CREATE INDEX IF NOT EXISTS idx_summary_account_folder_date
+                ON MessageSummary(account_id, folder_name, date_ticks DESC);
 
             CREATE TABLE IF NOT EXISTS MessageDetail (
                 unique_id   TEXT    NOT NULL,
@@ -84,6 +86,7 @@ public class LocalStoreService : ILocalStoreService
         RunMigration(conn, "ALTER TABLE MessageDetail ADD COLUMN attachments_json TEXT DEFAULT NULL;");
         RunMigration(conn, "ALTER TABLE MessageSummary ADD COLUMN flag_id TEXT DEFAULT NULL;");
         RunMigration(conn, "ALTER TABLE MessageDetail ADD COLUMN calendar_ics TEXT DEFAULT NULL;");
+        RunMigration(conn, "ALTER TABLE MessageDetail ADD COLUMN raw_headers TEXT NOT NULL DEFAULT '';");
         // Stable RFC 5322 Message-ID for collapsing duplicate copies across folders (issue #220).
         // Adds the column for DBs already past the v1→v2 rebuild; fresh/v1 DBs get it from the
         // rebuild's schema below. No index: deduplication runs in memory (MessageDeduplicator), so
@@ -162,10 +165,52 @@ public class LocalStoreService : ILocalStoreService
                 unread_count          INTEGER NOT NULL DEFAULT 0,
                 message_count         INTEGER NOT NULL DEFAULT 0,
                 sort_order            INTEGER NOT NULL DEFAULT 0,
+                is_container          INTEGER NOT NULL DEFAULT 0,
                 PRIMARY KEY (account_id, full_name)
             );
+
+            CREATE TABLE IF NOT EXISTS Pop3Receipt (
+                account_id    TEXT NOT NULL,
+                uidl          TEXT NOT NULL,
+                unique_id     TEXT NOT NULL,
+                received_utc  INTEGER NOT NULL,
+                PRIMARY KEY (account_id, uidl)
+            );
+
+            CREATE VIRTUAL TABLE IF NOT EXISTS LocalMessageFts USING fts5(
+                account_id UNINDEXED, unique_id UNINDEXED, folder_name UNINDEXED,
+                from_addr, to_addr, cc_addr, subject, body_text,
+                tokenize='unicode61 remove_diacritics 2'
+            );
+
+            -- FTS5 does not index the identity columns above. Keep a small ordinary
+            -- index that translates a message key to its FTS rowid, so deleting a
+            -- selection never scans every indexed message body.
+            CREATE TABLE IF NOT EXISTS LocalMessageFtsKey (
+                account_id  TEXT    NOT NULL,
+                unique_id   TEXT    NOT NULL,
+                folder_name TEXT    NOT NULL,
+                fts_rowid   INTEGER NOT NULL,
+                PRIMARY KEY (account_id, folder_name, unique_id)
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_local_fts_key_rowid
+                ON LocalMessageFtsKey(fts_rowid);
             """;
         cmd.ExecuteNonQuery();
+
+        // Existing databases need one backfill. Once populated, all write paths maintain
+        // the map and subsequent startups only perform the indexed existence check.
+        cmd.CommandText = "SELECT EXISTS(SELECT 1 FROM LocalMessageFtsKey LIMIT 1);";
+        if (Convert.ToInt64(cmd.ExecuteScalar() ?? 0) == 0)
+        {
+            cmd.CommandText = """
+                INSERT INTO LocalMessageFtsKey(account_id,unique_id,folder_name,fts_rowid)
+                    SELECT account_id,unique_id,folder_name,rowid FROM LocalMessageFts;
+                """;
+            cmd.ExecuteNonQuery();
+        }
+
+        RunMigration(conn, "ALTER TABLE Folder ADD COLUMN is_container INTEGER NOT NULL DEFAULT 0;");
 
         RunDataMigrations(conn);
     }
@@ -552,8 +597,8 @@ public class LocalStoreService : ILocalStoreService
             ins.CommandText = """
                 INSERT OR REPLACE INTO Folder
                     (account_id, full_name, display_name, parent_id, kind,
-                     exclude_from_all_mail, unread_count, message_count, sort_order)
-                VALUES ($aid, $fn, $dn, $pid, $kind, $excl, $unread, $total, $ord);
+                     exclude_from_all_mail, unread_count, message_count, sort_order, is_container)
+                VALUES ($aid, $fn, $dn, $pid, $kind, $excl, $unread, $total, $ord, $container);
                 """;
             var pFn    = ins.Parameters.Add("$fn",     Microsoft.Data.Sqlite.SqliteType.Text);
             var pDn    = ins.Parameters.Add("$dn",     Microsoft.Data.Sqlite.SqliteType.Text);
@@ -563,6 +608,7 @@ public class LocalStoreService : ILocalStoreService
             var pUnr   = ins.Parameters.Add("$unread", Microsoft.Data.Sqlite.SqliteType.Integer);
             var pTot   = ins.Parameters.Add("$total",  Microsoft.Data.Sqlite.SqliteType.Integer);
             var pOrd   = ins.Parameters.Add("$ord",    Microsoft.Data.Sqlite.SqliteType.Integer);
+            var pCont  = ins.Parameters.Add("$container", Microsoft.Data.Sqlite.SqliteType.Integer);
             ins.Parameters.AddWithValue("$aid", accountId.ToString());
 
             var order = 0;
@@ -579,6 +625,7 @@ public class LocalStoreService : ILocalStoreService
                 pUnr.Value  = f.UnreadCount;
                 pTot.Value  = f.MessageCount;
                 pOrd.Value  = order++;
+                pCont.Value = f.IsContainer ? 1 : 0;
                 await ins.ExecuteNonQueryAsync();
             }
         }
@@ -593,7 +640,7 @@ public class LocalStoreService : ILocalStoreService
         await using var cmd  = conn.CreateCommand();
         cmd.CommandText = """
             SELECT account_id, full_name, display_name, parent_id, kind,
-                   exclude_from_all_mail, unread_count, message_count
+                   exclude_from_all_mail, unread_count, message_count, is_container
             FROM Folder
             ORDER BY account_id, sort_order;
             """;
@@ -617,6 +664,7 @@ public class LocalStoreService : ILocalStoreService
                 ExcludeFromAllMail = r.GetInt32(5) != 0,
                 UnreadCount        = r.GetInt32(6),
                 MessageCount       = r.GetInt32(7),
+                IsContainer        = r.GetInt32(8) != 0,
             });
         }
         return result;
@@ -821,8 +869,8 @@ public class LocalStoreService : ILocalStoreService
         await using var tx = await conn.BeginTransactionAsync();
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = """
-            INSERT INTO MessageDetail(unique_id, account_id, folder_name, to_addr, cc, reply_to, plain_body, html_body, attachments_json, calendar_ics)
-            VALUES($uid, $aid, $fn, $to, $cc, $rt, $plain, $html, $attjson, $ics)
+            INSERT INTO MessageDetail(unique_id, account_id, folder_name, to_addr, cc, reply_to, plain_body, html_body, attachments_json, calendar_ics, raw_headers)
+            VALUES($uid, $aid, $fn, $to, $cc, $rt, $plain, $html, $attjson, $ics, $headers)
             ON CONFLICT(unique_id, account_id, folder_name) DO UPDATE SET
                 to_addr          = excluded.to_addr,
                 cc               = excluded.cc,
@@ -830,7 +878,8 @@ public class LocalStoreService : ILocalStoreService
                 plain_body       = excluded.plain_body,
                 html_body        = excluded.html_body,
                 attachments_json = excluded.attachments_json,
-                calendar_ics     = excluded.calendar_ics;
+                calendar_ics     = excluded.calendar_ics,
+                raw_headers      = excluded.raw_headers;
             """;
         cmd.Parameters.AddWithValue("$uid",    detail.MessageId);
         cmd.Parameters.AddWithValue("$aid",    detail.AccountId.ToString());
@@ -842,6 +891,7 @@ public class LocalStoreService : ILocalStoreService
         cmd.Parameters.AddWithValue("$html",   detail.HtmlBody);
         cmd.Parameters.AddWithValue("$attjson", (object?)attJson ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$ics",    (object?)detail.CalendarIcs ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$headers", detail.RawHeaders ?? string.Empty);
         await cmd.ExecuteNonQueryAsync();
 
         // Update the summary's has_attachments flag
@@ -869,7 +919,7 @@ public class LocalStoreService : ILocalStoreService
         // INNER JOIN returns nothing.
         cmd.CommandText = """
             SELECT d.to_addr, d.cc, d.reply_to, d.plain_body, d.html_body,
-                   s.from_disp, s.subject, s.date_ticks, s.is_read, d.attachments_json, d.calendar_ics
+                   s.from_disp, s.subject, s.date_ticks, s.is_read, d.attachments_json, d.calendar_ics, d.raw_headers
             FROM MessageDetail d
             LEFT JOIN MessageSummary s USING (unique_id, account_id, folder_name)
             WHERE d.unique_id=$uid AND d.account_id=$aid AND d.folder_name=$fn;
@@ -918,6 +968,7 @@ public class LocalStoreService : ILocalStoreService
             IsRead        = !r.IsDBNull(8) && r.GetInt64(8) != 0,
             Attachments   = attachments,
             CalendarIcs   = calendarIcs,
+            RawHeaders    = r.IsDBNull(11) ? string.Empty : r.GetString(11),
             CalendarInvite = string.IsNullOrWhiteSpace(calendarIcs) ? null : IcsModel.Parse(calendarIcs),
         };
     }

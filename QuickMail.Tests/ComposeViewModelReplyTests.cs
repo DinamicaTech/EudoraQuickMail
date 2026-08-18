@@ -106,6 +106,8 @@ public class ComposeViewModelReplyTests
 
         Assert.Contains("Hello from HTML", model.Body);
         Assert.Contains("> Hello from HTML", model.Body);
+        Assert.Equal(ComposeMode.Html, model.Mode);
+        Assert.Contains("<p>Hello from HTML</p>", model.HtmlBody);
     }
 
     [Fact]

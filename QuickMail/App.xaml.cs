@@ -49,6 +49,8 @@ public partial class App : Application
     private WindowsToastNotificationService? _notificationService;
     private AutoDiscoverService? _autoDiscoverService;
     private ConnectionTruthProbe? _truthProbe;
+    private PeriodicPop3Receiver? _pop3Receiver;
+    public ScheduledSendService? ScheduledSender { get; private set; }
 
     // Owned by Main (acquired before WPF starts, disposed after Run returns); OnStartup
     // wires its activation signal to the main window.
@@ -255,6 +257,9 @@ public partial class App : Application
             var accountService    = new AccountService(profile);
             var credentialService = new CredentialService();
             var configService     = new ConfigService(profile);
+            var localStore        = new LocalStoreService(profile);
+            if (!onlineMode)
+                localStore.Initialize();
             // Provider presets + settings discovery for the Add Account dialog. The catalog is a
             // pure lookup table; the discovery service owns an HttpClient, so it is disposed in OnExit.
             var providerCatalog   = new ProviderCatalog();
@@ -266,17 +271,24 @@ public partial class App : Application
             var imapBackend       = _imapBackend;
             _graphBackend         = new GraphMailService(msOAuthService, configService);
             var graphBackend      = _graphBackend;
+            var localBackend      = new LocalMailService(localStore);
             _graphSendMail        = new GraphSendMailService(msOAuthService);
-            var smtpService       = new SmtpService(oauthService, _graphSendMail);
+            var accountSecrets    = new DpapiAccountSecretProtector();
+            var smtpService       = new SmtpService(oauthService, _graphSendMail, accountSecrets);
 
             // Per-account mail backend router. Each account is registered to the backend its
             // BackendKind selects (IMAP by default, Graph for Microsoft 365 accounts).
             IMailService BackendFor(AccountModel a)
-                => a.BackendKind == BackendKind.MicrosoftGraph ? graphBackend : imapBackend;
+                => a.BackendKind switch
+                {
+                    BackendKind.MicrosoftGraph => graphBackend,
+                    BackendKind.Pop3Smtp or BackendKind.LocalArchive => localBackend,
+                    _ => imapBackend,
+                };
             // BackendFor is also handed to the router so an account it has never been told about —
             // the throwaway probe account Test Connection builds, for instance — is routed by its
             // BackendKind rather than defaulting to IMAP.
-            var mailRouter = new MailServiceRouter(new IMailService[] { imapBackend, graphBackend }, BackendFor);
+            var mailRouter = new MailServiceRouter(new IMailService[] { imapBackend, graphBackend, localBackend }, BackendFor);
 
             // ui-probe (#180 Decision D): network hard-off at the DI root. EVERY
             // consumer of the mail/send/oauth services gets the offline no-op —
@@ -287,10 +299,6 @@ public partial class App : Application
             IMailService effectiveMail = probeMode ? new ProbeOfflineMailService() : mailRouter;
             ISendMailService effectiveSmtp = probeMode ? new ProbeOfflineSendMailService() : smtpService;
             IOAuthService effectiveOAuth = probeMode ? new ProbeOfflineOAuthService() : oauthService;
-
-            var localStore = new LocalStoreService(profile);
-            if (!onlineMode)
-                localStore.Initialize();
 
             // Change-notification router (new-mail + reachability). IMAP's strategy is a held IDLE
             // connection, implemented by ImapMailService itself because it is bound to the IMAP
@@ -303,6 +311,7 @@ public partial class App : Application
             // Router registration runs via mainVm.RegisterAccountBackend (set below), which also
             // covers accounts added at runtime through RefreshAccountList.
             var accounts = accountService.LoadAccounts();
+            if (!probeMode) ScheduledSender = new ScheduledSendService(profile, effectiveSmtp, accountService, credentialService);
 
             // One-time immutable-id cache rebuild (#366): clear cached mail for Graph accounts so the
             // next sync repopulates with immutable ids (mutable and immutable ids must not be mixed).
@@ -363,12 +372,15 @@ public partial class App : Application
                 LogService.Log($"AccountStartupRepair: repaired {repaired.Count} account(s).");
             }
 
-            _contactService = new ContactService(profile);
+            _contactService = new ContactService(profile, configService.Load().RecipientCacheYears);
             var contactService = _contactService;
             _templateService = new TemplateService(profile);
             var templateService = _templateService;
             // accountService drives the one-time "All accounts" → per-account rule migration (#333 D1).
             var ruleService = new RuleService(effectiveMail, localStore, profile.ProfileDir, accountService);
+            if (!probeMode)
+                _pop3Receiver = new PeriodicPop3Receiver(accountService,
+                    new Pop3ReceiveService(new MailKitPop3TransportFactory(), localStore, accountSecrets), ruleService);
             // Server-side (Exchange/Graph) Inbox rules — read/manage a Graph account's messageRules.
             // Reuses the shared GraphClient (no own disposables), so no disposal wiring needed.
             var serverRuleService = new GraphServerRuleService(accountService, graphBackend.Client);
@@ -479,7 +491,23 @@ public partial class App : Application
             mainVm.ApplyConnectionDiagnosticsSetting(startupCfg.ConnectionDiagnostics);
             mainVm.LoadAccountList(accounts);
 
-            var mainWindow = new MainWindow(mainVm, effectiveSmtp, accountService, credentialService, effectiveMail, effectiveOAuth, commandRegistry, contactService, configService, localStore, viewService, ruleService, templateService, featureGate, flagService, customDictionary, themeService, _bugReportService, _notificationService, contactSyncService, graphCalendarSync, serverRuleService, providerCatalog, _autoDiscoverService, _truthProbe, rowLayoutService, watchService);
+            if (_pop3Receiver is not null)
+            {
+                _pop3Receiver.Started += (account, current, total) => Dispatcher.BeginInvoke(() =>
+                {
+                    mainVm.IsBusy = true;
+                    mainVm.IsStatusHighlighted = true;
+                    mainVm.StatusText = $"Downloading mail for {account.AccountLabel} {current}/{total}…";
+                });
+                _pop3Receiver.Completed += (account, result) => Dispatcher.BeginInvoke(() =>
+                {
+                    mainVm.IsBusy = false;
+                    mainVm.IsStatusHighlighted = true;
+                    mainVm.StatusText = $"Mail download complete for {account.AccountLabel}: {result.Downloaded:N0} new.";
+                });
+            }
+
+            var mainWindow = new MainWindow(mainVm, effectiveSmtp, accountService, credentialService, effectiveMail, effectiveOAuth, commandRegistry, contactService, configService, localStore, viewService, ruleService, templateService, featureGate, flagService, customDictionary, themeService, _bugReportService, _notificationService, contactSyncService, graphCalendarSync, serverRuleService, providerCatalog, _autoDiscoverService, _truthProbe, rowLayoutService, watchService, profile);
 
             // Clicking a new-mail toast brings QuickMail to the foreground and opens the referenced
             // message. OnActivated may fire on a background thread, so marshal to the UI thread first.
@@ -506,6 +534,8 @@ public partial class App : Application
 
     protected override void OnExit(ExitEventArgs e)
     {
+        _pop3Receiver?.Dispose();
+        ScheduledSender?.Dispose();
         _changeNotifier?.Dispose(); // stops all watchers (IDLE + Graph poll) + severs the event chain
         _graphNotifier?.Dispose();  // disposes the Graph poll CTS (StopWatchers already ran; idempotent)
         _imapBackend?.Dispose();    // closes connection pools (StopWatchers already ran, and is idempotent)

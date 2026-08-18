@@ -187,6 +187,23 @@ public class MessageBodyHtmlBuilderTests
     }
 
     [Fact]
+    public void BuildMessageHtml_ExternalImage_IsPreservedAndAllowedByCsp()
+    {
+        var detail = new QuickMail.Models.MailMessageDetail
+        {
+            HtmlBody = "<p><img src=\"https://images.example.test/profile.jpg\" onerror=\"alert(1)\"></p>",
+        };
+
+        var document = MessageBodyHtmlBuilder.BuildMessageHtml(detail);
+
+        Assert.Contains("<img", document, System.StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("https://images.example.test/profile.jpg", document);
+        Assert.Contains("img-src https: http: data:", document);
+        Assert.DoesNotContain("onerror", document, System.StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("script-src 'none'", document);
+    }
+
+    [Fact]
     public void BuildMessageHtml_ComplexHtml_FallsBackToReaderMode()
     {
         // Over the table-count threshold: the builder must switch to the simplified body.

@@ -13,6 +13,8 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tools", "tools", "{07C2787E
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "QuickMail.Fixtures", "Tools\QuickMail.Fixtures\QuickMail.Fixtures.csproj", "{325F9F3C-7A15-4DE0-A1C6-C83A35B9D125}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "EudoraImporter", "Tools\EudoraImporter\EudoraImporter.csproj", "{D9F5713D-9768-4FDB-BEC3-FA7A1A268936}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -71,11 +73,24 @@ Global
 		{325F9F3C-7A15-4DE0-A1C6-C83A35B9D125}.Release|x64.Build.0 = Release|Any CPU
 		{325F9F3C-7A15-4DE0-A1C6-C83A35B9D125}.Release|x86.ActiveCfg = Release|Any CPU
 		{325F9F3C-7A15-4DE0-A1C6-C83A35B9D125}.Release|x86.Build.0 = Release|Any CPU
+		{D9F5713D-9768-4FDB-BEC3-FA7A1A268936}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{D9F5713D-9768-4FDB-BEC3-FA7A1A268936}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{D9F5713D-9768-4FDB-BEC3-FA7A1A268936}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{D9F5713D-9768-4FDB-BEC3-FA7A1A268936}.Debug|x64.Build.0 = Debug|Any CPU
+		{D9F5713D-9768-4FDB-BEC3-FA7A1A268936}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{D9F5713D-9768-4FDB-BEC3-FA7A1A268936}.Debug|x86.Build.0 = Debug|Any CPU
+		{D9F5713D-9768-4FDB-BEC3-FA7A1A268936}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{D9F5713D-9768-4FDB-BEC3-FA7A1A268936}.Release|Any CPU.Build.0 = Release|Any CPU
+		{D9F5713D-9768-4FDB-BEC3-FA7A1A268936}.Release|x64.ActiveCfg = Release|Any CPU
+		{D9F5713D-9768-4FDB-BEC3-FA7A1A268936}.Release|x64.Build.0 = Release|Any CPU
+		{D9F5713D-9768-4FDB-BEC3-FA7A1A268936}.Release|x86.ActiveCfg = Release|Any CPU
+		{D9F5713D-9768-4FDB-BEC3-FA7A1A268936}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{325F9F3C-7A15-4DE0-A1C6-C83A35B9D125} = {07C2787E-EAC7-C090-1BA3-A61EC2A24D84}
+		{D9F5713D-9768-4FDB-BEC3-FA7A1A268936} = {07C2787E-EAC7-C090-1BA3-A61EC2A24D84}
 	EndGlobalSection
 EndGlobal

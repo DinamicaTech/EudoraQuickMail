@@ -20,4 +20,6 @@ public enum ContactSource
 
     /// <summary>Synced from an iCloud account via CardDAV (the account's address book).</summary>
     ICloud = 3,
+    /// <summary>Transient autocomplete entry discovered in locally stored sent mail.</summary>
+    SentHistory = 4,
 }

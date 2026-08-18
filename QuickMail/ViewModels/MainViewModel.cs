@@ -1014,14 +1014,175 @@ public partial class MainViewModel : ObservableObject, IDisposable
     // Updated by ApplyFiltersAndSearch(); the View debounces this to announce count.
     [ObservableProperty]
     private string _searchAnnouncement = string.Empty;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasLocalPagination))]
+    [NotifyPropertyChangedFor(nameof(CanLoadNextLocalPage))]
+    [NotifyPropertyChangedFor(nameof(LocalMaximumPageOffset))]
+    [NotifyPropertyChangedFor(nameof(LocalMaximumMessageIndex))]
+    [NotifyPropertyChangedFor(nameof(LocalPageStatus))]
+    [NotifyCanExecuteChangedFor(nameof(LoadNextLocalPageCommand))]
+    private long _localTotalMessages;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanLoadPreviousLocalPage))]
+    [NotifyPropertyChangedFor(nameof(CanLoadNextLocalPage))]
+    [NotifyPropertyChangedFor(nameof(LocalPageStatus))]
+    [NotifyCanExecuteChangedFor(nameof(LoadPreviousLocalPageCommand))]
+    [NotifyCanExecuteChangedFor(nameof(LoadNextLocalPageCommand))]
+    private int _localPageOffset;
+    public bool HasLocalPagination => LocalTotalMessages > LocalMailConstants.MaxRenderedMessages;
+    public bool CanLoadPreviousLocalPage => LocalPageOffset > 0;
+    public bool CanLoadNextLocalPage => LocalPageOffset + LocalMailConstants.MaxRenderedMessages < LocalTotalMessages;
+    public int LocalMaximumPageOffset => LocalTotalMessages <= LocalMailConstants.MaxRenderedMessages ? 0
+        : (int)Math.Min(int.MaxValue, ((LocalTotalMessages - 1) / LocalMailConstants.MaxRenderedMessages) * LocalMailConstants.MaxRenderedMessages);
+    public double LocalMaximumMessageIndex => Math.Max(0, LocalTotalMessages - 1);
+    public string LocalPageStatus => LocalTotalMessages == 0 ? string.Empty
+        : $"{LocalPageOffset + 1:N0}–{Math.Min(LocalPageOffset + LocalMailConstants.MaxRenderedMessages, LocalTotalMessages):N0} of {LocalTotalMessages:N0}";
+    private CancellationTokenSource? _localSearchCts;
+    private IReadOnlyList<AdvancedSearchCriterion>? _advancedSearchCriteria;
 
     /// <summary>Raised when the search box should receive focus (View concern).</summary>
     public event EventHandler? SearchRequested;
 
     partial void OnSearchTextChanged(string value)
     {
-        if (!_suppressFilterRebuild) ApplyFiltersAndSearch();
+        if (_suppressFilterRebuild) return;
+        _advancedSearchCriteria = null;
+        LocalPageOffset = 0;
+        if (Accounts.Any(a => a.BackendKind is BackendKind.Pop3Smtp or BackendKind.LocalArchive)
+            && _localStore is ILocalMailboxStore)
+            _ = ApplyLocalSearchAsync(value);
+        else
+            ApplyFiltersAndSearch();
     }
+
+    private async Task ApplyLocalSearchAsync(string value)
+    {
+        var previous = Interlocked.Exchange(ref _localSearchCts, new CancellationTokenSource());
+        previous?.Cancel();
+        previous?.Dispose();
+        var cts = _localSearchCts!;
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            ApplyFiltersAndSearch();
+            return;
+        }
+        try
+        {
+            var sort = LocalSortFor(ActiveSort);
+            Guid? accountScope = SelectedFolder switch
+            {
+                { AccountId: var aid } scopedFolder when aid != Guid.Empty && !IsVirtualFolder(scopedFolder) => aid,
+                null when SelectedAccount?.BackendKind is BackendKind.Pop3Smtp or BackendKind.LocalArchive
+                    => SelectedAccount.Id,
+                _ => null,
+            };
+            var realFolder = SelectedFolder is { IsHeader: false } selected && !IsVirtualFolder(selected)
+                ? selected.FullName : null;
+            var query = new LocalSearchQuery(value, accountScope, realFolder,
+                LocalMailConstants.MaxRenderedMessages, LocalPageOffset, sort,
+                SelectedFolder?.IsContainer == true);
+            var found = await ((ILocalMailboxStore)_localStore).SearchLocalMessagesAsync(query, cts.Token);
+            if (cts.IsCancellationRequested) return;
+            IEnumerable<MailMessageSummary> visible = found.Messages;
+            if (ActiveFilter != MessageFilter.All) visible = visible.Where(MatchesFilter);
+            visible = ActiveSort switch
+            {
+                MessageSort.DateAscending => visible.OrderBy(m => m.Date),
+                MessageSort.AlphaAscending => visible.OrderBy(m => m.Subject, StringComparer.OrdinalIgnoreCase),
+                MessageSort.AlphaDescending => visible.OrderByDescending(m => m.Subject, StringComparer.OrdinalIgnoreCase),
+                MessageSort.FromAscending => visible.OrderBy(m => m.From, StringComparer.OrdinalIgnoreCase),
+                MessageSort.FromDescending => visible.OrderByDescending(m => m.From, StringComparer.OrdinalIgnoreCase),
+                MessageSort.ReadStateAscending => visible.OrderBy(m => m.IsRead).ThenByDescending(m => m.Date),
+                MessageSort.ReadStateDescending => visible.OrderByDescending(m => m.IsRead).ThenByDescending(m => m.Date),
+                MessageSort.AttachmentsFirst => visible.OrderByDescending(m => m.HasAttachments).ThenByDescending(m => m.Date),
+                MessageSort.AttachmentsLast => visible.OrderBy(m => m.HasAttachments).ThenByDescending(m => m.Date),
+                _ => visible.OrderByDescending(m => m.Date),
+            };
+            Messages = new BatchObservableCollection<MailMessageSummary>(visible);
+            var shown = Messages.Count;
+            LocalTotalMessages = found.TotalMatches;
+            StatusText = found.TotalMatches > shown
+                ? $"Showing {shown:N0} of {found.TotalMatches:N0} matches"
+                : $"{found.TotalMatches:N0} matches";
+            SearchAnnouncement = StatusText;
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            StatusText = $"Search failed: {ex.Message}";
+        }
+    }
+
+    public async Task ApplyAdvancedSearchAsync(IReadOnlyList<AdvancedSearchCriterion> criteria)
+    {
+        if (_localStore is not ILocalMailboxStore store || criteria.Count == 0) return;
+        Guid? accountScope = SelectedFolder is { AccountId: var aid } folder
+            && aid != Guid.Empty && !IsVirtualFolder(folder) ? aid : null;
+        var folderScope = SelectedFolder is { IsHeader: false } selected && !IsVirtualFolder(selected)
+            ? selected.FullName : null;
+        var found = await store.SearchLocalMessagesAdvancedAsync(new AdvancedSearchQuery(
+            criteria, accountScope, folderScope, LocalMailConstants.MaxRenderedMessages, 0,
+            LocalSortFor(ActiveSort), SelectedFolder?.IsContainer == true));
+        Messages = new BatchObservableCollection<MailMessageSummary>(found.Messages);
+        _advancedSearchCriteria = criteria.ToList();
+        LocalPageOffset = 0;
+        LocalTotalMessages = found.TotalMatches;
+        IsSearchActive = true;
+        StatusText = $"Advanced search: showing {Messages.Count:N0} of {found.TotalMatches:N0} matches";
+    }
+
+    [RelayCommand(CanExecute = nameof(CanLoadPreviousLocalPage))]
+    private async Task LoadPreviousLocalPageAsync()
+    {
+        LocalPageOffset = Math.Max(0, LocalPageOffset - LocalMailConstants.MaxRenderedMessages);
+        await ReloadCurrentLocalPageAsync();
+    }
+
+    [RelayCommand(CanExecute = nameof(CanLoadNextLocalPage))]
+    private async Task LoadNextLocalPageAsync()
+    {
+        LocalPageOffset += LocalMailConstants.MaxRenderedMessages;
+        await ReloadCurrentLocalPageAsync();
+    }
+
+    public async Task JumpToLocalPageAsync(int requestedOffset)
+    {
+        var page = Math.Max(0, requestedOffset) / LocalMailConstants.MaxRenderedMessages;
+        LocalPageOffset = Math.Min(LocalMaximumPageOffset, page * LocalMailConstants.MaxRenderedMessages);
+        await ReloadCurrentLocalPageAsync();
+    }
+
+    private async Task ReloadCurrentLocalPageAsync()
+    {
+        if (_advancedSearchCriteria is { Count: > 0 }) { await ApplyAdvancedSearchAsync(_advancedSearchCriteria); return; }
+        if (!string.IsNullOrWhiteSpace(SearchText)) { await ApplyLocalSearchAsync(SearchText); return; }
+        if (_localStore is not ILocalMailboxStore store) return;
+        Guid? accountId = SelectedFolder?.AccountId != Guid.Empty ? SelectedFolder?.AccountId : null;
+        var folderName = SelectedFolder is { } folder && !IsVirtualFolder(folder) ? folder.FullName : null;
+        var sort = LocalSortFor(ActiveSort);
+        var page = await store.LoadLocalPageAsync(accountId, folderName,
+            LocalMailConstants.MaxRenderedMessages, LocalPageOffset, sort,
+            includeDescendants: SelectedFolder?.IsContainer == true);
+        LocalTotalMessages = page.TotalMatches;
+        SetMessages(page.Messages.ToList());
+        StatusText = $"Showing {LocalPageStatus} messages";
+    }
+
+    private static LocalSearchSort LocalSortFor(MessageSort sort) => sort switch
+    {
+        MessageSort.DateAscending => LocalSearchSort.OldestFirst,
+        MessageSort.FromAscending => LocalSearchSort.FromAscending,
+        MessageSort.FromDescending => LocalSearchSort.FromDescending,
+        MessageSort.ToAscending => LocalSearchSort.ToAscending,
+        MessageSort.ToDescending => LocalSearchSort.ToDescending,
+        MessageSort.AlphaAscending => LocalSearchSort.SubjectAscending,
+        MessageSort.AlphaDescending => LocalSearchSort.SubjectDescending,
+        MessageSort.ReadStateAscending => LocalSearchSort.ReadAscending,
+        MessageSort.ReadStateDescending => LocalSearchSort.ReadDescending,
+        MessageSort.AttachmentsFirst => LocalSearchSort.AttachmentsFirst,
+        MessageSort.AttachmentsLast => LocalSearchSort.AttachmentsLast,
+        _ => LocalSearchSort.NewestFirst,
+    };
 
     [ObservableProperty]
     private ObservableCollection<ConversationGroup> _conversations = [];
@@ -1174,6 +1335,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private string _statusText = "Ready";
 
+    [ObservableProperty]
+    private bool _isStatusHighlighted;
+
+    [ObservableProperty]
+    private int _selectedMessageCount;
+
     /// <summary>
     /// Category the View should use when announcing the *current* <see cref="StatusText"/> change to a
     /// screen reader. A one-shot override: <see cref="SetStatus"/> sets it, assigns StatusText (whose
@@ -1192,6 +1359,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private void SetStatus(string text, AnnouncementCategory category)
     {
         StatusAnnouncementCategory = category;
+        IsStatusHighlighted = true;
         StatusText = text;
         StatusAnnouncementCategory = AnnouncementCategory.Status;
     }
@@ -1207,6 +1375,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     [ObservableProperty]
     private bool _isBusy;
+
+    partial void OnIsBusyChanged(bool value)
+    {
+        if (value) IsStatusHighlighted = true;
+    }
 
     /// <summary>
     /// Sticky "read as plain text" preference (issue #34). Bound one-way to the View-menu
@@ -2366,7 +2539,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             execute: () => OpenArmDownloadPageCommand.Execute(null)));
 
         registry.Register(new CommandDefinition(
-            id: "view.search", category: "View", title: "Search Messages…",
+            id: "view.search", category: "Mail", title: "Search Messages…",
             execute: () =>
             {
                 // Context-aware: in the calendar this routes to appointment search (the View
@@ -2374,7 +2547,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 if (!IsCalendarView) IsSearchActive = true;
                 SearchRequested?.Invoke(this, EventArgs.Empty);
             },
-            defaultKey: Key.S, defaultModifiers: ModifierKeys.Control | ModifierKeys.Shift));
+            defaultKey: Key.F3, defaultModifiers: ModifierKeys.None));
 
         registry.Register(new CommandDefinition(
             id: "view.filterAll", category: "View", title: "Show All Messages",
@@ -2636,7 +2809,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private async Task<List<MailMessageSummary>> LoadStartupSummariesAsync(MailFolderModel folder)
     {
         if (string.Equals(folder.FullName, AllMailFolder.FullName, StringComparison.Ordinal))
-            return ExcludeSharedMail(await _localStore.LoadAllSummariesAsync());   // #31
+            return _localStore is ILocalMailboxStore localMailbox
+                ? (await localMailbox.LoadLocalPageAsync(null, null,
+                    LocalMailConstants.MaxRenderedMessages, 0)).Messages.ToList()
+                : ExcludeSharedMail(await _localStore.LoadAllSummariesAsync());
 
         if (IsFolderScopedAggregate(folder.FullName))
         {
@@ -3954,6 +4130,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
             MessageSort.AlphaAscending  => result.OrderBy(m => m.Subject, StringComparer.OrdinalIgnoreCase),
             MessageSort.AlphaDescending => result.OrderByDescending(m => m.Subject, StringComparer.OrdinalIgnoreCase),
             MessageSort.FlaggedFirst    => result.OrderBy(m => m.IsFlagged ? 0 : 1).ThenByDescending(m => m.Date),
+            MessageSort.FromAscending   => result.OrderBy(m => m.From, StringComparer.OrdinalIgnoreCase),
+            MessageSort.FromDescending  => result.OrderByDescending(m => m.From, StringComparer.OrdinalIgnoreCase),
+            MessageSort.ReadStateAscending => result.OrderBy(m => m.IsRead).ThenByDescending(m => m.Date),
+            MessageSort.ReadStateDescending => result.OrderByDescending(m => m.IsRead).ThenByDescending(m => m.Date),
+            MessageSort.AttachmentsFirst => result.OrderByDescending(m => m.HasAttachments).ThenByDescending(m => m.Date),
+            MessageSort.AttachmentsLast => result.OrderBy(m => m.HasAttachments).ThenByDescending(m => m.Date),
             _                           => result.OrderByDescending(m => m.Date),
         };
         Messages = new BatchObservableCollection<MailMessageSummary>(result);
@@ -4480,11 +4662,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
             roots.Add(viewsGroup);
         }
 
-        // "All Mail" is a top-level group header with 7 virtual sub-folder children.
+        // Aggregate searches are views, not a second folder hierarchy.
         var allMailGroup = new FolderTreeNode
         {
             IsHeader   = true,
-            Label      = "All Mail",
+            Label      = "Combined views",
             IsExpanded = true,
         };
         allMailGroup.Children.Add(new FolderTreeNode { Folder = AllMailFolder,    Label = AllMailFolder.DisplayName });
@@ -4502,18 +4684,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
             if (_cachedFolders.TryGetValue(account.Id, out var folders) && folders.Count > 0)
             {
                 var accountRoots = FolderTreeBuilder.Build(folders, account);
-
-                // Inject a per-account "All Mail" virtual folder as the first child
-                // of the account header node so users can see all mail for that account.
-                if (accountRoots.Count > 0)
-                {
-                    var accountMailFolder = CreateAccountMailVirtualFolder(account);
-                    accountRoots[0].Children.Insert(0, new FolderTreeNode
-                    {
-                        Folder = accountMailFolder,
-                        Label  = accountMailFolder.DisplayName,
-                    });
-                }
 
                 roots.AddRange(accountRoots);
             }
@@ -4614,7 +4784,15 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (_suppressFilterRebuild) return;
 
         if (ViewMode == ViewMode.Messages)
-            ApplyFiltersAndSearch();
+        {
+            if (_localStore is ILocalMailboxStore
+                && (IsVirtualFolder(SelectedFolder)
+                    || SelectedFolder?.AccountId is { } aid && Accounts.Any(a => a.Id == aid
+                        && a.BackendKind is BackendKind.Pop3Smtp or BackendKind.LocalArchive)))
+                _ = ReloadCurrentLocalPageAsync();
+            else
+                ApplyFiltersAndSearch();
+        }
         else
             RebuildActiveGroupView();
     }
@@ -4854,10 +5032,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
 
         _suppressFilterRebuild = true;
+        _advancedSearchCriteria = null;
         SearchText          = string.Empty;
         IsSearchActive      = false;
         ActiveView          = null;
         SelectedFolder      = folder;
+        LocalPageOffset     = 0;
+        LocalTotalMessages  = 0;
         MessageDetail       = null;
         IsMessageOpen       = false;
         // ActiveView and SelectedFolder are set first: the resolver reads both.
@@ -4941,14 +5122,25 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
             if (!OnlineMode)
             {
-                var cached = await _localStore.LoadFolderSummariesAsync(accountId, folder.FullName);
+                var localAccount = Accounts.FirstOrDefault(a => a.Id == accountId);
+                LocalSearchResult? localPage = localAccount?.BackendKind is BackendKind.LocalArchive or BackendKind.Pop3Smtp
+                    && _localStore is ILocalMailboxStore localMailbox
+                    ? await localMailbox.LoadLocalPageAsync(accountId, folder.FullName,
+                        LocalMailConstants.MaxRenderedMessages, 0,
+                        includeDescendants: folder.IsContainer)
+                    : null;
+                var cached = localPage?.Messages.ToList()
+                    ?? await _localStore.LoadFolderSummariesAsync(accountId, folder.FullName);
+                if (localPage is not null) LocalTotalMessages = localPage.TotalMatches;
                 if (!IsCurrentFolderLoad(loadVersion, folder))
                     return;
 
                 await ResolveFlagNamesAsync(cached);
                 SetMessages(cached);
                 StatusText = cached.Count > 0
-                    ? $"{cached.Count} cached {(cached.Count == 1 ? "message" : "messages")} (checking for new…)"
+                    ? localPage is { TotalMatches: > LocalMailConstants.MaxRenderedMessages }
+                        ? $"Showing {cached.Count:N0} of {localPage.TotalMatches:N0} messages"
+                        : $"{cached.Count} cached {(cached.Count == 1 ? "message" : "messages")} (checking for new…)"
                     : $"Loading {folder.DisplayName}…";
                 if (cached.Count > 0)
                 {
@@ -4956,9 +5148,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
                         ScheduleConversationRebuild();
                     StartPrefetchTopOfFolder();
                 }
+                if (localPage is not null) IsBusy = false;
             }
 
-            _ = RefreshFolderFromServerAsync(accountId, folder, loadVersion, ct);
+            var selectedAccount = Accounts.FirstOrDefault(a => a.Id == accountId);
+            if (selectedAccount?.BackendKind is not (BackendKind.LocalArchive or BackendKind.Pop3Smtp))
+                _ = RefreshFolderFromServerAsync(accountId, folder, loadVersion, ct);
 
             // Reconcile-on-open (#366): RefreshFolderFromServerAsync replaces the *displayed* list with
             // server truth, but only upserts the store — it never deletes rows for messages removed
@@ -4970,7 +5165,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
             {
                 var account = Accounts.FirstOrDefault(a => a.Id == accountId);
                 if (account != null)
-                    _syncService.ReconcileFolderAsync(account, folder, ct)
+                    if (account.BackendKind is not (BackendKind.LocalArchive or BackendKind.Pop3Smtp))
+                        _syncService.ReconcileFolderAsync(account, folder, ct)
                         .LogFaults("reconcile on folder open");
             }
         }
@@ -5363,19 +5559,31 @@ public partial class MainViewModel : ObservableObject, IDisposable
         try
         {
             List<MailMessageSummary> cached;
+            long cachedTotal = 0;
             if (!OnlineMode)
             {
                 // ── Phase 1: show cache immediately (same data as InitialLoadAsync) ──
                 // This keeps the view consistent regardless of how many times the user
                 // navigates to All Mail.  The IMAP fetch in Phase 2 adds truly new messages.
-                cached = ExcludeSharedMail(await _localStore.LoadAllSummariesAsync()); // #31: All Mail excludes shared
+                if (_localStore is ILocalMailboxStore localMailbox)
+                {
+                    var page = await localMailbox.LoadLocalPageAsync(null, null,
+                        LocalMailConstants.MaxRenderedMessages, 0);
+                    cached = page.Messages.ToList();
+                    cachedTotal = page.TotalMatches;
+                    LocalTotalMessages = page.TotalMatches;
+                }
+                else
+                    cached = ExcludeSharedMail(await _localStore.LoadAllSummariesAsync());
                 if (!IsCurrentFolderLoad(loadVersion, AllMailFolder))
                     return;
 
                 await ResolveFlagNamesAsync(cached);
                 SetMessages(cached);
                 StatusText = cached.Count > 0
-                    ? $"{cached.Count} messages (checking for new…)"
+                    ? cachedTotal > cached.Count
+                        ? $"Showing {cached.Count:N0} of {cachedTotal:N0} messages"
+                        : $"{cached.Count} messages (checking for new…)"
                     : "Checking for new messages…";
                 IsBusy = false;
             }
@@ -5393,7 +5601,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
             var perAccountTasks = Accounts
                 // Connected, not merely cached: this phase issues live IMAP fetches, and since #516
                 // the folder cache is populated before any account connects.
-                .Where(a => _connectedAccountIds.Contains(a.Id) && !a.IsShared)   // #31: shared excluded from All Mail
+                .Where(a => _connectedAccountIds.Contains(a.Id) && !a.IsShared
+                    && a.BackendKind is not (BackendKind.LocalArchive or BackendKind.Pop3Smtp))
                 .Select(account => (OnlineMode || needsRecipientRepair)
                     ? FetchAccountAllFoldersAsync(account, ct)
                     : FetchAccountNewMessagesAsync(account, ct));
@@ -6257,15 +6466,29 @@ public partial class MainViewModel : ObservableObject, IDisposable
             if (!OnlineMode)
             {
                 // ── Phase 1: show cache immediately ──────────────────────────────────
-                var cached = await _localStore.LoadAllSummariesAsync(accountId);
+                LocalSearchResult? localPage = account.BackendKind is BackendKind.LocalArchive or BackendKind.Pop3Smtp
+                    && _localStore is ILocalMailboxStore localMailbox
+                    ? await localMailbox.LoadLocalPageAsync(accountId, null,
+                        LocalMailConstants.MaxRenderedMessages, 0)
+                    : null;
+                var cached = localPage?.Messages.ToList()
+                    ?? await _localStore.LoadAllSummariesAsync(accountId);
+                if (localPage is not null) LocalTotalMessages = localPage.TotalMatches;
                 if (!IsCurrentFolderLoad(loadVersion, expectedFolder)) return;
 
                 await ResolveFlagNamesAsync(cached);
                 SetMessages(cached);
                 StatusText = cached.Count > 0
-                    ? $"{cached.Count} messages (checking for new…)"
+                    ? localPage is { TotalMatches: > LocalMailConstants.MaxRenderedMessages }
+                        ? $"Showing {cached.Count:N0} of {localPage.TotalMatches:N0} messages in {account.AccountLabel}"
+                        : $"{cached.Count} messages (checking for new…)"
                     : "Checking for new messages…";
                 IsBusy = false;
+
+                // Local archive/POP accounts have no folder server to sweep here. POP ingress is
+                // handled by PeriodicPop3Receiver; the bounded SQLite page is the complete UI load.
+                if (account.BackendKind is BackendKind.LocalArchive or BackendKind.Pop3Smtp)
+                    return;
             }
 
             // ── Phase 2: IMAP fetch ────────────────────────────────────────────────
@@ -6577,7 +6800,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         await DeleteMessagesAsync([SelectedMessage]);
     }
 
-    public async Task DeleteMessagesAsync(IReadOnlyList<MailMessageSummary> toDelete)
+    public async Task DeleteMessagesAsync(IReadOnlyList<MailMessageSummary> toDelete, bool permanently = false)
     {
         if (toDelete.Count == 0) return;
 
@@ -6642,9 +6865,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
             var ct = actionCts.Token;
 
             var groups = toDelete.GroupBy(m => (m.AccountId, m.FolderName));
+            var processed = 0;
             foreach (var group in groups)
             {
                 var uids = group.Select(m => m.MessageId).ToList();
+                SetStatus($"Deleting message {processed + 1:N0}/{toDelete.Count:N0}…",
+                    AnnouncementCategory.MessageAction);
 
                 // Messages already in Trash must be permanently deleted (expunge);
                 // moving them to trash again is a no-op on most servers.
@@ -6658,7 +6884,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 if (sourceFolder != null)
                     affectedFolders.Add((group.Key.AccountId, sourceFolder));
 
-                if (sourceKind == SpecialFolderKind.Trash)
+                if (permanently || sourceKind == SpecialFolderKind.Trash)
                     await _imap.PermanentlyDeleteBatchAsync(
                         group.Key.AccountId, group.Key.FolderName, uids, ct);
                 else
@@ -6667,6 +6893,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
                 if (!OnlineMode)
                     await _localStore.DeleteSummariesAsync(group.Key.AccountId, group.Key.FolderName, uids);
+                processed += uids.Count;
             }
 
             // Now the server deletes have landed, refresh folder unread counts — but only if an
@@ -7343,6 +7570,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 Subject         = detail.Subject,
                 Body            = detail.PlainTextBody,
                 Mode            = detail.DraftComposeMode,
+                SpellLanguage   = detail.DraftSpellLanguage,
                 HtmlBody        = detail.DraftComposeMode == ComposeMode.Html ? detail.HtmlBody : null,
                 DraftMessageId  = summary.MessageId,
                 DraftFolderName = summary.FolderName,
@@ -8458,8 +8686,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private void ClearSearch()
     {
+        _advancedSearchCriteria = null;
+        ActiveFilter = MessageFilter.All;
+        SetActiveFlagFilterId(null);
+        LocalPageOffset = 0;
         SearchText     = string.Empty;
         IsSearchActive = false;
+        ApplyFiltersAndSearch();
     }
 
     // ── Filter command ────────────────────────────────────────────────────────

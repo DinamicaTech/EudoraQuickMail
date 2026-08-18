@@ -151,12 +151,19 @@ public partial class AccountManagerViewModel : AccountEditorViewModel
         LoginUsername = value.LoginUsername ?? string.Empty;
         AuthType = value.AuthType;
         Password = value.AuthType == AuthType.Password
-            ? (_credentials.GetPassword(value.Id) ?? string.Empty)
+            ? (value.BackendKind == BackendKind.Pop3Smtp
+                ? new DpapiAccountSecretProtector().GetPop3Password(value)
+                : _credentials.GetPassword(value.Id)) ?? string.Empty
             : string.Empty;
         ImapHost = value.ImapHost;
         ImapPort = value.ImapPort;
         ImapUseSsl = value.ImapUseSsl;
         ImapAcceptInvalidCert = value.ImapAcceptInvalidCert;
+        Pop3Host = value.Pop3Host;
+        Pop3Port = value.Pop3Port;
+        Pop3UseSsl = value.Pop3UseSsl;
+        Pop3AcceptInvalidCert = value.Pop3AcceptInvalidCert;
+        CheckIncomingMail = value.CheckIncomingMail;
         SmtpHost = value.SmtpHost;
         SmtpPort = value.SmtpPort;
         SmtpUseSsl = value.SmtpUseSsl;
@@ -287,7 +294,7 @@ public partial class AccountManagerViewModel : AccountEditorViewModel
 
     public void CommitNewAccount(AccountModel account, string password)
     {
-        if (!string.IsNullOrEmpty(password))
+        if (!string.IsNullOrEmpty(password) && account.BackendKind != BackendKind.Pop3Smtp)
             _credentials.SavePassword(account.Id, password);
         Accounts.Add(account);
         _accountService.SaveAccounts([.. Accounts]);
@@ -380,10 +387,16 @@ public partial class AccountManagerViewModel : AccountEditorViewModel
         if (IsPersonalMicrosoftAccount.HasValue)
             account.IsPersonalMicrosoftAccount = IsPersonalMicrosoftAccount;
         account.AuthType = AuthType;
+        account.BackendKind = BackendKind;
         account.ImapHost = ImapHost;
         account.ImapPort = ImapPort;
         account.ImapUseSsl = ImapUseSsl;
         account.ImapAcceptInvalidCert = ImapAcceptInvalidCert;
+        account.Pop3Host = Pop3Host;
+        account.Pop3Port = Pop3Port;
+        account.Pop3UseSsl = Pop3UseSsl;
+        account.Pop3AcceptInvalidCert = Pop3AcceptInvalidCert;
+        account.CheckIncomingMail = CheckIncomingMail;
         account.SmtpHost = SmtpHost;
         account.SmtpPort = SmtpPort;
         account.SmtpUseSsl = SmtpUseSsl;
@@ -399,7 +412,12 @@ public partial class AccountManagerViewModel : AccountEditorViewModel
         // OnSyncContactsChanged (consent + persist), so Save never enables/disables it.
 
         if (AuthType == AuthType.Password && !string.IsNullOrEmpty(Password))
-            _credentials.SavePassword(account.Id, Password);
+        {
+            if (account.BackendKind == BackendKind.Pop3Smtp)
+                new DpapiAccountSecretProtector().SetPop3Password(account, Password);
+            else
+                _credentials.SavePassword(account.Id, Password);
+        }
 
         _accountService.SaveAccounts([.. Accounts]);
         StatusText = "Account saved.";

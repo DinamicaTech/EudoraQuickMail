@@ -47,6 +47,11 @@ public abstract partial class AccountEditorViewModel : ObservableObject
     [ObservableProperty] private int    _imapPort = 993;
     [ObservableProperty] private bool   _imapUseSsl = true;
     [ObservableProperty] private bool   _imapAcceptInvalidCert = false;
+    [ObservableProperty] private string _pop3Host = string.Empty;
+    [ObservableProperty] private int    _pop3Port = 995;
+    [ObservableProperty] private bool   _pop3UseSsl = true;
+    [ObservableProperty] private bool   _pop3AcceptInvalidCert = false;
+    [ObservableProperty] private bool   _checkIncomingMail = true;
     [ObservableProperty] private string _smtpHost = string.Empty;
     [ObservableProperty] private int    _smtpPort = 587;
     [ObservableProperty] private bool   _smtpUseSsl = false;
@@ -344,6 +349,8 @@ public abstract partial class AccountEditorViewModel : ObservableObject
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsGraphBackend))]
     [NotifyPropertyChangedFor(nameof(IsImapBackend))]
+    [NotifyPropertyChangedFor(nameof(IsPop3Backend))]
+    [NotifyPropertyChangedFor(nameof(IsMailServerBackend))]
     private BackendKind _backendKind = BackendKind.ImapSmtp;
 
     /// <summary>True when this account uses the Microsoft Graph backend (drives IMAP/SMTP field visibility).</summary>
@@ -351,6 +358,8 @@ public abstract partial class AccountEditorViewModel : ObservableObject
 
     /// <summary>True when this account uses the standard IMAP/SMTP backend.</summary>
     public bool IsImapBackend => BackendKind == BackendKind.ImapSmtp;
+    public bool IsPop3Backend => BackendKind == BackendKind.Pop3Smtp;
+    public bool IsMailServerBackend => IsImapBackend || IsPop3Backend;
 
     [ObservableProperty] private string _statusText = string.Empty;
 
@@ -710,9 +719,10 @@ public abstract partial class AccountEditorViewModel : ObservableObject
         // Graph carries no host configuration at all; sign-in is what proves the account.
         if (IsGraphBackend) return true;
 
-        if (string.IsNullOrWhiteSpace(ImapHost) || string.IsNullOrWhiteSpace(SmtpHost))
+        var incomingHost = IsPop3Backend ? Pop3Host : ImapHost;
+        if (string.IsNullOrWhiteSpace(incomingHost) || string.IsNullOrWhiteSpace(SmtpHost))
         {
-            error = "No server settings for this address. Enter the IMAP and SMTP hosts under Advanced settings.";
+            error = $"No server settings for this address. Enter the {(IsPop3Backend ? "POP3" : "IMAP")} and SMTP hosts under Advanced settings.";
             return false;
         }
 
@@ -748,6 +758,11 @@ public abstract partial class AccountEditorViewModel : ObservableObject
         ImapPort = ImapPort,
         ImapUseSsl = ImapUseSsl,
         ImapAcceptInvalidCert = ImapAcceptInvalidCert,
+        Pop3Host = Pop3Host,
+        Pop3Port = Pop3Port,
+        Pop3UseSsl = Pop3UseSsl,
+        Pop3AcceptInvalidCert = Pop3AcceptInvalidCert,
+        CheckIncomingMail = CheckIncomingMail,
         SmtpHost = SmtpHost,
         SmtpPort = SmtpPort,
         SmtpUseSsl = SmtpUseSsl,

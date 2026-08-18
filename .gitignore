@@ -56,3 +56,15 @@ QuickMail.Tests/TestResults/
 # Local integration-test servers (GreenMail jar cache, logs, pids)
 .testservers/
 *_wpftmp.csproj
+
+# Local Eudora search corpus (contains imported private mail)
+/eudora-messages.db
+/eudora-messages.db-*
+/local-mvp-profile/
+
+# SQLite transient files created by importer and recovery tests
+*.db-shm
+*.db-wal
+*.db.*.tmp
+/.tmp-eudora-v2.db*
+/in-recovery-test.db*

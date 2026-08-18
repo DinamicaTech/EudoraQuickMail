@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using QuickMail.Helpers;
@@ -340,6 +341,21 @@ public class ConfigService : IConfigService
                         break;
                     case "tabsrememberacrossrestart":
                         config.Windowing.TabsRememberAcrossRestart = ParseBool(value);
+                        break;
+                    case "recipientcacheyears":
+                        if (int.TryParse(value, out var rcy)) config.RecipientCacheYears = Math.Clamp(rcy, 1, 20);
+                        break;
+                    case "folderpanewidth":
+                        if (double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var fpw))
+                            config.Windowing.FolderPaneWidth = Math.Clamp(fpw, 120, 800);
+                        break;
+                    case "accountpaneheight":
+                        if (double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var aph))
+                            config.Windowing.AccountPaneHeight = Math.Clamp(aph, 60, 800);
+                        break;
+                    case "readingpaneheight":
+                        if (double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var rph))
+                            config.Windowing.ReadingPaneHeight = Math.Clamp(rph, 120, 1200);
                         break;
                 }
             }
@@ -763,6 +779,15 @@ public class ConfigService : IConfigService
         sb.AppendLine($"ConfirmCloseTabWithUnsaved = {(config.Windowing.ConfirmCloseTabWithUnsaved ? "on" : "off")}");
         sb.AppendLine("# Confirm before closing a tab with unsaved changes.");
         sb.AppendLine("# Values: on, off.");
+        sb.AppendLine();
+
+        sb.AppendLine($"RecipientCacheYears = {Math.Clamp(config.RecipientCacheYears, 1, 20)}");
+        sb.AppendLine("# Years of sent-mail recipients used for address autocomplete. Values: 1-20.");
+        sb.AppendLine();
+        sb.AppendLine($"FolderPaneWidth = {config.Windowing.FolderPaneWidth.ToString("0.##", CultureInfo.InvariantCulture)}");
+        sb.AppendLine($"AccountPaneHeight = {config.Windowing.AccountPaneHeight.ToString("0.##", CultureInfo.InvariantCulture)}");
+        sb.AppendLine($"ReadingPaneHeight = {config.Windowing.ReadingPaneHeight.ToString("0.##", CultureInfo.InvariantCulture)}");
+        sb.AppendLine("# Persisted sizes of the main navigation panels.");
         sb.AppendLine();
 
         // ── [account:guid] overrides ─────────────────────────────────────────────

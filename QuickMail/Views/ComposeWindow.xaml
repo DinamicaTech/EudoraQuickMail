@@ -34,6 +34,7 @@
               KeyboardNavigation.TabNavigation="None">
             <MenuItem Header="_File">
                 <MenuItem Header="_Send" InputGestureText="Alt+S" Click="MenuSend_Click"/>
+                <MenuItem Header="Send _later" Command="{Binding ScheduleSendCommand}"/>
                 <MenuItem Header="Save _Draft" Command="{Binding SaveDraftCommand}" InputGestureText="Ctrl+S"/>
                 <Separator/>
                 <MenuItem Header="_Insert Template…" Command="{Binding InsertTemplateCommand}"/>
@@ -204,6 +205,11 @@
                 <ComboBoxItem Content="HTML"/>
             </ComboBox>
             <WrapPanel DockPanel.Dock="Right" HorizontalAlignment="Right">
+                <TextBox Width="125" Margin="6,2,0,0" VerticalContentAlignment="Center"
+                         Text="{Binding ScheduledForLocal, UpdateSourceTrigger=PropertyChanged}"
+                         AutomationProperties.Name="Scheduled send local date and time"/>
+                <Button Content="Send later" Command="{Binding ScheduleSendCommand}"
+                        AutomationProperties.Name="Schedule message" MinWidth="90" Margin="6,2,0,0"/>
                 <Button x:Name="SendButton"
                         Content="Send"
                         Command="{Binding SendCommand}"
@@ -305,6 +311,7 @@
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
                 <RowDefinition Height="*"/>
             </Grid.RowDefinitions>
             <Grid.ColumnDefinitions>
@@ -374,17 +381,31 @@
                      IsInactiveSelectionHighlightEnabled="True"
                      Margin="0,4" TabIndex="4"/>
 
-            <Separator Grid.Row="5" Grid.ColumnSpan="2" Margin="0,4"/>
+            <!-- Spell-check language -->
+            <Label Grid.Row="5" Grid.Column="0" Content="Language:"
+                   Target="{Binding ElementName=SpellLanguageSelector}"
+                   Padding="0" VerticalAlignment="Center" Margin="0,4"/>
+            <ComboBox Grid.Row="5" Grid.Column="1" x:Name="SpellLanguageSelector"
+                      SelectedValue="{Binding SpellLanguage, Mode=TwoWay}"
+                      SelectedValuePath="Tag" Margin="0,4" TabIndex="5"
+                      AutomationProperties.Name="Spelling language"
+                      SelectionChanged="SpellLanguageSelector_SelectionChanged">
+                <ComboBoxItem Content="Español" Tag="es-ES"/>
+                <ComboBoxItem Content="Català" Tag="ca-ES"/>
+                <ComboBoxItem Content="English" Tag="en-US"/>
+            </ComboBox>
+
+            <Separator Grid.Row="6" Grid.ColumnSpan="2" Margin="0,4"/>
 
             <!-- Attachments -->
-            <Button Grid.Row="6" Grid.Column="0" Grid.ColumnSpan="2"
+            <Button Grid.Row="7" Grid.Column="0" Grid.ColumnSpan="2"
                     Content="Add Files…"
                     Command="{Binding AddAttachmentsCommand}"
                     AutomationProperties.Name="Add file attachments"
                     AutomationProperties.AcceleratorKey="Ctrl+Shift+A"
                     HorizontalAlignment="Left"
                     Margin="0,2" TabIndex="5"/>
-            <ListBox Grid.Row="7" Grid.Column="0" Grid.ColumnSpan="2"
+            <ListBox Grid.Row="8" Grid.Column="0" Grid.ColumnSpan="2"
                      x:Name="AttachmentList"
                      ItemsSource="{Binding Attachments}"
                      SelectionMode="Single"
@@ -453,7 +474,7 @@
             <!-- Body: plain/Markdown TextBox and rich HTML editor.
                  Only one editor is visible at a time; visibility is swapped in
                  code-behind when the compose mode changes. -->
-            <Grid Grid.Row="9" Grid.ColumnSpan="2">
+            <Grid Grid.Row="10" Grid.ColumnSpan="2">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="*"/>
                 </Grid.RowDefinitions>
@@ -484,6 +505,11 @@
                              Margin="0,4" TabIndex="7"
                              VerticalAlignment="Stretch"
                              TextChanged="RichBodyBox_TextChanged"/>
+
+                <wv2:WebView2 Grid.Row="0" x:Name="HtmlBodyEditor"
+                              Visibility="Collapsed"
+                              AutomationProperties.Name="HTML message body"
+                              Margin="0,4"/>
             </Grid>
         </Grid>
     </DockPanel>

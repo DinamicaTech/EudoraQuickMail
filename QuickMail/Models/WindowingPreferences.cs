@@ -24,4 +24,8 @@ public class WindowingPreferences
 
     /// <summary>Reserved for v2. v1 always resets tabs at restart.</summary>
     public bool TabsRememberAcrossRestart { get; set; } = false;
+
+    public double FolderPaneWidth { get; set; } = 200;
+    public double AccountPaneHeight { get; set; } = 180;
+    public double ReadingPaneHeight { get; set; } = 300;
 }

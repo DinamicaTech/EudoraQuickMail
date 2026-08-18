@@ -224,6 +224,10 @@
                       AutomationProperties.Name="Create Rule from Message"
                       AutomationProperties.AcceleratorKey="Ctrl+Shift+T"
                       Command="{Binding CreateRuleFromMessageCommand}"/>
+            <Separator/>
+            <MenuItem Header="View _Source"
+                      AutomationProperties.Name="View message source"
+                      Click="MessageContextMenu_ViewSource_Click"/>
         </ContextMenu>
 
         <!-- Folder context menu — MUST live in Window.Resources, not inside a Style.Setter.Value.
@@ -307,6 +311,8 @@
                 <Separator/>
                 <MenuItem Header="_Manage Accounts…"
                           Command="{Binding ManageAccountsCommand}"/>
+                <MenuItem Header="_Import from Eudora…"
+                          Click="MenuImportEudora_Click"/>
                 <Separator/>
                 <MenuItem Header="S_ettings…"
                           Click="MenuSettings_Click"
@@ -318,6 +324,8 @@
 
             <!-- Message -->
             <MenuItem Header="_Message" SubmenuOpened="MessageMenu_SubmenuOpened">
+                <MenuItem Header="_Search…" InputGestureText="F3" Click="MenuSearch_Click"/>
+                <Separator/>
                 <MenuItem Header="_Reply"
                           Command="{Binding ReplyCommand}"
                           InputGestureText="Ctrl+R"/>
@@ -867,7 +875,7 @@
         <!--  Ctrl+0 = toolbar | Ctrl+1/2/3 = jump directly to any pane                    -->
         <Grid Grid.Row="2">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="200" MinWidth="120"/>
+                <ColumnDefinition x:Name="FolderPaneColumn" Width="200" MinWidth="120"/>
                 <ColumnDefinition Width="5"/>
                 <ColumnDefinition Width="*" MinWidth="300"/>
             </Grid.ColumnDefinitions>
@@ -876,7 +884,8 @@
             <Grid Grid.Column="0">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="*"  MinHeight="60"/>
+                    <RowDefinition x:Name="AccountPaneRow" Height="*" MinHeight="60"/>
+                    <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="2*" MinHeight="80"/>
                 </Grid.RowDefinitions>
@@ -885,7 +894,11 @@
                            Focusable="False"
                            Background="{DynamicResource Theme.ChromeBackground}"/>
 
-                <ListBox Grid.Row="1"
+                <DockPanel Grid.Row="1">
+                <Button DockPanel.Dock="Top" Content="(All messages)" HorizontalContentAlignment="Left"
+                        Padding="6,5" Click="AllMessagesAccount_Click"
+                        AutomationProperties.Name="All messages from every account"/>
+                <ListBox
                          x:Name="AccountList"
                          AutomationProperties.Name="Email accounts"
                          ItemsSource="{Binding Accounts}"
@@ -938,13 +951,18 @@
                         </ContextMenu>
                     </ListBox.ContextMenu>
                 </ListBox>
+                </DockPanel>
 
-                <TextBlock Grid.Row="2" Text="Folders" FontWeight="SemiBold" Padding="6,4"
+                <GridSplitter Grid.Row="2" Height="5" HorizontalAlignment="Stretch"
+                              ResizeDirection="Rows" ResizeBehavior="PreviousAndNext"
+                              DragCompleted="PaneSplitter_DragCompleted"/>
+
+                <TextBlock Grid.Row="3" Text="Folders" FontWeight="SemiBold" Padding="6,4"
                            Focusable="False"
                            Background="{DynamicResource Theme.ChromeBackground}"/>
 
                 <!-- True TreeView so screen readers announce level, expanded/collapsed state correctly. -->
-                <TreeView Grid.Row="3"
+                <TreeView Grid.Row="4"
                           x:Name="FolderList"
                           AutomationProperties.Name="Folder list"
                           ItemsSource="{Binding FolderTree}"
@@ -952,8 +970,12 @@
                           TabIndex="2"
                           KeyboardNavigation.TabNavigation="Once"
                           GotKeyboardFocus="FolderList_GotKeyboardFocus"
+                          AllowDrop="True"
+                          DragOver="FolderList_DragOver"
+                          Drop="FolderList_Drop"
                           PreviewTextInput="FolderList_PreviewTextInput"
-                          PreviewKeyDown="FolderList_PreviewKeyDown">
+                          PreviewKeyDown="FolderList_PreviewKeyDown"
+                          SelectedItemChanged="FolderList_SelectedItemChanged">
                     <TreeView.Resources>
                         <HierarchicalDataTemplate DataType="{x:Type models:FolderTreeNode}"
                                                   ItemsSource="{Binding Children}">
@@ -1034,6 +1056,7 @@
             </Grid>
 
             <GridSplitter Grid.Column="1" Width="5" HorizontalAlignment="Stretch"
+                          DragCompleted="PaneSplitter_DragCompleted"
                           IsTabStop="False"
                           AutomationProperties.Name="Resize left and right panes"/>
 
@@ -1108,11 +1131,17 @@
                 <Grid>
                     <Grid.RowDefinitions>
                         <RowDefinition Height="{Binding IsMessageListAreaVisible, Converter={StaticResource BoolToGridLengthConverter}, ConverterParameter='*|0'}"/>
-                        <RowDefinition Height="{Binding IsMessageListAreaVisible, Converter={StaticResource BoolToGridLengthConverter}, ConverterParameter='Auto|*'}"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition x:Name="ReadingPaneRow" Height="0" MinHeight="0"/>
                     </Grid.RowDefinitions>
 
+                <GridSplitter Grid.Row="1" Height="5" HorizontalAlignment="Stretch"
+                              ResizeDirection="Rows" ResizeBehavior="PreviousAndNext"
+                              Visibility="{Binding IsMessageOpen, Converter={StaticResource BoolToVisibilityConverter}}"
+                              DragCompleted="PaneSplitter_DragCompleted"/>
+
                 <!-- Body pane — hidden until IsMessageOpen; Escape returns to MessageList -->
-                <Border Grid.Row="1"
+                <Border Grid.Row="2"
                         BorderThickness="0,1,0,0"
                         BorderBrush="{DynamicResource Theme.Border}"
                         MinHeight="200"
@@ -1173,6 +1202,7 @@
                                      KeyboardNavigation.DirectionalNavigation="Contained"
                                      AutomationProperties.Name="Attachments"
                                      PreviewKeyDown="ReadingPaneAttachmentList_PreviewKeyDown"
+                                     MouseDoubleClick="ReadingPaneAttachmentList_MouseDoubleClick"
                                      GotKeyboardFocus="ReadingPaneAttachmentList_GotKeyboardFocus">
                                 <ListBox.ItemContainerStyle>
                                     <Style TargetType="ListBoxItem">
@@ -1263,6 +1293,12 @@
                                     AutomationProperties.Name="Clear search"
                                     ToolTip="Clear search (Escape)"
                                     IsTabStop="True"/>
+                            <Button DockPanel.Dock="Right" Content="Search" Margin="6,0,0,0"
+                                    Click="SearchButton_Click" IsDefault="True"
+                                    AutomationProperties.Name="Execute message search"/>
+                            <Button DockPanel.Dock="Right" Content="Advanced Search" Margin="6,0,0,0"
+                                    Click="AdvancedSearchButton_Click"
+                                    AutomationProperties.Name="Open advanced message search"/>
                             <TextBlock DockPanel.Dock="Right"
                                        VerticalAlignment="Center"
                                        Margin="6,0"
@@ -1280,7 +1316,7 @@
                                 </TextBlock.Style>
                             </TextBlock>
                             <TextBox x:Name="SearchBox"
-                                     Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
+                                     Text="{Binding SearchText, UpdateSourceTrigger=Explicit}"
                                      AutomationProperties.Name="Search messages"
                                      ToolTip="Search by sender, subject, or preview. Escape to clear."
                                      PreviewKeyDown="SearchBox_PreviewKeyDown"/>
@@ -1477,6 +1513,7 @@
                               ContextMenu="{StaticResource MessageContextMenu}"
                               ItemsSource="{Binding Messages}"
                               SelectedItem="{Binding SelectedMessage, Mode=TwoWay}"
+                              SelectionChanged="MessageList_SelectionChanged"
                               SelectionMode="Extended"
                               BorderThickness="0"
                               TabIndex="3"
@@ -1485,7 +1522,20 @@
                               GotKeyboardFocus="List_GotKeyboardFocus"
                               PreviewTextInput="MessageList_PreviewTextInput"
                               PreviewKeyDown="MessageList_PreviewKeyDown"
+                              PreviewMouseLeftButtonDown="MessageList_PreviewMouseLeftButtonDown"
+                              PreviewMouseLeftButtonUp="MessageList_PreviewMouseLeftButtonUp"
+                              PreviewMouseMove="MessageList_PreviewMouseMove"
+                              PreviewMouseWheel="MessageList_PreviewMouseWheel"
+                              ScrollViewer.VerticalScrollBarVisibility="Hidden"
+                              Margin="0,0,16,0"
                               MouseLeftButtonUp="MessageList_MouseLeftButtonUp">
+                        <ListView.Resources>
+                            <!-- With a bounded 500-row page, pixel scrolling keeps the thumb
+                                 continuously draggable instead of snapping by logical items. -->
+                            <Style TargetType="ScrollViewer" BasedOn="{StaticResource {x:Type ScrollViewer}}">
+                                <Setter Property="CanContentScroll" Value="False"/>
+                            </Style>
+                        </ListView.Resources>
                         <ListView.Style>
                             <Style TargetType="ListView" BasedOn="{StaticResource {x:Type ListView}}">
                                 <Setter Property="Visibility" Value="{Binding IsMessagesView, Converter={StaticResource BoolToVisibilityConverter}}"/>
@@ -1504,7 +1554,7 @@
                             <GridView>
                                 <GridViewColumn Width="65">
                                     <GridViewColumn.Header>
-                                        <TextBlock Text="Status"
+                                        <GridViewColumnHeader Content="Status" Tag="Status"
                                                    AutomationProperties.IsColumnHeader="True"/>
                                     </GridViewColumn.Header>
                                     <GridViewColumn.CellTemplate>
@@ -1518,7 +1568,7 @@
                                 </GridViewColumn>
                                 <GridViewColumn Width="180">
                                     <GridViewColumn.Header>
-                                        <GridViewColumnHeader Content="From"
+                                        <GridViewColumnHeader Content="From" Tag="From"
                                                               AutomationProperties.IsColumnHeader="True"/>
                                     </GridViewColumn.Header>
                                     <GridViewColumn.CellTemplate>
@@ -1529,9 +1579,19 @@
                                         </DataTemplate>
                                     </GridViewColumn.CellTemplate>
                                 </GridViewColumn>
+                                <GridViewColumn Width="180">
+                                    <GridViewColumn.Header>
+                                        <GridViewColumnHeader Content="To" Tag="To" AutomationProperties.IsColumnHeader="True"/>
+                                    </GridViewColumn.Header>
+                                    <GridViewColumn.CellTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="{Binding To}" TextTrimming="CharacterEllipsis" ToolTip="{Binding To}"/>
+                                        </DataTemplate>
+                                    </GridViewColumn.CellTemplate>
+                                </GridViewColumn>
                                 <GridViewColumn Width="Auto">
                                     <GridViewColumn.Header>
-                                        <GridViewColumnHeader Content="Subject"
+                                        <GridViewColumnHeader Content="Subject" Tag="Subject"
                                                               AutomationProperties.IsColumnHeader="True"/>
                                     </GridViewColumn.Header>
                                     <GridViewColumn.CellTemplate>
@@ -1543,20 +1603,20 @@
                                         </DataTemplate>
                                     </GridViewColumn.CellTemplate>
                                 </GridViewColumn>
-                                <GridViewColumn Width="80">
+                                <GridViewColumn Width="96">
                                     <GridViewColumn.Header>
-                                        <GridViewColumnHeader Content="Date"
+                                        <GridViewColumnHeader Content="Date" Tag="Date" HorizontalContentAlignment="Right"
                                                               AutomationProperties.IsColumnHeader="True"/>
                                     </GridViewColumn.Header>
                                     <GridViewColumn.CellTemplate>
                                         <DataTemplate>
-                                            <TextBlock Text="{Binding DateDisplay}" TextAlignment="Right"/>
+                                            <TextBlock Text="{Binding DateDisplay}" TextAlignment="Right" Margin="0,0,4,0"/>
                                         </DataTemplate>
                                     </GridViewColumn.CellTemplate>
                                 </GridViewColumn>
-                                <GridViewColumn Width="24">
+                                <GridViewColumn Width="32">
                                     <GridViewColumn.Header>
-                                        <TextBlock Text="&#x1F4CE;" FontSize="{DynamicResource Theme.FontSizeSmall}"
+                                        <GridViewColumnHeader Content="&#x1F4CE;" Tag="Attachments" FontSize="{DynamicResource Theme.FontSizeSmall}"
                                                    ToolTip="Has attachments"
                                                    AutomationProperties.IsColumnHeader="True"/>
                                     </GridViewColumn.Header>
@@ -1657,6 +1717,21 @@
                             </Style>
                         </ListView.ItemContainerStyle>
                     </ListView>
+
+                    <!-- The list keeps only one bounded page in memory, while this scrollbar
+                         represents every matching message and loads the required page on demand. -->
+                    <ScrollBar x:Name="TotalMessageScrollBar"
+                               Panel.ZIndex="5"
+                               Orientation="Vertical"
+                               HorizontalAlignment="Right"
+                               Width="16"
+                               Minimum="0"
+                               Maximum="{Binding LocalMaximumMessageIndex}"
+                               ViewportSize="2000"
+                               SmallChange="3"
+                               LargeChange="25"
+                               Visibility="{Binding IsMessagesView, Converter={StaticResource BoolToVisibilityConverter}}"
+                               Scroll="TotalMessageScrollBar_Scroll"/>
 
                     <!-- Conversation tree view: one root node per subject group, children are individual messages. -->
                     <TreeView x:Name="ConversationTree"
@@ -2066,11 +2141,34 @@
                  E.g., "7323 messages. Synced 9:29 AM" or "Connecting and syncing... Never synced" -->
             <StatusBarItem x:Name="StatusTextItem"
                            KeyboardNavigation.IsTabStop="False">
+                <StatusBarItem.Style>
+                    <Style TargetType="StatusBarItem" BasedOn="{StaticResource {x:Type StatusBarItem}}">
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsStatusHighlighted}" Value="True">
+                                <Setter Property="Background" Value="{DynamicResource Theme.AccentSubtle}"/>
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </StatusBarItem.Style>
                 <TextBlock x:Name="StatusTextBox"
                            Style="{StaticResource StatusTextBlockStyle}">
                     <Run Text="{Binding StatusText, Mode=OneWay}"/>
                     <Run Text="{Binding LastSyncText, StringFormat=' {0}', Mode=OneWay}"/>
                 </TextBlock>
+            </StatusBarItem>
+
+            <StatusBarItem KeyboardNavigation.IsTabStop="False">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="{Binding Messages.Count, StringFormat='Grid: {0:N0} messages'}"
+                               AutomationProperties.Name="Messages currently shown in grid"/>
+                    <TextBlock Text="{Binding SelectedMessageCount, StringFormat=' · Selected: {0:N0}'}">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock"><Setter Property="Visibility" Value="Visible"/>
+                                <Style.Triggers><DataTrigger Binding="{Binding SelectedMessageCount}" Value="0"><Setter Property="Visibility" Value="Collapsed"/></DataTrigger></Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                </StackPanel>
             </StatusBarItem>
 
             <!-- Region 2: Connection state (informational) -->
