@@ -95,6 +95,41 @@ public partial class ComposeWindow : Window
     private bool _suppressNextMenuActivation;
     private bool _closeAfterDraftSave;
 
+    private ProfileContext TranslationProfile =>
+        ((App)Application.Current).Profile ?? ProfileContext.Default();
+
+    private void TranslateSelectionShortcut_Executed(object sender, ExecutedRoutedEventArgs e) =>
+        MenuTranslateSelection_Click(sender, new RoutedEventArgs());
+
+    private async void MenuTranslateSelection_Click(object sender, RoutedEventArgs e)
+    {
+        string selected;
+        if (_vm.CurrentMode == ComposeMode.Html)
+        {
+            if (!_htmlEditorReady || HtmlBodyEditor.CoreWebView2 is null) return;
+            var json = await HtmlBodyEditor.CoreWebView2.ExecuteScriptAsync("window.quickmailGetSelection()");
+            selected = JsonSerializer.Deserialize<string>(json) ?? string.Empty;
+        }
+        else selected = BodyBox.SelectedText;
+
+        if (string.IsNullOrWhiteSpace(selected))
+        {
+            MessageBox.Show(this, "Select the text you want to translate first.", "Translate Selection",
+                MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var dialog = new TranslateSelectionWindow(TranslationProfile, selected) { Owner = this };
+        if (dialog.ShowDialog() != true) return;
+        if (_vm.CurrentMode == ComposeMode.Html)
+            await HtmlBodyEditor.CoreWebView2.ExecuteScriptAsync(
+                $"window.quickmailReplaceSelection({JsonSerializer.Serialize(dialog.Translation)})");
+        else BodyBox.SelectedText = dialog.Translation;
+    }
+
+    private void MenuTranslationProviders_Click(object sender, RoutedEventArgs e) =>
+        new TranslationProvidersWindow(TranslationProfile) { Owner = this }.ShowDialog();
+
     // Last block type announced while navigating in HTML mode (e.g. "Heading 2", "Normal text").
     // Used to suppress repeat announcements when the caret stays on the same paragraph type.
     private string? _lastAnnouncedBlockType;

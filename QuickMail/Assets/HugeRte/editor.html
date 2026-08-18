@@ -11,6 +11,7 @@
   <textarea id="editor" aria-label="HTML message body"></textarea>
   <script>
     let quickMailEditor;
+    let quickMailSelectionBookmark;
     let preservedHeadStyles = '';
     let quickMailLanguage = 'es-ES';
 
@@ -90,6 +91,22 @@
     window.quickmailInsertText = text => {
       if (!quickMailEditor) return;
       quickMailEditor.insertContent(quickMailEditor.dom.encode(text));
+      quickMailEditor.focus();
+      emitContent();
+    };
+
+    window.quickmailGetSelection = () => {
+      if (!quickMailEditor) return '';
+      quickMailSelectionBookmark = quickMailEditor.selection.getBookmark(2, true);
+      return quickMailEditor.selection.getContent({ format: 'text' });
+    };
+
+    window.quickmailReplaceSelection = text => {
+      if (!quickMailEditor) return;
+      if (quickMailSelectionBookmark)
+        quickMailEditor.selection.moveToBookmark(quickMailSelectionBookmark);
+      quickMailEditor.selection.setContent(quickMailEditor.dom.encode(text));
+      quickMailSelectionBookmark = null;
       quickMailEditor.focus();
       emitContent();
     };

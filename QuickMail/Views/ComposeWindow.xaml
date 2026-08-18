@@ -22,7 +22,12 @@
         <KeyBinding Key="S" Modifiers="Alt"  Command="{Binding SendCommand}"/>
         <KeyBinding Key="S" Modifiers="Ctrl" Command="{Binding SaveDraftCommand}"/>
         <KeyBinding Key="A" Modifiers="Ctrl+Shift" Command="{Binding AddAttachmentsCommand}"/>
+        <KeyBinding Key="G" Modifiers="Ctrl+Shift" Command="NavigationCommands.Search"/>
     </Window.InputBindings>
+
+    <Window.CommandBindings>
+        <CommandBinding Command="NavigationCommands.Search" Executed="TranslateSelectionShortcut_Executed"/>
+    </Window.CommandBindings>
 
     <DockPanel>
 
@@ -109,6 +114,9 @@
                           IsEnabled="{Binding IsSpellNavAvailable}"
                           Click="MenuPrevMisspelling_Click"/>
                 <MenuItem Header="_Toggle Spelling Announcements" Click="MenuToggleSpelling_Click"/>
+                <Separator/>
+                <MenuItem Header="_Translate Selection…" InputGestureText="Ctrl+Shift+G" Click="MenuTranslateSelection_Click"/>
+                <MenuItem Header="Translation _Providers…" Click="MenuTranslationProviders_Click"/>
                 <Separator/>
                 <MenuItem Header="_Address Book…" InputGestureText="Ctrl+Shift+B" Click="MenuAddressBook_Click"/>
                 <MenuItem Header="Chec_k Addresses" InputGestureText="Ctrl+K" Click="MenuCheckAddresses_Click"/>

@@ -49,6 +49,9 @@ before a public release.
   compose mode, and correct AltGr handling on European keyboards.
 - Added selectable Spanish, Catalan, and English spelling languages with live underlining, native
   contextual suggestions, ignore/add-to-dictionary actions, and draft language metadata.
+- Added selected-text translation while composing, with a local Argos Translate provider and an
+  optional DeepL provider. Provider configuration includes setup/testing, local model management,
+  a persistent default, privacy guidance, and Windows DPAPI protection for the DeepL API key.
 - Fixed asynchronous draft-close re-entry and other composition focus/keyboard issues.
 
 ### Performance and reliability
