@@ -11,6 +11,7 @@ internal static class MigrationCommand
         Console.Title = "QuickMail — Import from Eudora";
         Console.WriteLine("QuickMail Eudora migration");
         Console.WriteLine("Progress is shown mailbox by mailbox below.");
+        Console.WriteLine("The previous Eudora import will be replaced; other accounts are preserved.");
         Console.WriteLine();
         try
         {

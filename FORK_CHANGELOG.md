@@ -10,6 +10,7 @@ before a public release.
 
 ## Unreleased
 
+- The Eudora import confirmation now explicitly explains that it replaces only the previous Eudora message import and preserves all other accounts and mail.
 - Connection test results now open in a readable modal dialog instead of being hidden behind the account form buttons.
 
 - Added local `Draft` and `Scheduled` system folders to imported Eudora/archive accounts.

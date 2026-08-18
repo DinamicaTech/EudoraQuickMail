@@ -6545,6 +6545,7 @@ public partial class MainWindow : Window
         }
         var confirmation = MessageBox.Show(this,
             $"All Eudora messages from the following folder will be imported:\n\n{eudoraFolder}\n\n" +
+            "Any previous Eudora message import will be replaced. Other accounts and their messages will not be changed.\n\n" +
             "Account configurations found in Eudora.ini will also be imported without passwords.\n\n" +
             "QuickMail will close during the import and reopen automatically when it finishes. Continue?",
             "Import from Eudora", MessageBoxButton.YesNo, MessageBoxImage.Information);
