@@ -1945,6 +1945,15 @@ public partial class ComposeWindow : Window
                 _pendingHtml = null;
                 await LoadHtmlIntoWebEditorAsync(pending);
             }
+            else
+            {
+                // New messages already enter HTML mode before the Window is shown, so
+                // there is no Plain Text -> HTML mode transition to raise the VM's load
+                // event. Explicitly bootstrap HugeRTE instead of leaving its narrow raw
+                // <textarea> visible (which also bypasses our context menu and content events).
+                await LoadHtmlIntoWebEditorAsync(
+                    "<!doctype html><html><head><meta charset=\"utf-8\"></head><body><p><br></p></body></html>");
+            }
             await HtmlBodyEditor.CoreWebView2.ExecuteScriptAsync(
                 $"window.quickmailSetLanguage({JsonSerializer.Serialize(_vm.SpellLanguage)})");
         }
