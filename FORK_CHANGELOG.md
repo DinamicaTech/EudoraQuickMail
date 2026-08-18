@@ -14,6 +14,8 @@ before a public release.
 - Moved the New/Reply/Reply All/Forward toolbar above the message list.
 - Restored the full-result vertical scrollbar and added a reading-pane `Detach / Follow Selection` action.
 - Added visible indeterminate progress while Argos runtime and language packages are installed.
+- Fixed the total-result scrollbar layout, kept the inline preview closed while a detached follower
+  is active, and ensured local archive accounts run their system-folder migration without credentials.
 
 - Added visible local Draft and Scheduled folders; Send Later now prompts explicitly for a local
   date/time and keeps a local scheduled copy until successful delivery.

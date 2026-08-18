@@ -1385,8 +1385,9 @@
                     </Grid>
 
                     <!-- Represents the complete result set, not merely the loaded 2,000-row page. -->
-                    <ScrollBar x:Name="TotalMessageScrollBar" DockPanel.Dock="Right"
-                               Panel.ZIndex="5" Orientation="Vertical" Width="16"
+                    <ScrollBar x:Name="TotalMessageScrollBar"
+                               Panel.ZIndex="20" Orientation="Vertical" Width="16"
+                               HorizontalAlignment="Right" VerticalAlignment="Stretch"
                                Minimum="0" Maximum="{Binding LocalMaximumMessageIndex}"
                                ViewportSize="2000" SmallChange="3" LargeChange="25"
                                Visibility="{Binding IsMessagesView, Converter={StaticResource BoolToVisibilityConverter}}"
@@ -1411,7 +1412,7 @@
                               PreviewMouseMove="MessageList_PreviewMouseMove"
                               PreviewMouseWheel="MessageList_PreviewMouseWheel"
                               ScrollViewer.VerticalScrollBarVisibility="Hidden"
-                              Margin="0"
+                              Margin="0,0,16,0"
                               MouseLeftButtonUp="MessageList_MouseLeftButtonUp">
                         <ListView.Resources>
                             <!-- With a bounded 500-row page, pixel scrolling keeps the thumb

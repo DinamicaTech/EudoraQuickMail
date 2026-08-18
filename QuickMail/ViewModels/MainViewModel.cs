@@ -4427,7 +4427,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private async Task<(Guid Id, List<MailFolderModel>? Folders)> ConnectOneAccountAsync(AccountModel account)
     {
         string? password = null;
-        if (account.AuthType == Models.AuthType.Password)
+        // A LocalArchive is an on-disk mailbox and never needs a server password. Requiring a
+        // credential here prevented its ConnectAsync migration from creating Draft/Scheduled.
+        if (account.BackendKind != BackendKind.LocalArchive && account.AuthType == Models.AuthType.Password)
         {
             password = _credentials.GetPassword(account.Id);
             if (string.IsNullOrEmpty(password)) return (account.Id, null);

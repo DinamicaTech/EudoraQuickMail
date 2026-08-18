@@ -2790,7 +2790,16 @@ public partial class MainWindow : Window
         }
 
         if (MessageList.SelectedItems.Count == 1 && MessageList.SelectedItem is MailMessageSummary summary)
+        {
+            if (_followSelectionWindow is { IsLoaded: true } follower)
+            {
+                follower.FollowMessage(summary, _vm.Messages);
+                _vm.MessageDetail = null;
+                _vm.IsMessageOpen = false;
+                return;
+            }
             await OpenMessageFromListAsync(summary);
+        }
     }
 
     private void MessageList_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -5357,6 +5366,14 @@ public partial class MainWindow : Window
         if (_vm.IsSelectedFolderDrafts)
         {
             await _vm.OpenDraftCommand.ExecuteAsync(null);
+            return;
+        }
+
+        if (_followSelectionWindow is { IsLoaded: true } follower)
+        {
+            follower.FollowMessage(summary, _vm.Messages);
+            _vm.MessageDetail = null;
+            _vm.IsMessageOpen = false;
             return;
         }
 
