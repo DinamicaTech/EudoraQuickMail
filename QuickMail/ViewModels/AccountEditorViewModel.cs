@@ -39,6 +39,7 @@ public abstract partial class AccountEditorViewModel : ObservableObject
     [ObservableProperty] private string _loginUsername = string.Empty;
 
     [ObservableProperty] private string _password = string.Empty;
+    [ObservableProperty] private bool _isActive = true;
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsICloudAccount))]
     [NotifyPropertyChangedFor(nameof(ShowContactSyncOption))]

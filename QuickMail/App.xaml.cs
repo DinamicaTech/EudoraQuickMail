@@ -52,6 +52,17 @@ public partial class App : Application
     private PeriodicPop3Receiver? _pop3Receiver;
     public ScheduledSendService? ScheduledSender { get; private set; }
 
+    public async Task CheckMailNowAsync(Action<string>? progress = null)
+    {
+        progress?.Invoke("Checking incoming mail…");
+        if (_pop3Receiver != null)
+            await _pop3Receiver.SweepAsync(includeAccountsWithAutomaticCheckDisabled: true);
+        progress?.Invoke("Sending queued messages…");
+        if (ScheduledSender != null)
+            await ScheduledSender.DispatchDueAsync();
+        progress?.Invoke("Mail check complete.");
+    }
+
     // Owned by Main (acquired before WPF starts, disposed after Run returns); OnStartup
     // wires its activation signal to the main window.
     private static SingleInstanceService? _singleInstance;

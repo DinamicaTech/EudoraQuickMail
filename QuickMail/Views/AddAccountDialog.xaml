@@ -219,6 +219,8 @@
                                 <CheckBox Content="Comprobar correo entrante" IsChecked="{Binding CheckIncomingMail}"
                                           AutomationProperties.Name="Comprobar correo entrante" Margin="0,4,0,6"/>
                             </StackPanel>
+                            <CheckBox Content="_Active account" IsChecked="{Binding IsActive}"
+                                      AutomationProperties.Name="Active account" Margin="0,4,0,6"/>
 
                             <Separator Margin="0,6"/>
 

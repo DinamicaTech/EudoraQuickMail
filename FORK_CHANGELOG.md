@@ -20,6 +20,12 @@ before a public release.
   simplified detached preview windows so they always follow the main selection.
 - Reopened local HTML drafts in their original mode, closed compose after Save Draft, added editable
   scheduled messages (reschedule or Send immediately), and added a regional `Time` message column.
+- Added full-form account editing from Manage Accounts and a `Check Mail` toolbar action that
+  manually checks every POP3 account, dispatches due queued mail, and reports progress in Status.
+- Protected local archive deletion with an explicit destructive warning and moved its potentially
+  long SQLite cascade off the UI thread so Manage Accounts remains responsive.
+- Added an `Active account` flag; inactive accounts remain configured and keep their data but are
+  excluded from the main account tree, connection, POP3 checks, and scheduled dispatch.
 
 - Added visible local Draft and Scheduled folders; Send Later now prompts explicitly for a local
   date/time and keeps a local scheduled copy until successful delivery.

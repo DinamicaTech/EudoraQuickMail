@@ -102,6 +102,8 @@
                          AutomationProperties.LabeledBy="{Binding ElementName=LblProvider}"
                          TabIndex="5"
                          Margin="0,0,0,4"/>
+                <CheckBox Content="_Active account" IsChecked="{Binding IsActive}"
+                          AutomationProperties.Name="Active account" Margin="0,6,0,4"/>
 
                 <!-- Account Name -->
                 <Label x:Name="LblAccountName" Content="Account _name:" Target="{Binding ElementName=AccountNameBox}" Padding="0" Margin="0,8,0,2"/>
@@ -355,6 +357,12 @@
                     AutomationProperties.Name="Save"
                     IsDefault="True"
                     MinWidth="80"/>
+            <Button DockPanel.Dock="Right"
+                    Content="_Edit…"
+                    Click="EditButton_Click"
+                    AutomationProperties.Name="Edit account in full account form"
+                    IsEnabled="{Binding IsEditing}"
+                    MinWidth="80" Margin="0,0,6,0"/>
             <TextBlock VerticalAlignment="Center"
                        Text="{Binding StatusText}"
                        AutomationProperties.Name="Status"

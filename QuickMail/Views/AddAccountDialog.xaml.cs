@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics;
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Navigation;
@@ -16,11 +17,17 @@ public partial class AddAccountDialog : Window
     private readonly AddAccountViewModel _vm;
     private bool _restoreFocusToTestButton;
 
-    public AddAccountDialog(AddAccountViewModel vm)
+    public AddAccountDialog(AddAccountViewModel vm, bool editMode = false)
     {
         _vm = vm;
         InitializeComponent();
         DataContext = vm;
+        if (editMode)
+        {
+            Title = "Edit Account";
+            AddButton.Content = "_Save";
+            AutomationProperties.SetName(AddButton, "Save account");
+        }
         vm.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName == nameof(vm.StatusText) && !string.IsNullOrEmpty(vm.StatusText))

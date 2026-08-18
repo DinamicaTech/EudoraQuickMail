@@ -164,6 +164,7 @@ public partial class AccountManagerViewModel : AccountEditorViewModel
         Pop3UseSsl = value.Pop3UseSsl;
         Pop3AcceptInvalidCert = value.Pop3AcceptInvalidCert;
         CheckIncomingMail = value.CheckIncomingMail;
+        IsActive = value.IsActive;
         SmtpHost = value.SmtpHost;
         SmtpPort = value.SmtpPort;
         SmtpUseSsl = value.SmtpUseSsl;
@@ -292,6 +293,33 @@ public partial class AccountManagerViewModel : AccountEditorViewModel
     public AddAccountViewModel CreateAddAccountViewModel() =>
         new(_featureGate, MailService, OAuthService, Catalog, _autoDiscover, _sendMail);
 
+    public AddAccountViewModel? CreateEditAccountViewModel()
+    {
+        if (SelectedAccount is not { IsShared: false } account) return null;
+        var vm = CreateAddAccountViewModel();
+        var password = account.BackendKind == BackendKind.Pop3Smtp
+            ? new DpapiAccountSecretProtector().GetPop3Password(account)
+            : _credentials.GetPassword(account.Id);
+        vm.SeedFrom(account, password);
+        return vm;
+    }
+
+    public void CommitEditedAccount(AccountModel edited, string password)
+    {
+        if (SelectedAccount is not { } original) return;
+        var index = Accounts.IndexOf(original);
+        edited.Id = original.Id;
+        edited.IsDefault = original.IsDefault;
+        edited.ArchiveFolderFullName = original.ArchiveFolderFullName;
+        edited.TenantId = original.TenantId;
+        if (edited.BackendKind != BackendKind.Pop3Smtp && !string.IsNullOrEmpty(password))
+            _credentials.SavePassword(edited.Id, password);
+        Accounts[index] = edited;
+        _accountService.SaveAccounts([.. Accounts]);
+        SelectedAccount = edited;
+        StatusText = "Account updated.";
+    }
+
     public void CommitNewAccount(AccountModel account, string password)
     {
         if (!string.IsNullOrEmpty(password) && account.BackendKind != BackendKind.Pop3Smtp)
@@ -397,6 +425,7 @@ public partial class AccountManagerViewModel : AccountEditorViewModel
         account.Pop3UseSsl = Pop3UseSsl;
         account.Pop3AcceptInvalidCert = Pop3AcceptInvalidCert;
         account.CheckIncomingMail = CheckIncomingMail;
+        account.IsActive = IsActive;
         account.SmtpHost = SmtpHost;
         account.SmtpPort = SmtpPort;
         account.SmtpUseSsl = SmtpUseSsl;
@@ -437,12 +466,22 @@ public partial class AccountManagerViewModel : AccountEditorViewModel
     /// only way to get the required yes, so an unset callback fails closed — the cascade is treated as
     /// declined and nothing is removed, never removed unconfirmed. The shipped View always wires it.</summary>
     public Func<string, bool>? ConfirmCascadeRemoval { get; set; }
+    public Func<string, bool>? ConfirmLocalArchiveRemoval { get; set; }
 
     [RelayCommand]
     private async Task DeleteAccountAsync()
     {
         if (SelectedAccount == null) return;
         var account = SelectedAccount;
+
+        if (account.BackendKind == BackendKind.LocalArchive)
+        {
+            var confirmed = ConfirmLocalArchiveRemoval?.Invoke(
+                $"Delete '{account.AccountLabel}' and ALL locally imported messages?\n\n" +
+                "This permanently removes the imported mail database records and can take several minutes. " +
+                "The original Eudora files are not deleted.") ?? false;
+            if (!confirmed) return;
+        }
 
         // #31: a shared mailbox has no independent existence — it lives entirely through its parent's
         // token and backend — so removing the parent removes its shared mailboxes too. Confirm and name
@@ -472,7 +511,8 @@ public partial class AccountManagerViewModel : AccountEditorViewModel
 
         StatusText = "Account deleted. Cleaning up…";
 
-        try   { await _localStore.DeleteAccountDataAsync(account.Id); }
+        IsBusy = true;
+        try   { await Task.Run(() => _localStore.DeleteAccountDataAsync(account.Id)); }
         catch (Exception ex) { LogService.Log($"AccountManager.DeleteAccount: failed to purge mail.db — {ex.Message}"); }
         foreach (var child in sharedChildren)
         {
@@ -493,6 +533,7 @@ public partial class AccountManagerViewModel : AccountEditorViewModel
             catch (Exception ex) { LogService.Log($"AccountManager.DeleteAccount: failed to remove synced contacts — {ex.Message}"); }
         }
 
+        IsBusy = false;
         StatusText = sharedChildren.Count > 0
             ? $"Account deleted, along with {sharedChildren.Count} shared mailbox{(sharedChildren.Count == 1 ? "" : "es")}."
             : "Account deleted.";

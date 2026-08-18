@@ -112,7 +112,7 @@ public sealed class ScheduledSendService : IDisposable
             var changed = false;
             foreach (var item in queue.Where(x => x.SendAtUtc <= DateTimeOffset.UtcNow).ToList())
             {
-                var account = _accounts.LoadAccounts().FirstOrDefault(a => a.Id == item.Message.AccountId);
+                var account = _accounts.LoadAccounts().FirstOrDefault(a => a.Id == item.Message.AccountId && a.IsActive);
                 if (account is null) continue;
                 try
                 {

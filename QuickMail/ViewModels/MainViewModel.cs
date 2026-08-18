@@ -1834,7 +1834,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     public void LoadAccountList(List<AccountModel>? preloaded = null)
     {
-        var accounts = preloaded ?? _accountService.LoadAccounts();
+        var accounts = (preloaded ?? _accountService.LoadAccounts()).Where(a => a.IsActive).ToList();
 
         // Carry live connection state across the reload.
         //

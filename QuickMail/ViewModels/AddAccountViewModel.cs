@@ -427,6 +427,7 @@ public partial class AddAccountViewModel : AccountEditorViewModel, IDisposable
         Pop3UseSsl = Pop3UseSsl,
         Pop3AcceptInvalidCert = Pop3AcceptInvalidCert,
         CheckIncomingMail = CheckIncomingMail,
+        IsActive = IsActive,
         SmtpHost = SmtpHost,
         SmtpPort = SmtpPort,
         SmtpUseSsl = SmtpUseSsl,
@@ -441,6 +442,26 @@ public partial class AddAccountViewModel : AccountEditorViewModel, IDisposable
         if (account.BackendKind == BackendKind.Pop3Smtp && !string.IsNullOrEmpty(Password))
             new DpapiAccountSecretProtector().SetPop3Password(account, Password);
         return account;
+    }
+
+    public void SeedFrom(AccountModel account, string? password)
+    {
+        SelectedProvider = Providers.FirstOrDefault(p => p.Id == account.ProviderId) ?? Catalog.Resolve(account);
+        var backend = AvailableBackends.FirstOrDefault(x => x.Kind == account.BackendKind);
+        if (backend != null) SetBackendInternally(backend);
+        AccountName = account.AccountName; DisplayName = account.DisplayName; Username = account.Username;
+        LoginUsername = account.LoginUsername ?? string.Empty; Password = password ?? string.Empty;
+        AuthType = account.AuthType; BackendKind = account.BackendKind;
+        ImapHost = account.ImapHost; ImapPort = account.ImapPort; ImapUseSsl = account.ImapUseSsl;
+        ImapAcceptInvalidCert = account.ImapAcceptInvalidCert;
+        Pop3Host = account.Pop3Host; Pop3Port = account.Pop3Port; Pop3UseSsl = account.Pop3UseSsl;
+        Pop3AcceptInvalidCert = account.Pop3AcceptInvalidCert; CheckIncomingMail = account.CheckIncomingMail;
+        IsActive = account.IsActive;
+        SmtpHost = account.SmtpHost; SmtpPort = account.SmtpPort; SmtpUseSsl = account.SmtpUseSsl;
+        SmtpAcceptInvalidCert = account.SmtpAcceptInvalidCert; RequireStartTls = account.RequireStartTls;
+        Signature = account.Signature; SyncContacts = account.SyncContacts; SyncCalendar = account.SyncCalendar;
+        HostsUserEdited = false;
+        IsAdvancedExpanded = true;
     }
 
     /// <summary>

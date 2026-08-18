@@ -1106,6 +1106,10 @@
                              KeyboardNavigation.TabNavigation="None"
                              KeyboardNavigation.DirectionalNavigation="Cycle"
                              PreviewKeyDown="Toolbar_PreviewKeyDown">
+                        <Button Style="{DynamicResource ToolbarButton}" Content="Check Mail"
+                                Click="CheckMailButton_Click" AutomationProperties.Name="Check mail"
+                                ToolTip="Download incoming POP3 mail and send queued messages"/>
+                        <Separator/>
                         <Button x:Name="ToolbarFirstButton" Style="{DynamicResource ToolbarButton}"
                                 Command="{Binding NewMessageCommand}" Content="New"
                                 AutomationProperties.Name="New Message" ToolTip="New Message (Ctrl+N)"/>

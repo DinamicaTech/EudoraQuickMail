@@ -90,6 +90,8 @@ public partial class AccountModel : ObservableObject
 
     /// <summary>Whether the periodic receiver includes this account. Manual checking remains available.</summary>
     public bool CheckIncomingMail { get; set; } = true;
+    /// <summary>Inactive accounts remain configured but do not connect, receive, send, or appear in the main account tree.</summary>
+    public bool IsActive { get; set; } = true;
 
     /// <summary>DPAPI-protected password payloads, Base64 encoded. Empty for OAuth and local archives.</summary>
     public string EncryptedPop3Password { get; set; } = string.Empty;

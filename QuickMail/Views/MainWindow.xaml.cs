@@ -5652,6 +5652,31 @@ public partial class MainWindow : Window
             _vm.StatusText = "Detached message window now follows the main selection.";
     }
 
+    private async void CheckMailButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (Application.Current is not App app) return;
+        _vm.IsBusy = true;
+        _vm.IsStatusHighlighted = true;
+        try
+        {
+            await app.CheckMailNowAsync(message =>
+            {
+                _vm.IsStatusHighlighted = true;
+                _vm.StatusText = message;
+            });
+            await _vm.RefreshCommand.ExecuteAsync(null);
+            _vm.IsStatusHighlighted = true;
+            _vm.StatusText = "Mail check complete.";
+        }
+        catch (Exception ex)
+        {
+            _vm.IsStatusHighlighted = true;
+            _vm.StatusText = $"Mail check failed: {ex.Message}";
+            LogService.Log("Manual Check Mail", ex);
+        }
+        finally { _vm.IsBusy = false; }
+    }
+
     private void PromoteTabToWindow(MessageTabViewModel tab)
     {
         _vm.CloseTab(tab);

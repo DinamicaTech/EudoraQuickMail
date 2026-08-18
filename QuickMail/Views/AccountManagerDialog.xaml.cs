@@ -39,6 +39,9 @@ public partial class AccountManagerDialog : Window
         vm.ConfirmCascadeRemoval = message =>
             MessageBox.Show(this, message, "Remove shared mailboxes",
                 MessageBoxButton.YesNo, MessageBoxImage.Warning) == MessageBoxResult.Yes;
+        vm.ConfirmLocalArchiveRemoval = message =>
+            MessageBox.Show(this, message, "Delete imported mail archive",
+                MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No) == MessageBoxResult.Yes;
     }
 
     private void AddSharedMailboxButton_Click(object sender, RoutedEventArgs e)
@@ -214,6 +217,15 @@ public partial class AccountManagerDialog : Window
         var dialog = new AddAccountDialog(addVm) { Owner = this };
         if (dialog.ShowDialog() == true)
             _vm.CommitNewAccount(addVm.ToAccountModel(), addVm.Password);
+    }
+
+    private void EditButton_Click(object sender, RoutedEventArgs e)
+    {
+        var editVm = _vm.CreateEditAccountViewModel();
+        if (editVm == null) return;
+        var dialog = new AddAccountDialog(editVm, editMode: true) { Owner = this };
+        if (dialog.ShowDialog() == true)
+            _vm.CommitEditedAccount(editVm.ToAccountModel(), editVm.Password);
     }
 
     private void CloseButton_Click(object sender, RoutedEventArgs e)

@@ -25,13 +25,14 @@ public sealed class PeriodicPop3Receiver : IDisposable
     public event Action<AccountModel, Pop3ReceiveResult>? Completed;
     public event Action<AccountModel, int, int>? Started;
 
-    public async Task SweepAsync()
+    public async Task SweepAsync(bool includeAccountsWithAutomaticCheckDisabled = false)
     {
         if (Interlocked.Exchange(ref _running, 1) != 0) return;
         try
         {
             var accounts = _accounts.LoadAccounts()
-                .Where(a => a.BackendKind == BackendKind.Pop3Smtp && a.CheckIncomingMail).ToList();
+                .Where(a => a.IsActive && a.BackendKind == BackendKind.Pop3Smtp
+                    && (includeAccountsWithAutomaticCheckDisabled || a.CheckIncomingMail)).ToList();
             for (var index = 0; index < accounts.Count; index++)
             {
                 var account = accounts[index];
