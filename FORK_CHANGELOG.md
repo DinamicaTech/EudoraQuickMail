@@ -63,6 +63,8 @@ before a public release.
   changes Chromium's dictionary and context menu instead of merely changing the HTML `lang` tag.
 - Added reliable offline Catalan proofing with Softcatalà's Hunspell dictionary, wavy error
   underlining, contextual suggestions, and integration with QuickMail's personal dictionary.
+- Preserved the exact caret/selection offsets while Catalan proofing reshapes HTML text nodes, so
+  live underlining no longer moves the insertion point backwards while typing.
 - Added selected-text translation while composing, with a local Argos Translate provider and an
   optional DeepL provider. Provider configuration includes setup/testing, local model management,
   a persistent default, privacy guidance, and Windows DPAPI protection for the DeepL API key.

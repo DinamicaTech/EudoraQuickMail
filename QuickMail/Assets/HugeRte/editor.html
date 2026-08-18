@@ -52,6 +52,39 @@
     const closeQuickMailMenu = () => quickMailEditor?.getBody()
       .querySelectorAll('[data-quickmail-menu]').forEach(menu => menu.remove());
 
+    // HugeRTE bookmarks are DOM-path based. Catalan proofing deliberately splits text
+    // nodes to add wavy underlines, so restoring such a bookmark can land several words
+    // to the left. Text offsets survive that reshaping because proofing never changes the
+    // actual characters in the message.
+    const captureTextSelection = () => {
+      const body = quickMailEditor.getBody();
+      const range = quickMailEditor.selection.getRng();
+      if (!body.contains(range.startContainer) || !body.contains(range.endContainer)) return null;
+      const beforeStart = body.ownerDocument.createRange();
+      beforeStart.selectNodeContents(body); beforeStart.setEnd(range.startContainer, range.startOffset);
+      const beforeEnd = body.ownerDocument.createRange();
+      beforeEnd.selectNodeContents(body); beforeEnd.setEnd(range.endContainer, range.endOffset);
+      return { start: beforeStart.toString().length, end: beforeEnd.toString().length };
+    };
+
+    const restoreTextSelection = saved => {
+      if (!saved) return;
+      const body = quickMailEditor.getBody();
+      const walker = body.ownerDocument.createTreeWalker(body, NodeFilter.SHOW_TEXT);
+      let position = 0, startNode, endNode, startOffset = 0, endOffset = 0;
+      while (walker.nextNode()) {
+        const node = walker.currentNode, next = position + node.data.length;
+        if (!startNode && saved.start <= next) { startNode = node; startOffset = saved.start - position; }
+        if (!endNode && saved.end <= next) { endNode = node; endOffset = saved.end - position; break; }
+        position = next;
+      }
+      if (!startNode || !endNode) return;
+      const range = body.ownerDocument.createRange();
+      range.setStart(startNode, Math.max(0, startOffset));
+      range.setEnd(endNode, Math.max(0, endOffset));
+      quickMailEditor.selection.setRng(range);
+    };
+
     const addMenuButton = (menu, label, action) => {
       const item = menu.ownerDocument.createElement('button');
       item.type = 'button'; item.textContent = label;
@@ -97,7 +130,7 @@
     window.quickmailApplyCatalanProofing = errors => {
       if (!quickMailEditor || quickMailLanguage !== 'ca-ES') return;
       const body = quickMailEditor.getBody();
-      const bookmark = quickMailEditor.selection.getBookmark(2, true);
+      const savedSelection = captureTextSelection();
       body.querySelectorAll('[data-quickmail-spelling]').forEach(span => span.replaceWith(...span.childNodes));
       const lookup = new Map(Object.entries(errors).map(([word, suggestions]) => [word.toLocaleLowerCase('ca'), suggestions]));
       const walker = body.ownerDocument.createTreeWalker(body, NodeFilter.SHOW_TEXT);
@@ -116,7 +149,7 @@
         }
         if (changed) { fragment.append(node.data.slice(last)); node.replaceWith(fragment); }
       }
-      try { quickMailEditor.selection.moveToBookmark(bookmark); } catch { /* content may have changed */ }
+      try { restoreTextSelection(savedSelection); } catch { /* content may have changed */ }
     };
 
     window.quickmailLoad = sourceBase64 => {
