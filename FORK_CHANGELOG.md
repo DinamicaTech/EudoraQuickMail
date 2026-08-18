@@ -10,6 +10,8 @@ before a public release.
 
 ## Unreleased
 
+- Connection test results now open in a readable modal dialog instead of being hidden behind the account form buttons.
+
 - Added local `Draft` and `Scheduled` system folders to imported Eudora/archive accounts.
 - Moved the New/Reply/Reply All/Forward toolbar above the message list.
 - Restored the full-result vertical scrollbar and added a reading-pane `Detach / Follow Selection` action.

@@ -31,6 +31,7 @@ public partial class AccountManagerDialog : Window
         // #202: warn with a focus-grabbing dialog when a different identity than the one entered signs
         // in (typically an admin approving consent) — the account stays bound to the entered user.
         vm.SignInIdentityMismatch += WarnIdentityMismatch;
+        vm.ConnectionTestCompleted += ShowConnectionTestResult;
         // A PasswordBox cannot be data-bound, so the View has to be told when the VM drops the
         // password itself — otherwise the box keeps showing dots for a password that is gone.
         vm.PasswordCleared += OnPasswordCleared;
@@ -102,6 +103,7 @@ public partial class AccountManagerDialog : Window
     {
         // OnClosed, not OnClosing: the window can still cancel a close and stay open.
         _vm.SignInIdentityMismatch -= WarnIdentityMismatch;
+        _vm.ConnectionTestCompleted -= ShowConnectionTestResult;
         _vm.PasswordCleared -= OnPasswordCleared;
         _vm.EmailAddressRejected -= OnEmailAddressRejected;
         base.OnClosed(e);
@@ -217,6 +219,12 @@ public partial class AccountManagerDialog : Window
         var dialog = new AddAccountDialog(addVm) { Owner = this };
         if (dialog.ShowDialog() == true)
             _vm.CommitNewAccount(addVm.ToAccountModel(), addVm.Password);
+    }
+
+    private void ShowConnectionTestResult(string message, bool successful)
+    {
+        MessageBox.Show(this, message, "Test Connection", MessageBoxButton.OK,
+            successful ? MessageBoxImage.Information : MessageBoxImage.Warning);
     }
 
     private void EditButton_Click(object sender, RoutedEventArgs e)

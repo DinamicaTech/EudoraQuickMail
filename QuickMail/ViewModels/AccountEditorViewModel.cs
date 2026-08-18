@@ -18,6 +18,14 @@ namespace QuickMail.ViewModels;
 /// </summary>
 public abstract partial class AccountEditorViewModel : ObservableObject
 {
+    public event Action<string, bool>? ConnectionTestCompleted;
+
+    private void CompleteConnectionTest(string message, bool successful)
+    {
+        StatusText = message;
+        ConnectionTestCompleted?.Invoke(message, successful);
+    }
+
     protected IMailService MailService { get; }
     protected IOAuthService OAuthService { get; }
     protected IProviderCatalog Catalog { get; }
@@ -783,7 +791,7 @@ public abstract partial class AccountEditorViewModel : ObservableObject
         {
             if (string.IsNullOrWhiteSpace(Username))
             {
-                StatusText = "Sign in with Microsoft first, so there is an account to test.";
+                CompleteConnectionTest("Sign in with Microsoft first, so there is an account to test.", false);
                 return;
             }
 
@@ -794,11 +802,11 @@ public abstract partial class AccountEditorViewModel : ObservableObject
             {
                 using var graphCts = new CancellationTokenSource(ProbeTimeout);
                 await MailService.ConnectAsync(graphAccount, null, graphCts.Token);
-                StatusText = "Microsoft 365 connection successful.";
+                CompleteConnectionTest("Microsoft 365 connection successful.", true);
             }
             catch (Exception ex)
             {
-                StatusText = $"Microsoft 365 connection failed: {ex.Message}";
+                CompleteConnectionTest($"Microsoft 365 connection failed: {ex.Message}", false);
             }
             finally
             {
@@ -812,12 +820,12 @@ public abstract partial class AccountEditorViewModel : ObservableObject
         {
             if (string.IsNullOrWhiteSpace(Pop3Host) || string.IsNullOrWhiteSpace(Username))
             {
-                StatusText = "Fill in POP3 host and email address first.";
+                CompleteConnectionTest("Fill in POP3 host and email address first.", false);
                 return;
             }
             if (string.IsNullOrEmpty(Password))
             {
-                StatusText = "Enter the POP3 password first.";
+                CompleteConnectionTest("Enter the POP3 password first.", false);
                 return;
             }
 
@@ -840,7 +848,8 @@ public abstract partial class AccountEditorViewModel : ObservableObject
                     : SendMailService is null
                         ? "SMTP not checked."
                         : await ProbeAsync(ct => SendMailService.VerifyAsync(popAccount, Password, ct));
-                StatusText = $"POP3: {popResult} SMTP: {smtpResult}";
+                CompleteConnectionTest($"POP3: {popResult}\nSMTP: {smtpResult}",
+                    popResult == "OK." && (smtpResult == "OK." || smtpResult == "SMTP not configured."));
             }
             finally { IsBusy = false; }
             return;
@@ -848,7 +857,7 @@ public abstract partial class AccountEditorViewModel : ObservableObject
 
         if (string.IsNullOrWhiteSpace(ImapHost) || string.IsNullOrWhiteSpace(Username))
         {
-            StatusText = "Fill in IMAP host and username first.";
+            CompleteConnectionTest("Fill in IMAP host and username first.", false);
             return;
         }
 
@@ -869,7 +878,8 @@ public abstract partial class AccountEditorViewModel : ObservableObject
                     ? "SMTP not checked."
                     : await ProbeAsync(ct => SendMailService.VerifyAsync(account, pwd, ct));
 
-            StatusText = $"IMAP: {imapResult} SMTP: {smtpResult}";
+            CompleteConnectionTest($"IMAP: {imapResult}\nSMTP: {smtpResult}",
+                imapResult == "OK." && (smtpResult == "OK." || smtpResult == "SMTP not configured."));
         }
         finally
         {

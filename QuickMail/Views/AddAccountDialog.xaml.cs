@@ -44,6 +44,7 @@ public partial class AddAccountDialog : Window
         // consent). Warn with a focus-grabbing dialog rather than a passing status line, since a screen
         // reader can miss the soft cue — the account is intentionally left bound to the entered user.
         vm.SignInIdentityMismatch += WarnIdentityMismatch;
+        vm.ConnectionTestCompleted += ShowConnectionTestResult;
         vm.ProviderApplied += OnProviderApplied;
         vm.DiscoveryCompleted += OnDiscoveryCompleted;
         vm.PasswordCleared += OnPasswordCleared;
@@ -67,6 +68,12 @@ public partial class AddAccountDialog : Window
             $"organization. The account was not changed. Please sign in again as {entered}.",
             "Different account signed in",
             MessageBoxButton.OK, MessageBoxImage.Warning);
+    }
+
+    private void ShowConnectionTestResult(string message, bool successful)
+    {
+        MessageBox.Show(this, message, "Test Connection", MessageBoxButton.OK,
+            successful ? MessageBoxImage.Information : MessageBoxImage.Warning);
     }
 
     /// <summary>
@@ -291,6 +298,7 @@ public partial class AddAccountDialog : Window
         // OnClosed, not OnClosing: the window can still cancel a close and stay open. Unsubscribe
         // before disposing so a late event can't reach a disposed VM.
         _vm.SignInIdentityMismatch -= WarnIdentityMismatch;
+        _vm.ConnectionTestCompleted -= ShowConnectionTestResult;
         _vm.ProviderApplied -= OnProviderApplied;
         _vm.DiscoveryCompleted -= OnDiscoveryCompleted;
         _vm.PasswordCleared -= OnPasswordCleared;
