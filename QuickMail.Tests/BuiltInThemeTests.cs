@@ -36,7 +36,7 @@ public class BuiltInThemeTests
     public void AllBuiltInsParse_AndCarryTheExpectedLineup()
     {
         var ids = NewStore().LoadBuiltIns().Select(t => t.Id).ToList();
-        Assert.Equal(new[] { "parchment", "dark", "ember", "fjord", "heather" }, ids);
+        Assert.Equal(new[] { "parchment", "microsoft365-blue", "dark", "ember", "fjord", "heather" }, ids);
     }
 
     [Fact]
@@ -61,7 +61,7 @@ public class BuiltInThemeTests
     // ── WCAG contrast policy (§6) ─────────────────────────────────────────────
 
     public static IEnumerable<object[]> BuiltInIds() =>
-        new[] { "parchment", "dark", "ember", "fjord", "heather" }.Select(id => new object[] { id });
+        new[] { "parchment", "microsoft365-blue", "dark", "ember", "fjord", "heather" }.Select(id => new object[] { id });
 
     [Theory]
     [MemberData(nameof(BuiltInIds))]

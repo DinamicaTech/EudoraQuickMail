@@ -327,7 +327,7 @@ public class ThemeService : IThemeService
     {
         var id = string.IsNullOrWhiteSpace(themeId) ? SystemThemeId : themeId.Trim();
         if (string.Equals(id, SystemThemeId, StringComparison.OrdinalIgnoreCase))
-            id = OsLightModeProbe() ? "parchment" : "dark";
+            id = OsLightModeProbe() ? "microsoft365-blue" : "dark";
 
         var theme = _store.LoadBuiltIns()
                         .Concat(_store.LoadUserThemes())
@@ -336,7 +336,7 @@ public class ThemeService : IThemeService
         {
             // Unknown id — fall back to system resolution, never throw.
             LogService.Log($"Theme id \"{id}\" not found; falling back to system.");
-            theme = OsLightModeProbe() ? BuiltInById("parchment") : BuiltInById("dark");
+            theme = OsLightModeProbe() ? BuiltInById("microsoft365-blue") : BuiltInById("dark");
         }
 
         return theme.ResolveAgainst(BaseTheme(theme.Base));

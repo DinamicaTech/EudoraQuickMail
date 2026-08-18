@@ -58,7 +58,7 @@ before a public release.
 - Added selectable Spanish, Catalan, and English spelling languages with live underlining, native
   contextual suggestions, ignore/add-to-dictionary actions, and draft language metadata.
 - Added `(None)` to disable proofing, forced dictionary reloads when changing language, and one-shot
-  Spanish/Catalan/English detection after the first 24 words of a new message.
+  Spanish/Catalan/English detection after the first five words of a new message.
 - Added selected-text translation while composing, with a local Argos Translate provider and an
   optional DeepL provider. Provider configuration includes setup/testing, local model management,
   a persistent default, privacy guidance, and Windows DPAPI protection for the DeepL API key.
@@ -69,6 +69,8 @@ before a public release.
 - Added targeted SQLite indexes and FTS row-key tracking for fast bulk deletion and search.
 - Added high-volume import/search diagnostics and optimized message paging for large local archives.
 - Published self-contained Windows builds so users do not need to install a separate .NET runtime.
+- Added a native WPF `Microsoft 365 Blue` theme modelled on Krypton Suite's
+  `PaletteMode.Microsoft365Blue`, without introducing WinForms interop into the interface.
 
 ## Attribution
 

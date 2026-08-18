@@ -20,6 +20,7 @@ public class ThemeStore
     private static readonly string[] BuiltInResourceNames =
     {
         "QuickMail.Themes.BuiltIn.light.json",
+        "QuickMail.Themes.BuiltIn.microsoft365-blue.json",
         "QuickMail.Themes.BuiltIn.dark.json",
         "QuickMail.Themes.BuiltIn.ember.json",
         "QuickMail.Themes.BuiltIn.fjord.json",

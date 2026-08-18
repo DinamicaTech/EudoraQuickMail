@@ -1,0 +1,39 @@
+{
+  "formatVersion": 1,
+  "id": "microsoft365-blue",
+  "name": "Microsoft 365 Blue",
+  "base": "light",
+  "colors": {
+    "windowBackground": "#F7F9FC",
+    "surfaceBackground": "#FFFFFF",
+    "chromeBackground": "#E6F2FA",
+    "inputBackground": "#FFFFFF",
+    "border": "#626F7A",
+    "borderSubtle": "#A5B3BF",
+    "inputBorder": "#616E78",
+    "textPrimary": "#242424",
+    "textSecondary": "#424242",
+    "textDisabled": "#707070",
+    "textOnAccent": "#FFFFFF",
+    "accent": "#0078D4",
+    "accentSubtle": "#E1F0FA",
+    "hyperlink": "#005A9E",
+    "selectionBackground": "#0078D4",
+    "selectionText": "#FFFFFF",
+    "selectionInactive": "#D2E7F5",
+    "focusIndicator": "#005A9E",
+    "error": "#A4262C",
+    "errorBackground": "#FDE7E9",
+    "warning": "#835C00",
+    "warningBackground": "#FFF4CE",
+    "success": "#107C10",
+    "successBackground": "#DFF6DD",
+    "info": "#005A9E",
+    "infoBackground": "#E1F0FA"
+  },
+  "typography": {
+    "fontFamily": "Segoe UI",
+    "monoFontFamily": "Cascadia Code",
+    "baseFontSize": 13
+  }
+}
