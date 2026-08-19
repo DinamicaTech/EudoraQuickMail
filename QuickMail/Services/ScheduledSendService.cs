@@ -46,6 +46,7 @@ public sealed class ScheduledSendService : IDisposable
                 AccountId = message.AccountId, FolderName = "Scheduled", MessageId = localId,
                 From = account.Username, To = message.To, Cc = message.Cc, Subject = message.Subject,
                 Date = sendAtUtc, PlainTextBody = message.Body, HtmlBody = message.HtmlBody ?? string.Empty,
+                DraftComposeMode = message.Mode, DraftSpellLanguage = message.SpellLanguage,
                 Preview = message.Body.Length <= 240 ? message.Body : message.Body[..240], IsRead = true,
             });
             queue.Add(new ScheduledMail(id, sendAtUtc.ToUniversalTime(), message, LocalMessageId: localId));

@@ -10,6 +10,7 @@ before a public release.
 
 ## Unreleased
 
+- Reopened scheduled messages now restore their saved HTML/Markdown/plain-text mode and do not append the signature a second time.
 - Shared roots now present Inbox, Draft, Scheduled, Sent, Trash, and Junk as one logical aggregate folder across their member accounts.
 - Local drafts and scheduled messages now atomically create their system-folder catalogue row and refresh the tree, preventing invisible queued mail.
 - Accounts can now share a named logical folder-tree root while messages retain their original account identity.

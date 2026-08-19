@@ -238,7 +238,9 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
 
         // Auto-append signature if this is a new compose (not a draft re-open) and the
         // account has a signature configured. Drafts already have the signature in the body.
-        if (model.DraftMessageId == null && SenderAccount != null && !string.IsNullOrWhiteSpace(SenderAccount.Signature))
+        if (model.DraftMessageId == null && model.ScheduledId == null
+            && model.Kind != ComposeKind.EditScheduled
+            && SenderAccount != null && !string.IsNullOrWhiteSpace(SenderAccount.Signature))
         {
             var sig = SenderAccount.Signature;
             // Add separator if body already has content (reply/forward)

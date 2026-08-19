@@ -2066,7 +2066,7 @@ public partial class ComposeWindow : Window
         ComposeMode targetMode;
         if (_vm.ComposeKind == ComposeKind.NewMessage)
             targetMode = ComposeMode.Html;
-        else if (_vm.ComposeKind is ComposeKind.EditDraft or ComposeKind.NewDraft
+        else if (_vm.ComposeKind is ComposeKind.EditDraft or ComposeKind.NewDraft or ComposeKind.EditScheduled
             || (_vm.ComposeKind is ComposeKind.Reply or ComposeKind.ReplyAll or ComposeKind.Forward
                 && _vm.SeededMode == ComposeMode.Html))
             targetMode = _vm.SeededMode;       // restore saved mode or preserve the source's rich reply/forward body
