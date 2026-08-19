@@ -1100,6 +1100,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
         try
         {
+            IsBusy = true;
+            StatusText = "Searching messages…";
             var sort = LocalSortFor(ActiveSort);
             Guid? accountScope = SelectedFolder switch
             {
@@ -1144,6 +1146,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
         catch (Exception ex)
         {
             StatusText = $"Search failed: {ex.Message}";
+        }
+        finally
+        {
+            if (ReferenceEquals(_localSearchCts, cts)) IsBusy = false;
         }
     }
 
@@ -6798,6 +6804,24 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         try
         {
+            if (TryParseRootAggregate(fullName, out _, out _)
+                && _localStore is ILocalMailboxStore)
+            {
+                foreach (var source in FolderScopedAggregateSources(fullName))
+                    all.AddRange(await _localStore.LoadFolderSummariesAsync(
+                        source.Account.Id, source.Folder.FullName));
+                if (!IsCurrentFolderLoad(loadVersion, expectedFolder)) return;
+                await ResolveFlagNamesAsync(all);
+                var local = MessageDeduplicator.CollapseForAggregate(all, ResolveFolderKind)
+                    .OrderByDescending(m => m.Date).ToList();
+                LocalTotalMessages = local.Count;
+                SetMessages(local.Take(LocalMailConstants.MaxRenderedMessages).ToList());
+                StatusText = local.Count > LocalMailConstants.MaxRenderedMessages
+                    ? $"Showing {LocalMailConstants.MaxRenderedMessages:N0} of {local.Count:N0} messages in {displayName}."
+                    : $"{local.Count:N0} messages in {displayName}.";
+                return;
+            }
+
             // connectedOnly: this is the live-fetch path. An account that never connected would
             // otherwise be handed to GetMessageSummariesAsync, and the lazy client pool would sit on
             // its connect timeout inside Task.WhenAll before the view could render.

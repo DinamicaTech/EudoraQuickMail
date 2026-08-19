@@ -182,9 +182,9 @@ public partial class LocalStoreService
         var terms = parsed.Groups.SelectMany(g => g.Alternatives).ToList();
         var requiresFts = terms.Any(t => t.Field is QuickSearchField.Any or QuickSearchField.To
             or QuickSearchField.From or QuickSearchField.Cc or QuickSearchField.Subject
-            or QuickSearchField.Body or QuickSearchField.AttachmentContent);
+            or QuickSearchField.Body);
         var requiresDetail = terms.Any(t => t.Field is QuickSearchField.AttachmentCount
-            or QuickSearchField.AttachmentName or QuickSearchField.AttachmentContent);
+            or QuickSearchField.AttachmentName);
         var ftsJoin = requiresFts
             ? "JOIN LocalMessageFts f ON f.account_id=s.account_id AND f.unique_id=s.unique_id AND f.folder_name=s.folder_name"
             : string.Empty;
@@ -300,7 +300,7 @@ public partial class LocalStoreService
                 var value = wildcard ? "%" + EscapeLike(term.Value).Replace("?", "_") + "%"
                     : "\"" + term.Value.Replace("\"", "\"\"") + "\"";
                 command.Parameters.AddWithValue(p, value);
-                if (term.Field == QuickSearchField.AttachmentName)
+                if (term.Field is QuickSearchField.AttachmentName or QuickSearchField.AttachmentContent)
                     command.Parameters.AddWithValue(p + "l", "%" + EscapeLike(term.Value).Replace("?", "_") + "%");
                 string FieldPredicate(string column, string ftsColumn) => wildcard
                     ? $"{column} LIKE {p} ESCAPE '\\' COLLATE NOCASE"
@@ -314,9 +314,10 @@ public partial class LocalStoreService
                     QuickSearchField.Body => FieldPredicate("f.body_text", "body_text"),
                     QuickSearchField.AttachmentName =>
                         $"(EXISTS(SELECT 1 FROM json_each(d.attachments_json) j WHERE json_extract(j.value,'$.FileName') LIKE {p}l ESCAPE '\\' COLLATE NOCASE) OR EXISTS(SELECT 1 FROM AttachmentContent ac WHERE ac.account_id=s.account_id AND ac.unique_id=s.unique_id AND ac.folder_name=s.folder_name AND ac.entry_path LIKE {p}l ESCAPE '\\' COLLATE NOCASE))",
-                    QuickSearchField.AttachmentContent => wildcard
-                        ? $"EXISTS(SELECT 1 FROM AttachmentContent ac WHERE ac.account_id=s.account_id AND ac.unique_id=s.unique_id AND ac.folder_name=s.folder_name AND ac.content_text LIKE {p} ESCAPE '\\' COLLATE NOCASE)"
-                        : $"EXISTS(SELECT 1 FROM AttachmentContent ac JOIN AttachmentContentFts af ON af.rowid=ac.fts_rowid WHERE ac.account_id=s.account_id AND ac.unique_id=s.unique_id AND ac.folder_name=s.folder_name AND AttachmentContentFts MATCH 'content_text:' || {p})",
+                    QuickSearchField.AttachmentContent =>
+                        $"(s.has_attachments=1 AND (s.account_id,s.unique_id,s.folder_name) IN " +
+                        $"(SELECT ac.account_id,ac.unique_id,ac.folder_name FROM AttachmentContent ac " +
+                        $"WHERE ac.status='indexed' AND ac.content_text LIKE {p}l ESCAPE '\\' COLLATE NOCASE))",
                     _ => wildcard
                         ? $"(f.from_addr LIKE {p} ESCAPE '\\' COLLATE NOCASE OR f.to_addr LIKE {p} ESCAPE '\\' COLLATE NOCASE OR f.cc_addr LIKE {p} ESCAPE '\\' COLLATE NOCASE OR f.subject LIKE {p} ESCAPE '\\' COLLATE NOCASE OR f.body_text LIKE {p} ESCAPE '\\' COLLATE NOCASE)"
                         : $"f.rowid IN (SELECT rowid FROM LocalMessageFts WHERE LocalMessageFts MATCH {p})",

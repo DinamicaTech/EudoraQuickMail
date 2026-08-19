@@ -1740,6 +1740,14 @@ public partial class MainWindow : Window
             return;
         }
 
+        // The search editor owns editing keys. Spanish AltGr+# arrives as Ctrl+Alt+3; without
+        // this guard the global pane shortcut moved focus to the message list. Delete must edit
+        // the query, never delete the selected message behind it.
+        if (SearchBox.IsKeyboardFocusWithin
+            && (key is Key.Delete or Key.Back || (modifiers & (ModifierKeys.Control | ModifierKeys.Alt))
+                == (ModifierKeys.Control | ModifierKeys.Alt)))
+            return;
+
         if (_vm.IsCalendarView)
             await InitCalendarWebViewAsync();
 
@@ -6939,6 +6947,9 @@ public partial class MainWindow : Window
                 else if (existing is UnifiedRulesWindow urw) urw.PrefillFromTemplate(template);
             }
             existing.Activate();
+            existing.Topmost = true;
+            existing.Dispatcher.BeginInvoke(() => existing.Topmost = false,
+                DispatcherPriority.ApplicationIdle);
             return;
         }
 
@@ -7063,6 +7074,9 @@ public partial class MainWindow : Window
         };
 
         dialog.Show();
+        dialog.Activate();
+        dialog.Topmost = true;
+        dialog.Dispatcher.BeginInvoke(() => dialog.Topmost = false, DispatcherPriority.ApplicationIdle);
     }
 
     private void RulesStatusButton_Click(object sender, RoutedEventArgs e) => OpenRulesManager();
@@ -7231,7 +7245,11 @@ public partial class MainWindow : Window
     {
         var menu = (ContextMenu)FindResource("MessageContextMenu");
         if (FindFlagsSubmenu(menu) is not { } sub) return;
-        PopulateFlagSubmenuForMessage(sub, _vm.SelectedMessage);
+        var selected = MessageList.SelectedItems.OfType<MailMessageSummary>().ToList();
+        if (selected.Count > 1)
+            PopulateFlagSubmenuForGroup(sub, selected);
+        else
+            PopulateFlagSubmenuForMessage(sub, _vm.SelectedMessage);
     }
 
     private void RebuildConversationContextFlagsSubmenu()
