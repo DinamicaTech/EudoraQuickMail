@@ -450,10 +450,17 @@ public partial class CalendarViewModel : ObservableObject
             }
         }
         var editor = new EventEditorViewModel(DateTime.Now, accountTargets);
-        // Preselect the user's default calendar (#497). Left alone the picker opens on Local, which
-        // is what an unset default should keep doing — so only a set default touches it.
+        // An explicit user default wins. Otherwise prefer a Google account whose calendar sync is
+        // enabled: silently creating a local-only reservation while a cloud calendar is available
+        // is a much more dangerous default than choosing the first synced Google calendar.
         if (DefaultCalendar is { Account: { } defaultAccount })
             editor.SelectTarget(defaultAccount, DefaultCalendar.CalendarId);
+        else
+        {
+            var google = (_graphAccountsProvider?.Invoke() ?? [])
+                .FirstOrDefault(a => a.SyncCalendar && a.AuthType == AuthType.OAuth2Google);
+            if (google != null) editor.SelectTarget(google.Id, null);
+        }
         editor.Saved += evt => _ = SaveNewEventAsync(evt);
         EditorRequested?.Invoke(editor);
     }

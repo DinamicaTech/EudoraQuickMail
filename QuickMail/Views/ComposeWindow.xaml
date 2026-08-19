@@ -358,39 +358,41 @@
                      AutomationProperties.HelpText="Type an address and press comma, semicolon, or Tab to add it. Arrow keys navigate between addresses. Delete removes the focused address."
                      Margin="0,4" TabIndex="1"/>
 
-            <!-- Cc -->
-            <TextBlock Grid.Row="2" Grid.Column="0"
-                       x:Name="CcLabel" Text="Cc:"
-                       VerticalAlignment="Center" Margin="0,4"/>
-            <controls:TokenizedAddressBox Grid.Row="2" Grid.Column="1"
-                     x:Name="CcBox"
-                     AddressText="{Binding Cc, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                     AutomationProperties.LabeledBy="{Binding ElementName=CcLabel}"
-                     Margin="0,4" TabIndex="2"/>
-
-            <!-- Bcc -->
-            <TextBlock Grid.Row="3" Grid.Column="0"
-                       x:Name="BccLabel" Text="Bcc:"
-                       VerticalAlignment="Center" Margin="0,4"/>
-            <controls:TokenizedAddressBox Grid.Row="3" Grid.Column="1"
-                     x:Name="BccBox"
-                     AddressText="{Binding Bcc, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                     AutomationProperties.LabeledBy="{Binding ElementName=BccLabel}"
-                     Margin="0,4" TabIndex="3"/>
-
-            <!-- Subject -->
-            <Label Grid.Row="4" Grid.Column="0"
+            <!-- Subject: deliberately before the optional Cc/Bcc fields. Tab order jumps from
+                 Subject straight to the body; Cc/Bcc remain available by click/access key. -->
+            <Label Grid.Row="2" Grid.Column="0"
                    x:Name="SubjectLabel" Content="S_ubject:"
                    Target="{Binding ElementName=SubjectBox}"
                    Padding="0" VerticalAlignment="Center" Margin="0,4"/>
-            <TextBox Grid.Row="4" Grid.Column="1"
+            <TextBox Grid.Row="2" Grid.Column="1"
                      x:Name="SubjectBox"
                      Text="{Binding Subject, UpdateSourceTrigger=PropertyChanged}"
                      AutomationProperties.LabeledBy="{Binding ElementName=SubjectLabel}"
                      AutomationProperties.Name="Subject"
                      AutomationProperties.AcceleratorKey="Alt+U"
                      IsInactiveSelectionHighlightEnabled="True"
+                     Margin="0,4" TabIndex="2"
+                     PreviewKeyDown="SubjectBox_PreviewKeyDown"/>
+
+            <!-- Cc -->
+            <TextBlock Grid.Row="3" Grid.Column="0"
+                       x:Name="CcLabel" Text="Cc:"
+                       VerticalAlignment="Center" Margin="0,4"/>
+            <controls:TokenizedAddressBox Grid.Row="3" Grid.Column="1"
+                     x:Name="CcBox"
+                     AddressText="{Binding Cc, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                     AutomationProperties.LabeledBy="{Binding ElementName=CcLabel}"
                      Margin="0,4" TabIndex="4"/>
+
+            <!-- Bcc -->
+            <TextBlock Grid.Row="4" Grid.Column="0"
+                       x:Name="BccLabel" Text="Bcc:"
+                       VerticalAlignment="Center" Margin="0,4"/>
+            <controls:TokenizedAddressBox Grid.Row="4" Grid.Column="1"
+                     x:Name="BccBox"
+                     AddressText="{Binding Bcc, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                     AutomationProperties.LabeledBy="{Binding ElementName=BccLabel}"
+                     Margin="0,4" TabIndex="5"/>
 
             <!-- Spell-check language -->
             <Label Grid.Row="5" Grid.Column="0" Content="Language:"
@@ -398,7 +400,7 @@
                    Padding="0" VerticalAlignment="Center" Margin="0,4"/>
             <ComboBox Grid.Row="5" Grid.Column="1" x:Name="SpellLanguageSelector"
                       SelectedValue="{Binding SpellLanguage, Mode=TwoWay}"
-                      SelectedValuePath="Tag" Margin="0,4" TabIndex="5"
+                      SelectedValuePath="Tag" Margin="0,4" TabIndex="6"
                       AutomationProperties.Name="Spelling language"
                       SelectionChanged="SpellLanguageSelector_SelectionChanged">
                 <ComboBoxItem Content="(None)" Tag=""/>
@@ -416,14 +418,14 @@
                     AutomationProperties.Name="Add file attachments"
                     AutomationProperties.AcceleratorKey="Ctrl+Shift+A"
                     HorizontalAlignment="Left"
-                    Margin="0,2" TabIndex="5"/>
+                    Margin="0,2" TabIndex="7"/>
             <ListBox Grid.Row="8" Grid.Column="0" Grid.ColumnSpan="2"
                      x:Name="AttachmentList"
                      ItemsSource="{Binding Attachments}"
                      SelectionMode="Single"
                      MaxHeight="80"
                      Margin="0,2"
-                     TabIndex="6"
+                     TabIndex="8"
                      KeyboardNavigation.TabNavigation="Once"
                      KeyboardNavigation.DirectionalNavigation="Contained"
                      AutomationProperties.Name="Attachments"
@@ -502,7 +504,7 @@
                          IsInactiveSelectionHighlightEnabled="True"
                          VerticalScrollBarVisibility="Auto"
                          FontFamily="{DynamicResource Theme.FontFamily}"
-                         Margin="0,4" TabIndex="7"
+                         Margin="0,4" TabIndex="3"
                          VerticalAlignment="Stretch"
                          PreviewKeyDown="BodyBox_PreviewKeyDown"/>
 
@@ -515,7 +517,7 @@
                              IsInactiveSelectionHighlightEnabled="True"
                              VerticalScrollBarVisibility="Auto"
                              FontFamily="{DynamicResource Theme.FontFamily}"
-                             Margin="0,4" TabIndex="7"
+                             Margin="0,4" TabIndex="3"
                              VerticalAlignment="Stretch"
                              TextChanged="RichBodyBox_TextChanged"/>
 

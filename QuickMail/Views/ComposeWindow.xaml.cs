@@ -2124,6 +2124,13 @@ public partial class ComposeWindow : Window
             BodyBox.Focus();
     }
 
+    private void SubjectBox_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Tab || Keyboard.Modifiers != ModifierKeys.None) return;
+        e.Handled = true;
+        FocusActiveEditor();
+    }
+
     /// <summary>Reacts to a mode change: swaps editors, toolbar, fonts, and announces.</summary>
     private void ApplyComposeMode()
     {
