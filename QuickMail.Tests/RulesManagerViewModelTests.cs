@@ -340,16 +340,16 @@ public class RulesManagerViewModelTests
         Assert.NotEmpty(vm.StatusText);
     }
 
-    // ── CloseCommand ─────────────────────────────────────────────────────────
+    // ── CancelCommand ────────────────────────────────────────────────────────
 
     [Fact]
-    public void Close_FiresCloseRequestedEvent()
+    public void Cancel_FiresCloseRequestedEvent()
     {
         var vm = new RulesManagerViewModel(new StubRuleService(), accounts: []);
         bool closed = false;
         vm.CloseRequested += () => closed = true;
 
-        vm.CloseCommand.Execute(null);
+        vm.CancelCommand.Execute(null);
 
         Assert.True(closed);
     }

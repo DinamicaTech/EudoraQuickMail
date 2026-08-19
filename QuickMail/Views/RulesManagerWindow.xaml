@@ -283,9 +283,9 @@
                                 MinWidth="60" Margin="0,0,8,0"
                                 AutomationProperties.Name="Save rule"
                                 IsDefault="True"/>
-                        <Button Content="Close" Command="{Binding CloseCommand}"
+                        <Button Content="Cancel" Command="{Binding CancelCommand}"
                                 MinWidth="60"
-                                AutomationProperties.Name="Close rules manager"
+                                AutomationProperties.Name="Cancel rule changes"
                                 IsCancel="True"/>
                     </StackPanel>
                 </StackPanel>

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Globalization;
 using System.Linq;
 using System.Windows;
@@ -219,5 +220,11 @@ public partial class RulesManagerWindow : Window
         _vm.AnnouncementRequested -= OnAnnouncementRequested;
         _vm.PickFolderRequested -= OnPickFolderRequested;
         base.OnClosed(e);
+    }
+
+    protected override void OnClosing(CancelEventArgs e)
+    {
+        _vm.CancelPendingEdits();
+        base.OnClosing(e);
     }
 }

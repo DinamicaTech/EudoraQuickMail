@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
+using System.Text.Json;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -17,6 +18,10 @@ public partial class RulesManagerViewModel : ObservableObject
     private readonly IEnumerable<MailMessageSummary>? _selectedMessagesForTest;
     private readonly Dictionary<Guid, string> _accountLabels = [];
     private readonly bool _showFieldLabels;
+    private readonly List<MailRule> _originalRules;
+    private bool _cancelRestored;
+
+    public bool IsCommitted { get; private set; }
 
     // ── Events (View subscribes) ────────────────────────────────────────────
 
@@ -66,6 +71,7 @@ public partial class RulesManagerViewModel : ObservableObject
         _showFieldLabels = configService?.Load().RuleListShowFieldLabels ?? false;
 
         var rules = _ruleService.LoadRules();
+        _originalRules = CloneRules(rules);
         foreach (var r in rules) StampDisplay(r);
         Rules = new ObservableCollection<MailRule>(rules);
 
@@ -290,10 +296,12 @@ public partial class RulesManagerViewModel : ObservableObject
         if (!Validate(SelectedRule)) return;
 
         _ruleService.SaveRules(Rules.ToList());
+        IsCommitted = true;
         StampDisplay(SelectedRule);
         RefreshRow(SelectedRule);   // reflect a renamed rule or changed account in the list row
         StatusText = $"Rule '{SelectedRule.Name}' saved.";
         Announce($"Rule '{SelectedRule.Name}' saved.", AnnouncementCategory.Result);
+        CloseRequested?.Invoke();
     }
 
     [RelayCommand(CanExecute = nameof(HasSelectedRule))]
@@ -320,10 +328,22 @@ public partial class RulesManagerViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private void Close()
+    private void Cancel()
     {
+        CancelPendingEdits();
         CloseRequested?.Invoke();
     }
+
+    /// <summary>Restores the persisted rule set when Cancel, Escape or the title-bar close is used.</summary>
+    public void CancelPendingEdits()
+    {
+        if (IsCommitted || _cancelRestored) return;
+        _ruleService.SaveRules(CloneRules(_originalRules));
+        _cancelRestored = true;
+    }
+
+    private static List<MailRule> CloneRules(IEnumerable<MailRule> rules) =>
+        JsonSerializer.Deserialize<List<MailRule>>(JsonSerializer.Serialize(rules)) ?? [];
 
     /// <summary>
     /// Runs all enabled rules against existing cached mail on demand and reports the outcome, so the
