@@ -271,6 +271,7 @@ public partial class MainWindow : Window
 
         _truthProbe       = truthProbe;
         InitializeComponent();
+        ApplyAccountsPanelVisibility(_configService.Load().ShowAccountsPanel);
         DataContext = vm;
         MessageList.AddHandler(GridViewColumnHeader.ClickEvent,
             new RoutedEventHandler(MessageColumnHeader_Click), handledEventsToo: true);
@@ -6528,6 +6529,7 @@ public partial class MainWindow : Window
             // apply the theme (ThemeChanged handlers rebuild parent UI).
             var cfg = _configService.Load();
             _vm.ApplySettings(cfg);
+            ApplyAccountsPanelVisibility(cfg.ShowAccountsPanel);
             _registry.ApplyUserOverrides(cfg.CustomHotkeys);
             // The plain-text preference may have changed; re-render the open message so a
             // Settings change takes effect live (focus is preserved). Theme changes already
@@ -6699,6 +6701,16 @@ public partial class MainWindow : Window
             LandOnToGroupAfterRebuild(0);
         else
             FocusMessageListFirstItem();
+    }
+
+    private void ApplyAccountsPanelVisibility(bool visible)
+    {
+        var visibility = visible ? Visibility.Visible : Visibility.Collapsed;
+        AccountsHeader.Visibility = visibility;
+        AccountsPanel.Visibility = visibility;
+        AccountsSplitter.Visibility = visibility;
+        AccountPaneRow.MinHeight = visible ? 60 : 0;
+        AccountPaneRow.Height = visible ? new GridLength(1, GridUnitType.Star) : new GridLength(0);
     }
 
     private async void MessageContextMenu_MarkRead_Click(object sender, RoutedEventArgs e) =>
@@ -6958,6 +6970,17 @@ public partial class MainWindow : Window
         var previousFocus = Keyboard.FocusedElement as IInputElement;
 
         var accounts = _vm.Accounts.ToList();
+        var currentFolder = _vm.SelectedFolder;
+        var currentFolderName = currentFolder?.DisplayName ?? "Current folder";
+
+        async Task<int> ApplySelectedRuleToCurrentFolder(MailRule rule)
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(5));
+            var messages = await _vm.LoadCurrentFolderSummariesForRulesAsync(currentFolder);
+            var matched = await _ruleService.ApplyRuleToMessagesAsync(rule, messages, _localStore, cts.Token);
+            _vm.RefreshCommand.Execute(null);
+            return matched;
+        }
 
         // Unowned (issue #347) so the window reads its own title, not the main window's. Modeless
         // (.Show) — a modal loop over the live WebView2 reading pane hard-deadlocks with a screen
@@ -7038,8 +7061,10 @@ public partial class MainWindow : Window
                 _ruleService, accounts,
                 prefillTemplate: template,
                 selectedMessagesForTest: selectedMessages,
-                configService: _configService);
+                configService: _configService,
+                currentFolderName: currentFolderName);
             rulesVm.RunOnExistingRequested += RunClientRulesOnExisting;
+            rulesVm.ApplyToCurrentFolderRequested += ApplySelectedRuleToCurrentFolder;
             dialog = new RulesManagerWindow(rulesVm, accounts, _vm.CachedFolders,
                 (accountId, parentFullName, name) =>
                     _vm.CreateFolderReturningFoldersAsync(accountId, parentFullName, name));

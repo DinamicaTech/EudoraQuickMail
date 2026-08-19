@@ -51,6 +51,9 @@ public partial class RulesManagerViewModel : ObservableObject
     // passes null). The unified window passes a specific account (#493). Shared handler, one signature.
     public event Func<Guid?, Task<int>>? RunOnExistingRequested;
 
+    /// <summary>Raised to apply only the edited rule to the folder active when this window opened.</summary>
+    public event Func<MailRule, Task<int>>? ApplyToCurrentFolderRequested;
+
     // ── Constructor ─────────────────────────────────────────────────────────
 
     public RulesManagerViewModel(
@@ -58,11 +61,13 @@ public partial class RulesManagerViewModel : ObservableObject
         IEnumerable<AccountModel> accounts,
         MailRule? prefillTemplate = null,
         IEnumerable<MailMessageSummary>? selectedMessagesForTest = null,
-        IConfigService? configService = null)
+        IConfigService? configService = null,
+        string currentFolderName = "Current folder")
     {
         _ruleService = ruleService;
         _accounts = accounts;
         _selectedMessagesForTest = selectedMessagesForTest;
+        CurrentFolderName = string.IsNullOrWhiteSpace(currentFolderName) ? "Current folder" : currentFolderName;
 
         // Account id → label, so each rule row can show which account it applies to.
         foreach (var a in _accounts)
@@ -105,6 +110,7 @@ public partial class RulesManagerViewModel : ObservableObject
     [NotifyCanExecuteChangedFor(nameof(DeleteRuleCommand))]
     [NotifyCanExecuteChangedFor(nameof(SaveRuleCommand))]
     [NotifyCanExecuteChangedFor(nameof(TestRuleCommand))]
+    [NotifyCanExecuteChangedFor(nameof(ApplyToCurrentFolderCommand))]
     private MailRule? _selectedRule;
 
     /// <summary>
@@ -118,6 +124,9 @@ public partial class RulesManagerViewModel : ObservableObject
 
     /// <summary>True when the list has any rules — gates "Run on Existing Mail".</summary>
     public bool HasRules => Rules.Count > 0;
+
+    public string CurrentFolderName { get; }
+    public string ApplyToCurrentFolderLabel => $"Apply to {CurrentFolderName}";
 
     /// <summary>
     /// Account options for the ComboBox. Every rule belongs to exactly one account — the "All
@@ -374,6 +383,27 @@ public partial class RulesManagerViewModel : ObservableObject
         StatusText = affected > 0
             ? $"Applied rules to existing mail: {affected} message{(affected == 1 ? "" : "s")} moved or deleted."
             : "Applied rules to existing mail.";
+        Announce(StatusText, AnnouncementCategory.Result);
+    }
+
+    [RelayCommand(CanExecute = nameof(HasSelectedRule))]
+    private async Task ApplyToCurrentFolderAsync()
+    {
+        if (SelectedRule == null || ApplyToCurrentFolderRequested is null || !Validate(SelectedRule)) return;
+
+        _ruleService.SaveRules(Rules.ToList());
+        IsCommitted = true;
+        StatusText = $"Applying rule to {CurrentFolderName}…";
+        Announce(StatusText, AnnouncementCategory.Status);
+        try
+        {
+            var matched = await ApplyToCurrentFolderRequested.Invoke(SelectedRule);
+            StatusText = $"Applied rule to {CurrentFolderName}: {matched:N0} message{(matched == 1 ? "" : "s")} matched.";
+        }
+        catch (Exception ex)
+        {
+            StatusText = $"Couldn't apply rule to {CurrentFolderName}: {ex.Message}";
+        }
         Announce(StatusText, AnnouncementCategory.Result);
     }
 

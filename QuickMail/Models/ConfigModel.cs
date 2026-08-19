@@ -44,6 +44,9 @@ public class ConfigModel
     /// <summary>Show Calendar and its sources in the folder tree.</summary>
     public bool ShowCalendar { get; set; } = true;
 
+    /// <summary>Show the account selector above the unified folder tree.</summary>
+    public bool ShowAccountsPanel { get; set; } = true;
+
     /// <summary>
     /// How many days of mail to sync. 0 = sync all mail (no date filter).
     /// Supported values: 7, 30, 180, 365, or 0 (all).

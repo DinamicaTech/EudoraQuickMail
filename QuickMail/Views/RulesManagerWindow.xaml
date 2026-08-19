@@ -279,6 +279,10 @@
                         <Button Content="Test Rule" Command="{Binding TestRuleCommand}"
                                 MinWidth="80" Margin="0,0,8,0"
                                 AutomationProperties.Name="Test rule against selected messages"/>
+                        <Button Content="{Binding ApplyToCurrentFolderLabel}"
+                                Command="{Binding ApplyToCurrentFolderCommand}"
+                                MinWidth="110" Margin="0,0,8,0"
+                                AutomationProperties.Name="{Binding ApplyToCurrentFolderLabel}"/>
                         <Button Content="Save" Command="{Binding SaveRuleCommand}"
                                 MinWidth="60" Margin="0,0,8,0"
                                 AutomationProperties.Name="Save rule"

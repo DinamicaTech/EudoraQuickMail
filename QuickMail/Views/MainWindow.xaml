@@ -740,11 +740,11 @@
                     <RowDefinition Height="2*" MinHeight="80"/>
                 </Grid.RowDefinitions>
 
-                <TextBlock Grid.Row="0" Text="Accounts" FontWeight="SemiBold" Padding="6,4"
+                <TextBlock x:Name="AccountsHeader" Grid.Row="0" Text="Accounts" FontWeight="SemiBold" Padding="6,4"
                            Focusable="False"
                            Background="{DynamicResource Theme.ChromeBackground}"/>
 
-                <DockPanel Grid.Row="1">
+                <DockPanel x:Name="AccountsPanel" Grid.Row="1">
                 <Button DockPanel.Dock="Top" Content="(All messages)" HorizontalContentAlignment="Left"
                         Padding="6,5" Click="AllMessagesAccount_Click"
                         AutomationProperties.Name="All messages from every account"/>
@@ -803,7 +803,7 @@
                 </ListBox>
                 </DockPanel>
 
-                <GridSplitter Grid.Row="2" Height="5" HorizontalAlignment="Stretch"
+                <GridSplitter x:Name="AccountsSplitter" Grid.Row="2" Height="5" HorizontalAlignment="Stretch"
                               ResizeDirection="Rows" ResizeBehavior="PreviousAndNext"
                               DragCompleted="PaneSplitter_DragCompleted"/>
 

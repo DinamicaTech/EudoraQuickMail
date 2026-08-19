@@ -212,6 +212,46 @@ public class RuleService : IRuleService
         return messages.Where(m => MatchesRule(rule, m)).ToList();
     }
 
+    public async Task<int> ApplyRuleToMessagesAsync(
+        MailRule rule,
+        List<MailMessageSummary> messages,
+        ILocalStoreService store,
+        CancellationToken ct)
+    {
+        var candidates = rule.AccountId is { } accountId
+            ? messages.Where(m => m.AccountId == accountId).ToList()
+            : messages;
+        var bodies = new Dictionary<(Guid, string, string), string>();
+        if (rule.UseBodyCondition && !string.IsNullOrWhiteSpace(rule.BodyContains))
+        {
+            foreach (var message in candidates)
+            {
+                ct.ThrowIfCancellationRequested();
+                var detail = await store.LoadDetailAsync(message.AccountId, message.FolderName, message.MessageId);
+                bodies[(message.AccountId, message.FolderName, message.MessageId)] = detail is null
+                    ? message.Preview ?? string.Empty
+                    : string.IsNullOrWhiteSpace(detail.PlainTextBody)
+                        ? detail.HtmlBody ?? string.Empty
+                        : detail.PlainTextBody;
+            }
+        }
+
+        var matched = candidates.Where(m => MatchesRule(rule, m,
+            bodies.GetValueOrDefault((m.AccountId, m.FolderName, m.MessageId)))).ToList();
+        if (matched.Count == 0) return 0;
+
+        foreach (var group in matched.GroupBy(m => m.AccountId))
+            await ExecuteActionAsync(rule, group.ToList(), group.Key, ct);
+
+        if (rule.Action is RuleAction.MoveToFolder or RuleAction.Delete)
+        {
+            foreach (var group in matched.GroupBy(m => (m.AccountId, m.FolderName)))
+                await store.DeleteSummariesAsync(group.Key.AccountId, group.Key.FolderName,
+                    group.Select(m => m.MessageId));
+        }
+        return matched.Count;
+    }
+
     // ── Condition Matching ──────────────────────────────────────────────────
 
     private static bool MatchesRule(MailRule rule, MailMessageSummary msg, string? completeBody = null)

@@ -38,6 +38,13 @@ public interface IRuleService
     /// </summary>
     List<MailMessageSummary> TestRule(MailRule rule, IEnumerable<MailMessageSummary> messages);
 
+    /// <summary>Apply one rule to the supplied cached messages and return the number matched.</summary>
+    Task<int> ApplyRuleToMessagesAsync(
+        MailRule rule,
+        List<MailMessageSummary> messages,
+        ILocalStoreService store,
+        CancellationToken ct);
+
     /// <summary>
     /// Apply all enabled rules to messages already in the local store, restricted to
     /// each account's Inbox (issue #346 follow-up). Invoked by the user-facing

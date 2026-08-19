@@ -218,6 +218,7 @@ public class ConfigService : IConfigService
                         break;
                     case "showcombinedviews": config.ShowCombinedViews = ParseBool(value); break;
                     case "showcalendar":      config.ShowCalendar      = ParseBool(value); break;
+                    case "showaccountspanel": config.ShowAccountsPanel = ParseBool(value); break;
                     case "syncdays":
                         if (int.TryParse(value, out var sd)) config.SyncDays = Math.Max(0, sd);
                         break;
@@ -457,6 +458,10 @@ public class ConfigService : IConfigService
 
         sb.AppendLine($"ShowCalendar = {(config.ShowCalendar ? "on" : "off")}");
         sb.AppendLine("# Show Calendar and its sources in the folder tree.");
+        sb.AppendLine();
+
+        sb.AppendLine($"ShowAccountsPanel = {(config.ShowAccountsPanel ? "on" : "off")}");
+        sb.AppendLine("# Show the account selector above the unified folder tree.");
         sb.AppendLine();
 
         sb.AppendLine($"SyncDays = {config.SyncDays}");

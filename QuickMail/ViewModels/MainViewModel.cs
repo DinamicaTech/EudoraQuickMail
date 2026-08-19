@@ -6788,6 +6788,41 @@ public partial class MainViewModel : ObservableObject, IDisposable
         : throw new ArgumentOutOfRangeException(
             nameof(fullName), "Not a folder-scoped aggregate sentinel.");
 
+    /// <summary>Loads the complete local contents represented by the currently selected folder.</summary>
+    public async Task<List<MailMessageSummary>> LoadCurrentFolderSummariesForRulesAsync(
+        MailFolderModel? folderSnapshot = null)
+    {
+        var selected = folderSnapshot ?? SelectedFolder;
+        if (selected == null || selected.IsHeader) return [];
+
+        var result = new List<MailMessageSummary>();
+        if (IsFolderScopedAggregate(selected.FullName))
+        {
+            foreach (var source in FolderScopedAggregateSources(selected.FullName))
+                result.AddRange(await _localStore.LoadFolderSummariesAsync(
+                    source.Account.Id, source.Folder.FullName));
+            return MessageDeduplicator.CollapseForAggregate(result, ResolveFolderKind);
+        }
+
+        if (!IsVirtualFolder(selected) && selected.AccountId != Guid.Empty)
+        {
+            var folders = new[] { selected };
+            if (selected.IsContainer && _cachedFolders.TryGetValue(selected.AccountId, out var cached))
+            {
+                folders = cached.Where(f =>
+                    string.Equals(f.FullName, selected.FullName, StringComparison.OrdinalIgnoreCase) ||
+                    f.FullName.StartsWith(selected.FullName + "/", StringComparison.OrdinalIgnoreCase) ||
+                    f.FullName.StartsWith(selected.FullName + ".", StringComparison.OrdinalIgnoreCase)).ToArray();
+            }
+            foreach (var folder in folders)
+                result.AddRange(await _localStore.LoadFolderSummariesAsync(selected.AccountId, folder.FullName));
+            return result;
+        }
+
+        // Saved/combined views can represent arbitrary predicates; use the materialized result set.
+        return Messages.ToList();
+    }
+
     private async Task FetchVirtualFolderAsync(string fullName)
     {
         var displayName = FolderScopedAggregateDisplayName(fullName);
