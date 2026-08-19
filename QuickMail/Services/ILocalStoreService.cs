@@ -149,6 +149,9 @@ public interface ILocalStoreService
     /// </summary>
     Task ReplaceGraphCalendarEventsAsync(Guid accountId, IReadOnlyList<CalendarEvent> events);
 
+    /// <summary>Removes server-synced events overlapping a UTC range before a focused re-sync.</summary>
+    Task DeleteGraphCalendarEventsInRangeAsync(Guid accountId, DateTime startUtc, DateTime endUtc);
+
     /// <summary>
     /// Returns all non-empty calendar_ics rows from MessageDetail, for harvesting.
     /// Each item is (AccountId, FolderName, MessageId, IcsText).

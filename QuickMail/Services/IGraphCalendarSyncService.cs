@@ -31,6 +31,9 @@ public interface IGraphCalendarSyncService
     /// </summary>
     Task<GraphCalendarSyncResult> SyncAllAsync(CancellationToken ct = default);
 
+    /// <summary>Refreshes only events overlapping one local calendar day.</summary>
+    Task<GraphCalendarSyncResult> SyncDayAsync(DateTime localDay, CancellationToken ct = default);
+
     /// <summary>
     /// Syncs a single account's calendar on demand — used when the user turns an account's calendar
     /// sync on (#282). Best-effort (never throws); returns the event count. No-op unless the account

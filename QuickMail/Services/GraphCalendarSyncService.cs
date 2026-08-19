@@ -156,6 +156,89 @@ public sealed class GraphCalendarSyncService : IGraphCalendarSyncService
             : new GraphCalendarSyncResult(accountsSynced, eventsFetched, error);
     }
 
+    public async Task<GraphCalendarSyncResult> SyncDayAsync(DateTime localDay, CancellationToken ct = default)
+    {
+        var startUtc = DateTime.SpecifyKind(localDay.Date, DateTimeKind.Local).ToUniversalTime();
+        var endUtc = DateTime.SpecifyKind(localDay.Date.AddDays(1), DateTimeKind.Local).ToUniversalTime();
+        int accountsSynced = 0, eventsFetched = 0;
+        string? error = null;
+        foreach (var account in _accounts.LoadAccounts())
+        {
+            if (!account.SyncCalendar || !HasCalendar(account)) continue;
+            try
+            {
+                var events = await FetchAccountRangeAsync(account, startUtc, endUtc, ct);
+                await _store.DeleteGraphCalendarEventsInRangeAsync(account.Id, startUtc, endUtc);
+                foreach (var evt in events) await _store.UpsertCalendarEventAsync(evt);
+                accountsSynced++;
+                eventsFetched += events.Count;
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex)
+            {
+                LogService.Log($"Calendar day sync failed for {account.AccountLabel}", ex);
+                error = ex.Message;
+            }
+        }
+        return accountsSynced == 0 && error is null
+            ? GraphCalendarSyncResult.None
+            : new GraphCalendarSyncResult(accountsSynced, eventsFetched, error);
+    }
+
+    private async Task<List<CalendarEvent>> FetchAccountRangeAsync(AccountModel account, DateTime startUtc, DateTime endUtc, CancellationToken ct)
+    {
+        if (IsGraphEligible(account))
+        {
+            var window =
+                  $"startDateTime={Uri.EscapeDataString(startUtc.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture))}"
+                + $"&endDateTime={Uri.EscapeDataString(endUtc.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture))}"
+                + "&$select=id,subject,bodyPreview,location,organizer,start,end,isAllDay,isOrganizer,responseStatus&$top=100";
+            var calendars = await _graph.GetAllPagesAsync<GraphCalendar>(account,
+                "/me/calendars?$select=id,name", OAuthService.GraphCalendarScopes, true, null, ct);
+            var result = new List<CalendarEvent>();
+            foreach (var cal in calendars.Where(c => !string.IsNullOrEmpty(c.Id)))
+            {
+                var name = string.IsNullOrWhiteSpace(cal.Name) ? "Calendar" : cal.Name.Trim();
+                var items = await _graph.GetAllPagesAsync<GraphCalendarEvent>(account,
+                    $"/me/calendars/{Uri.EscapeDataString(cal.Id)}/calendarView?{window}",
+                    OAuthService.GraphCalendarScopes, true, UtcPreferHeader, ct);
+                result.AddRange(items.Where(e => !string.IsNullOrEmpty(e.Id)).Select(e => MapEvent(e, account.Id, cal.Id, name)));
+            }
+            return result;
+        }
+        if (IsGoogleEligible(account))
+        {
+            var result = new List<CalendarEvent>();
+            var calendars = await _google!.GetCalendarListAsync(GoogleIdentity(account), ct);
+            foreach (var cal in calendars.Where(c => !string.IsNullOrEmpty(c.Id) && !c.Deleted))
+            {
+                var name = string.IsNullOrWhiteSpace(cal.Summary) ? "Calendar" : cal.Summary.Trim();
+                var items = await _google.GetEventsAsync(GoogleIdentity(account), startUtc, endUtc, cal.Id, ct);
+                result.AddRange(items.Where(e => !string.IsNullOrEmpty(e.Id))
+                    .Where(e => !string.Equals(e.Status, "cancelled", StringComparison.OrdinalIgnoreCase))
+                    .Select(e => MapGoogleEvent(e, account.Id, cal.Id, name)));
+            }
+            return result;
+        }
+        if (IsICloudCalendarEligible(account))
+        {
+            var password = ICloudPassword(account);
+            if (!_calDavCalendarsByAccount.TryGetValue(account.Id, out var calendars))
+            {
+                calendars = await _calDav!.DiscoverCalendarsAsync(ICloudCalDavUrl, account.AuthUsername, password, ct);
+                _calDavCalendarsByAccount[account.Id] = calendars;
+            }
+            var result = new List<CalendarEvent>();
+            foreach (var cal in calendars)
+            {
+                var resources = await _calDav!.FetchEventIcsAsync(cal.Url, account.AuthUsername, password, startUtc, endUtc, ct);
+                result.AddRange(MapCalDavEvents(resources, account.Id, cal.Url, cal.DisplayName));
+            }
+            return result;
+        }
+        return [];
+    }
+
     /// <summary>Dispatches one account to its provider (Microsoft / Google / iCloud CalDAV). May throw.</summary>
     private async Task<int> SyncOneAccountAsync(AccountModel account, CancellationToken ct)
     {

@@ -2489,6 +2489,8 @@ public partial class MainWindow : Window
         => _vm.CalendarVm?.NextPeriodCommand.Execute(null);
     private void CalendarToday_Click(object sender, RoutedEventArgs e)
         => _vm.CalendarVm?.ToggleTodayFilterCommand.Execute(null);
+    private async void CalendarRefresh_Click(object sender, RoutedEventArgs e)
+        => await _vm.RefreshCommand.ExecuteAsync(null);
 
     /// <summary>True when the calendar's main content (event list or Month grid) has focus.</summary>
     private bool CalendarPaneFocused =>
@@ -3468,7 +3470,7 @@ public partial class MainWindow : Window
         catch (Exception ex) { LogService.Log("FullCalendar refresh failed", ex); }
     }
 
-    private void CalendarWebView_WebMessageReceived(object? sender, CoreWebView2WebMessageReceivedEventArgs args)
+    private async void CalendarWebView_WebMessageReceived(object? sender, CoreWebView2WebMessageReceivedEventArgs args)
     {
         if (_vm.CalendarVm == null) return;
         try
@@ -3488,6 +3490,7 @@ public partial class MainWindow : Window
             if (type == "date" && DateTime.TryParse(root.GetProperty("date").GetString(), out var date))
             {
                 _vm.CalendarVm.GoToDate(date);
+                await SyncSelectedCalendarDayAsync(date.Date);
                 return;
             }
 
@@ -3501,6 +3504,27 @@ public partial class MainWindow : Window
             if (type == "open") ActivateSelectedCalendarEvent();
         }
         catch (Exception ex) { LogService.Log("FullCalendar message handling failed", ex); }
+    }
+
+    private async Task SyncSelectedCalendarDayAsync(DateTime day)
+    {
+        if (_graphCalendarSyncService == null || _vm.CalendarVm == null) return;
+        _vm.StatusText = $"Syncing calendar for {day:d}…";
+        try
+        {
+            var result = await _graphCalendarSyncService.SyncDayAsync(day);
+            await _vm.CalendarVm.RefreshCommand.ExecuteAsync(null);
+            _vm.StatusText = result.Error is not null
+                ? $"Calendar sync failed: {result.Error}"
+                : result.AccountsSynced == 0
+                    ? "No online calendars are enabled."
+                    : $"Calendar updated for {day:d}: {result.EventsFetched:N0} event{(result.EventsFetched == 1 ? "" : "s")}.";
+        }
+        catch (Exception ex)
+        {
+            LogService.Log("Calendar selected-day sync", ex);
+            _vm.StatusText = $"Calendar sync failed: {ex.Message}";
+        }
     }
 
     // One-time setup of the reading pane WebView2. Skipped at startup in Window mode;

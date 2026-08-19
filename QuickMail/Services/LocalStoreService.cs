@@ -1339,6 +1339,22 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
         await tx.CommitAsync();
     }
 
+    public async Task DeleteGraphCalendarEventsInRangeAsync(Guid accountId, DateTime startUtc, DateTime endUtc)
+    {
+        await using var conn = await OpenAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            DELETE FROM CalendarEvent
+             WHERE account_id = $aid AND is_graph = 1
+               AND start_time_ticks < $end
+               AND COALESCE(end_time_ticks, start_time_ticks) >= $start;
+            """;
+        cmd.Parameters.AddWithValue("$aid", accountId.ToString());
+        cmd.Parameters.AddWithValue("$start", startUtc.Ticks);
+        cmd.Parameters.AddWithValue("$end", endUtc.Ticks);
+        await cmd.ExecuteNonQueryAsync();
+    }
+
     public async Task<List<CalendarEvent>> LoadCalendarEventsAsync()
     {
         var list = new List<CalendarEvent>();
