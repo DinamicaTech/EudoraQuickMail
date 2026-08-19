@@ -27,6 +27,38 @@ public partial class LocalStoreService
         if (string.IsNullOrWhiteSpace(message.FolderName)) throw new ArgumentException("FolderName is required.");
         await using var conn = await OpenAsync();
         await using var tx = (SqliteTransaction)await conn.BeginTransactionAsync(ct);
+        // A locally-authored message is authoritative. Ensure its folder is catalogued in the same
+        // transaction so a scheduled message or draft can never exist in SQLite while remaining
+        // invisible from the folder tree.
+        await using (var folder = conn.CreateCommand())
+        {
+            folder.Transaction = tx;
+            folder.CommandText = """
+                INSERT OR IGNORE INTO Folder
+                    (account_id,full_name,display_name,parent_id,kind,exclude_from_all_mail,
+                     unread_count,message_count,sort_order,is_container)
+                VALUES ($aid,$fn,$display,NULL,$kind,$exclude,0,0,0,0);
+                """;
+            folder.Parameters.AddWithValue("$aid", message.AccountId.ToString());
+            folder.Parameters.AddWithValue("$fn", message.FolderName);
+            folder.Parameters.AddWithValue("$display", message.FolderName.Split('/', '.')[^1]);
+            var kind = message.FolderName.Equals("Draft", StringComparison.OrdinalIgnoreCase)
+                || message.FolderName.Equals("Drafts", StringComparison.OrdinalIgnoreCase)
+                    ? SpecialFolderKind.Drafts
+                : message.FolderName.Equals("Scheduled", StringComparison.OrdinalIgnoreCase)
+                    ? SpecialFolderKind.Scheduled
+                : message.FolderName.Equals("Sent", StringComparison.OrdinalIgnoreCase)
+                    ? SpecialFolderKind.Sent
+                : message.FolderName.Equals("Trash", StringComparison.OrdinalIgnoreCase)
+                    ? SpecialFolderKind.Trash
+                : message.FolderName.Equals("Inbox", StringComparison.OrdinalIgnoreCase)
+                    ? SpecialFolderKind.Inbox
+                : SpecialFolderKind.None;
+            folder.Parameters.AddWithValue("$kind", (int)kind);
+            folder.Parameters.AddWithValue("$exclude", kind is SpecialFolderKind.Drafts
+                or SpecialFolderKind.Scheduled or SpecialFolderKind.Sent or SpecialFolderKind.Trash ? 1 : 0);
+            await folder.ExecuteNonQueryAsync(ct);
+        }
         await EnsureNotContainerAsync(conn, tx, message.AccountId, message.FolderName, allowMissing: true, ct);
 
         await using (var summary = conn.CreateCommand())

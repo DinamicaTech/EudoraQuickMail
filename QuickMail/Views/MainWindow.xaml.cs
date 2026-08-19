@@ -5315,6 +5315,8 @@ public partial class MainWindow : Window
         {
             var composeVm = new ComposeViewModel(_smtp, _accountService, _credentials, _imap, _templateService);
             composeVm.Seed(composeModel);
+            composeVm.LocalFolderChanged += accountId =>
+                _ = _vm.RefreshFolderListAsync(accountId);
             var window = new ComposeWindow(composeVm, _contactService, _templateService, _configService, _customDictionary, _themeService);
             composeVm.CloseRequested += window.Close;
             _openComposeWindows.Add(window);

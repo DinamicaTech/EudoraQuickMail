@@ -17,6 +17,8 @@ namespace QuickMail.ViewModels;
 
 public partial class ComposeViewModel : ObservableObject, IDisposable
 {
+    /// <summary>Raised after a local Draft or Scheduled folder may have been created.</summary>
+    public event Action<Guid>? LocalFolderChanged;
     private readonly ISendMailService _smtp;
     private readonly IAccountService _accountService;
     private readonly ICredentialService _credentials;
@@ -270,6 +272,7 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
         try
         {
             await SaveDraftCoreAsync(account);
+            LocalFolderChanged?.Invoke(account.Id);
             SetStatusOutcome("Draft saved.");
             CloseRequested?.Invoke();
         }
@@ -496,6 +499,7 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
             await scheduler.ReplaceAsync(scheduledId, compose, new DateTimeOffset(local));
         else
             await scheduler.ScheduleAsync(compose, new DateTimeOffset(local));
+        LocalFolderChanged?.Invoke(account.Id);
         _isSent = true;
         SetStatusOutcome($"Message scheduled for {local:g}.");
         CloseRequested?.Invoke();

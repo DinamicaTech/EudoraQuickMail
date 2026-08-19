@@ -236,6 +236,28 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
             """;
         cmd.ExecuteNonQuery();
 
+        // Repair messages written by older builds before their local Draft/Scheduled folder was
+        // catalogued. INSERT OR IGNORE is cheap on normal startups and leaves complete folder
+        // metadata imported from Eudora or fetched from a server untouched.
+        cmd.CommandText = """
+            INSERT OR IGNORE INTO Folder
+                (account_id,full_name,display_name,parent_id,kind,exclude_from_all_mail,
+                 unread_count,message_count,sort_order,is_container)
+            SELECT account_id,folder_name,folder_name,NULL,
+                   CASE lower(folder_name)
+                     WHEN 'inbox' THEN 1 WHEN 'draft' THEN 2 WHEN 'drafts' THEN 2
+                     WHEN 'sent' THEN 3 WHEN 'trash' THEN 4 WHEN 'junk' THEN 5
+                     WHEN 'scheduled' THEN 10 ELSE 0 END,
+                   CASE lower(folder_name)
+                     WHEN 'draft' THEN 1 WHEN 'drafts' THEN 1 WHEN 'sent' THEN 1
+                     WHEN 'trash' THEN 1 WHEN 'scheduled' THEN 1 ELSE 0 END,
+                   SUM(CASE WHEN is_read=0 THEN 1 ELSE 0 END),COUNT(*),0,0
+            FROM MessageSummary
+            WHERE folder_name<>''
+            GROUP BY account_id,folder_name;
+            """;
+        cmd.ExecuteNonQuery();
+
         // Existing databases need one backfill. Once populated, all write paths maintain
         // the map and subsequent startups only perform the indexed existence check.
         cmd.CommandText = "SELECT EXISTS(SELECT 1 FROM LocalMessageFtsKey LIMIT 1);";
