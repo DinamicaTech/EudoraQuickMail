@@ -10,6 +10,7 @@ before a public release.
 
 ## Unreleased
 
+- Shared roots now present Inbox, Draft, Scheduled, Sent, Trash, and Junk as one logical aggregate folder across their member accounts.
 - Local drafts and scheduled messages now atomically create their system-folder catalogue row and refresh the tree, preventing invisible queued mail.
 - Accounts can now share a named logical folder-tree root while messages retain their original account identity.
 - The Eudora import confirmation now explicitly explains that it replaces only the previous Eudora message import and preserves all other accounts and mail.

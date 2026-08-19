@@ -289,6 +289,22 @@ public partial class MainViewModel : ObservableObject, IDisposable
         FullName    = "\u0000AllTrash",
         DisplayName = "All Trash"
     };
+    private const string RootAggregatePrefix = "\u0000RootAggregate:";
+
+    private static MailFolderModel CreateRootAggregateFolder(Guid rootId, SpecialFolderKind kind, string name) => new()
+    {
+        FullName = $"{RootAggregatePrefix}{rootId:D}:{(int)kind}", DisplayName = name, Kind = kind,
+    };
+
+    private static bool TryParseRootAggregate(string? fullName, out Guid rootId, out SpecialFolderKind kind)
+    {
+        rootId = Guid.Empty; kind = SpecialFolderKind.None;
+        if (fullName == null || !fullName.StartsWith(RootAggregatePrefix, StringComparison.Ordinal)) return false;
+        var parts = fullName[RootAggregatePrefix.Length..].Split(':');
+        return parts.Length == 2 && Guid.TryParse(parts[0], out rootId)
+            && int.TryParse(parts[1], out var value) && Enum.IsDefined(typeof(SpecialFolderKind), value)
+            && (kind = (SpecialFolderKind)value) != SpecialFolderKind.None;
+    }
 
     /// <summary>
     /// Every account's Archive destination merged into one list (issue #452). Unlike the other
@@ -676,6 +692,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         // Per-account "All Mail" sentinels have a real AccountId, not Guid.Empty.
         if (TryGetAccountIdFromSentinel(folder.FullName, out _)) return true;
+        if (TryParseRootAggregate(folder.FullName, out _, out _)) return true;
 
         // Saved-view sentinels.
         if (TryGetViewIdFromSentinel(folder.FullName, out _))    return true;
@@ -4701,9 +4718,35 @@ public partial class MainViewModel : ObservableObject, IDisposable
             {
                 if (_cachedFolders.TryGetValue(account.Id, out var folders) && folders.Count > 0)
                 {
-                    foreach (var node in FolderTreeBuilder.Build(folders))
+                    foreach (var node in FolderTreeBuilder.Build(folders.Where(f => f.Kind is not (
+                                 SpecialFolderKind.Inbox or SpecialFolderKind.Drafts or SpecialFolderKind.Scheduled
+                                 or SpecialFolderKind.Sent or SpecialFolderKind.Trash or SpecialFolderKind.Junk))))
                         accountRootNodes.Add((account, node));
                 }
+            }
+
+            var systemKinds = new[]
+            {
+                SpecialFolderKind.Inbox, SpecialFolderKind.Drafts, SpecialFolderKind.Scheduled,
+                SpecialFolderKind.Sent, SpecialFolderKind.Trash, SpecialFolderKind.Junk,
+            };
+            foreach (var kind in systemKinds)
+            {
+                var exists = groupAccounts.Any(a => _cachedFolders.TryGetValue(a.Id, out var folders)
+                    && folders.Any(f => f.Kind == kind));
+                if (!exists) continue;
+                var label = kind switch
+                {
+                    SpecialFolderKind.Inbox => "Inbox", SpecialFolderKind.Drafts => "Draft",
+                    SpecialFolderKind.Scheduled => "Scheduled", SpecialFolderKind.Sent => "Sent",
+                    SpecialFolderKind.Trash => "Trash", SpecialFolderKind.Junk => "Junk",
+                    _ => kind.ToString(),
+                };
+                var node = new FolderTreeNode
+                {
+                    Folder = CreateRootAggregateFolder(rootGroup.Key, kind, label), Label = label, Parent = rootNode,
+                };
+                rootNode.Children.Add(node);
             }
 
             // Accounts sharing a tree are interleaved directly below the common root. Only an
@@ -6600,7 +6643,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// </summary>
     private static bool IsFolderScopedAggregate(string? fullName) =>
         fullName != null &&
-        (string.Equals(fullName, AllInboxesFolder.FullName, StringComparison.Ordinal) ||
+        (TryParseRootAggregate(fullName, out _, out _) ||
+         string.Equals(fullName, AllInboxesFolder.FullName, StringComparison.Ordinal) ||
          string.Equals(fullName, AllDraftsFolder.FullName,  StringComparison.Ordinal) ||
          string.Equals(fullName, AllSentFolder.FullName,    StringComparison.Ordinal) ||
          string.Equals(fullName, AllTrashFolder.FullName,   StringComparison.Ordinal) ||
@@ -6645,8 +6689,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
     internal IEnumerable<(AccountModel Account, MailFolderModel Folder)> FolderScopedAggregateSources(
         string fullName, bool connectedOnly = false)
     {
+        var isRootAggregate = TryParseRootAggregate(fullName, out var rootId, out var rootKind);
         var isArchive = string.Equals(fullName, AllArchiveFolder.FullName, StringComparison.Ordinal);
-        var kind = string.Equals(fullName, AllInboxesFolder.FullName, StringComparison.Ordinal) ? SpecialFolderKind.Inbox
+        var kind = isRootAggregate ? rootKind
+                 : string.Equals(fullName, AllInboxesFolder.FullName, StringComparison.Ordinal) ? SpecialFolderKind.Inbox
                  : string.Equals(fullName, AllDraftsFolder.FullName,  StringComparison.Ordinal) ? SpecialFolderKind.Drafts
                  : string.Equals(fullName, AllSentFolder.FullName,    StringComparison.Ordinal) ? SpecialFolderKind.Sent
                  : string.Equals(fullName, AllTrashFolder.FullName,   StringComparison.Ordinal) ? SpecialFolderKind.Trash
@@ -6656,6 +6702,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         foreach (var account in Accounts)
         {
             if (account.IsShared) continue;   // #31: shared mailboxes are excluded from All-* aggregates (still swept)
+            if (isRootAggregate && (account.FolderTreeRootId ?? account.Id) != rootId) continue;
             if (connectedOnly && !_connectedAccountIds.Contains(account.Id)) continue;
             if (!_cachedFolders.TryGetValue(account.Id, out var folders)) continue;
 
@@ -6679,7 +6726,14 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// status text, its loading text, and its log tag.
     /// </summary>
     private static string FolderScopedAggregateDisplayName(string fullName) =>
-        string.Equals(fullName, AllInboxesFolder.FullName, StringComparison.Ordinal) ? AllInboxesFolder.DisplayName
+        TryParseRootAggregate(fullName, out _, out var rootKind) ? rootKind switch
+        {
+            SpecialFolderKind.Inbox => "Inbox", SpecialFolderKind.Drafts => "Draft",
+            SpecialFolderKind.Scheduled => "Scheduled", SpecialFolderKind.Sent => "Sent",
+            SpecialFolderKind.Trash => "Trash", SpecialFolderKind.Junk => "Junk",
+            _ => rootKind.ToString(),
+        }
+        : string.Equals(fullName, AllInboxesFolder.FullName, StringComparison.Ordinal) ? AllInboxesFolder.DisplayName
         : string.Equals(fullName, AllDraftsFolder.FullName,  StringComparison.Ordinal) ? AllDraftsFolder.DisplayName
         : string.Equals(fullName, AllSentFolder.FullName,    StringComparison.Ordinal) ? AllSentFolder.DisplayName
         : string.Equals(fullName, AllTrashFolder.FullName,   StringComparison.Ordinal) ? AllTrashFolder.DisplayName
@@ -7664,8 +7718,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private async Task EmptyTrashAsync()
     {
-        var accountsToEmpty = IsVirtualFolder(SelectedFolder)
-            ? Accounts.ToList()
+        var accountsToEmpty = SelectedFolder != null
+            && TryParseRootAggregate(SelectedFolder.FullName, out var selectedRootId, out _)
+            ? Accounts.Where(a => (a.FolderTreeRootId ?? a.Id) == selectedRootId).ToList()
+            : IsVirtualFolder(SelectedFolder) ? Accounts.ToList()
             : (SelectedAccount != null ? [SelectedAccount] : Accounts.Take(1).ToList());
 
         if (accountsToEmpty.Count == 0) return;
