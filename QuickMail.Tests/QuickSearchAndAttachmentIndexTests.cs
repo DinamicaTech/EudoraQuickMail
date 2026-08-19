@@ -30,6 +30,15 @@ public class QuickSearchParserTests
     }
 
     [Fact]
+    public void BareFMeansFlaggedWhileFColonStillMeansFrom()
+    {
+        var parsed = QuickSearchParser.Parse("F;F:@paypal.es");
+
+        Assert.Equal(QuickSearchField.Flagged, parsed.Groups[0].Alternatives[0].Field);
+        Assert.Equal(QuickSearchField.From, parsed.Groups[1].Alternatives[0].Field);
+    }
+
+    [Fact]
     public void QuotedSemicolonIsPlainText()
     {
         var parsed = QuickSearchParser.Parse("\"B:not a command;still text\"");

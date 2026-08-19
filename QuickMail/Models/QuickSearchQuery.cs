@@ -3,7 +3,7 @@ using System.Text;
 
 namespace QuickMail.Models;
 
-public enum QuickSearchField { Any, To, From, Cc, Subject, Body, AttachmentCount, AttachmentName, AttachmentContent, Date, Unread }
+public enum QuickSearchField { Any, To, From, Cc, Subject, Body, AttachmentCount, AttachmentName, AttachmentContent, Date, Unread, Flagged }
 
 public sealed record QuickSearchTerm(QuickSearchField Field, string Operator, string Value);
 public sealed record QuickSearchGroup(IReadOnlyList<QuickSearchTerm> Alternatives);
@@ -23,6 +23,11 @@ public static class QuickSearchParser
             if (token.Equals("N", StringComparison.OrdinalIgnoreCase))
             {
                 groups.Add(new([new(QuickSearchField.Unread, string.Empty, string.Empty)]));
+                continue;
+            }
+            if (token.Equals("F", StringComparison.OrdinalIgnoreCase))
+            {
+                groups.Add(new([new(QuickSearchField.Flagged, string.Empty, string.Empty)]));
                 continue;
             }
             if (IsEntirelyQuoted(token))

@@ -2906,14 +2906,79 @@ public partial class MainWindow : Window
         var element = FolderList.InputHitTest(e.GetPosition(FolderList)) as DependencyObject;
         while (element is not null && element is not TreeViewItem)
             element = System.Windows.Media.VisualTreeHelper.GetParent(element);
-        if (element is not TreeViewItem { DataContext: FolderTreeNode { Folder: { } folder } }) return;
+        if (element is not TreeViewItem { DataContext: FolderTreeNode { Folder: { } folder } node }) return;
+        var shiftDrop = (e.KeyStates & DragDropKeyStates.ShiftKey) != 0;
         if (folder.IsContainer)
         {
+            if (shiftDrop)
+            {
+                await ShiftDropOnContainerAsync(messages, node, folder);
+                return;
+            }
             AccessibilityHelper.Announce(this, "Choose a subfolder; container folders cannot contain messages.",
                 category: AnnouncementCategory.Result);
             return;
         }
         await _vm.MoveSelectedMessagesToFolderAsync(messages, folder);
+        if (shiftDrop) OpenRulesManager(CreateMoveRuleTemplate(messages[0], folder));
+    }
+
+    private async Task ShiftDropOnContainerAsync(List<MailMessageSummary> messages, FolderTreeNode node, MailFolderModel container)
+    {
+        var accountId = messages[0].AccountId;
+        var parentName = container.FullName.Length > 0 && container.FullName[0] != '\0'
+            ? container.FullName : null;
+        var suggested = SuggestedDomainFolder(messages[0].From);
+        var dialog = new NewFolderDialog
+        {
+            Owner = this,
+            ParentFolderName = node.Label,
+            DefaultFolderName = suggested,
+        };
+        if (dialog.ShowDialog() != true) return;
+
+        var folders = _vm.CachedFolders.TryGetValue(accountId, out var cached) ? cached : [];
+        var destination = folders.FirstOrDefault(f =>
+            string.Equals(f.DisplayName, dialog.FolderName, StringComparison.OrdinalIgnoreCase)
+            && (parentName == null || string.Equals(f.ParentId, parentName, StringComparison.OrdinalIgnoreCase)
+                || f.FullName.StartsWith(parentName + "/", StringComparison.OrdinalIgnoreCase)
+                || f.FullName.StartsWith(parentName + ".", StringComparison.OrdinalIgnoreCase)));
+        if (destination == null)
+        {
+            var refreshed = await _vm.CreateFolderReturningFoldersAsync(accountId, parentName, dialog.FolderName);
+            destination = refreshed?.FirstOrDefault(f =>
+                string.Equals(f.DisplayName, dialog.FolderName, StringComparison.OrdinalIgnoreCase));
+            _vm.CommitPendingFolderTreeRebuild();
+        }
+        if (destination == null) return;
+
+        await _vm.MoveSelectedMessagesToFolderAsync(messages, destination);
+        if (MessageBox.Show(this, "Create a filter for messages like this?", "Create Filter",
+                MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes)
+            OpenRulesManager(CreateMoveRuleTemplate(messages[0], destination));
+    }
+
+    private static MailRule CreateMoveRuleTemplate(MailMessageSummary message, MailFolderModel destination) => new()
+    {
+        Name = $"Rule for {message.From}",
+        FromContains = message.From,
+        UseFromCondition = true,
+        AccountId = null,
+        Action = RuleAction.MoveToFolder,
+        AlsoMarkAsRead = true,
+        ApplyAutomatically = false,
+        TargetFolder = destination.FullName,
+    };
+
+    private static string SuggestedDomainFolder(string? from)
+    {
+        if (string.IsNullOrWhiteSpace(from)) return string.Empty;
+        var at = from.LastIndexOf('@');
+        if (at < 0) return string.Empty;
+        var domain = from[(at + 1)..].Trim(' ', '<', '>', '"').Split(',', ';')[0];
+        var parts = domain.Split('.', StringSplitOptions.RemoveEmptyEntries);
+        var label = parts.Length >= 2 ? parts[^2] : parts.FirstOrDefault() ?? string.Empty;
+        return label.Length == 0 ? string.Empty : char.ToUpperInvariant(label[0]) + label[1..];
     }
 
     // Ctrl+Shift+M = Archive (issue #318). Used by the message list and all three group trees when

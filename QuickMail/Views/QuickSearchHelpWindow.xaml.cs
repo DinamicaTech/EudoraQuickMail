@@ -12,6 +12,7 @@ public partial class QuickSearchHelpWindow : Window
             new Row("(none)", "From, To, Cc, Subject and message body", "chocolate"),
             new Row("T", "To recipients", "T:person@example.com"),
             new Row("F", "From sender", "F:@paypal.es"),
+            new Row("F", "Messages with any flag (no operator or value)", "F"),
             new Row("C", "Cc recipients", "C:accounts"),
             new Row("S", "Subject", "S:quarterly report"),
             new Row("B", "Message body", "B:chocolate"),

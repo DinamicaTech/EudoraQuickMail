@@ -251,6 +251,11 @@ public partial class LocalStoreService
                     alternatives.Add("s.is_read=0");
                     continue;
                 }
+                if (term.Field == QuickSearchField.Flagged)
+                {
+                    alternatives.Add("s.flag_id IS NOT NULL");
+                    continue;
+                }
                 var p = "$q" + parameterIndex++;
                 if (term.Field == QuickSearchField.AttachmentCount)
                 {
