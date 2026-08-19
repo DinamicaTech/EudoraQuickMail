@@ -154,6 +154,11 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
     private bool _isSent;
     private ComposeMode _seededMode = ComposeMode.PlainText;
     private string? _seededHtmlBody;
+    private string _appliedPlainSignatureBlock = string.Empty;
+    private bool _seedComplete;
+
+    private const string HtmlSignatureStart = "<!--quickmail-signature-start-->";
+    private const string HtmlSignatureEnd = "<!--quickmail-signature-end-->";
 
     public bool IsDirty => _isDirty;
     public bool IsSent  => _isSent;
@@ -200,6 +205,11 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
     partial void OnBodyChanged(string value)    => _isDirty = true;
     [ObservableProperty] private string _spellLanguage = string.Empty;
     partial void OnSpellLanguageChanged(string value) => _isDirty = true;
+    partial void OnSenderAccountChanged(AccountModel? value)
+    {
+        if (!_seedComplete) return;
+        ReplaceSignature(value);
+    }
 
     public void Seed(ComposeModel model)
     {
@@ -248,32 +258,95 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
                 ? HtmlStripper.ToPlainText(sig)
                 : sig;
             // Add separator if body already has content (reply/forward)
-            if (!string.IsNullOrWhiteSpace(Body) && !Body.EndsWith('\n'))
-                Body += "\n";
-            if (!string.IsNullOrWhiteSpace(Body))
-                Body += "\n-- \n";
-            Body += plainSignature;
+            _appliedPlainSignatureBlock = BuildPlainSignatureBlock(bodyBeforeSignature, plainSignature);
+            Body += _appliedPlainSignatureBlock;
 
-            if (model.Mode == ComposeMode.Html)
-            {
-                var html = _seededHtmlBody ?? _markdown.PlainTextToHtml(bodyBeforeSignature);
-                var signatureFragment = SenderAccount.SignatureIsHtml
-                    ? sig
-                    : WebUtility.HtmlEncode(sig)
-                        .Replace("\r\n", "<br>", StringComparison.Ordinal)
-                        .Replace("\n", "<br>", StringComparison.Ordinal);
-                var separator = string.IsNullOrWhiteSpace(bodyBeforeSignature) ? string.Empty : "<br>-- <br>";
-                _seededHtmlBody = AppendBeforeClosingBody(html,
-                    $"<div class=\"quickmail-signature\">{separator}{signatureFragment}</div>");
-            }
+            // New messages are seeded as Plain Text and switched to the user's default mode
+            // only after the editor is ready. Prepare the HTML signature regardless of the
+            // seeded mode so an image-only signature is not flattened to an empty string.
+            var html = _seededHtmlBody ?? _markdown.PlainTextToHtml(bodyBeforeSignature);
+            _seededHtmlBody = AppendBeforeClosingBody(html,
+                BuildHtmlSignatureBlock(SenderAccount, bodyBeforeSignature));
             _isDirty = false; // signature insertion is not a user edit
         }
+
+        _seedComplete = true;
+    }
+
+    private void ReplaceSignature(AccountModel? account)
+    {
+        var wasDirty = _isDirty;
+        var plainBody = Body;
+        if (!string.IsNullOrEmpty(_appliedPlainSignatureBlock)
+            && plainBody.EndsWith(_appliedPlainSignatureBlock, StringComparison.Ordinal))
+            plainBody = plainBody[..^_appliedPlainSignatureBlock.Length];
+
+        var plainSignature = account == null || string.IsNullOrWhiteSpace(account.Signature)
+            ? string.Empty
+            : account.SignatureIsHtml
+                ? HtmlStripper.ToPlainText(account.Signature)
+                : account.Signature;
+        _appliedPlainSignatureBlock = string.IsNullOrWhiteSpace(plainSignature)
+            ? string.Empty
+            : BuildPlainSignatureBlock(plainBody, plainSignature);
+        Body = plainBody + _appliedPlainSignatureBlock;
+
+        if (CurrentMode == ComposeMode.Html)
+        {
+            var currentHtml = RichBodyProvider?.Invoke().Html ?? string.Empty;
+            currentHtml = RemoveMarkedHtmlSignature(currentHtml);
+            if (account != null && !string.IsNullOrWhiteSpace(account.Signature))
+                currentHtml = AppendBeforeClosingBody(currentHtml,
+                    BuildHtmlSignatureBlock(account, HtmlStripper.ToPlainText(currentHtml)));
+            LoadHtmlIntoEditorRequested?.Invoke(currentHtml);
+        }
+
+        _isDirty = wasDirty;
+    }
+
+    private static string BuildPlainSignatureBlock(string body, string signature)
+    {
+        var prefix = string.IsNullOrWhiteSpace(body)
+            ? string.Empty
+            : body.EndsWith('\n') ? "\n-- \n" : "\n\n-- \n";
+        return prefix + signature;
+    }
+
+    private static string BuildHtmlSignatureBlock(AccountModel account, string body)
+    {
+        var signatureFragment = account.SignatureIsHtml
+            ? ExtractHtmlBodyFragment(account.Signature)
+            : WebUtility.HtmlEncode(account.Signature)
+                .Replace("\r\n", "<br>", StringComparison.Ordinal)
+                .Replace("\n", "<br>", StringComparison.Ordinal);
+        var separator = string.IsNullOrWhiteSpace(body) ? string.Empty : "<br>-- <br>";
+        return $"{HtmlSignatureStart}<div class=\"quickmail-signature\">{separator}{signatureFragment}</div>{HtmlSignatureEnd}";
+    }
+
+    private static string RemoveMarkedHtmlSignature(string html)
+    {
+        var start = html.IndexOf(HtmlSignatureStart, StringComparison.Ordinal);
+        if (start < 0) return html;
+        var end = html.IndexOf(HtmlSignatureEnd, start, StringComparison.Ordinal);
+        return end < 0 ? html[..start] : html.Remove(start, end + HtmlSignatureEnd.Length - start);
     }
 
     private static string AppendBeforeClosingBody(string html, string fragment)
     {
         var index = html.LastIndexOf("</body>", StringComparison.OrdinalIgnoreCase);
         return index >= 0 ? html.Insert(index, fragment) : html + fragment;
+    }
+
+    private static string ExtractHtmlBodyFragment(string html)
+    {
+        var body = html.IndexOf("<body", StringComparison.OrdinalIgnoreCase);
+        if (body < 0) return html;
+        var contentStart = html.IndexOf('>', body);
+        if (contentStart < 0) return html;
+        var contentEnd = html.IndexOf("</body>", contentStart + 1, StringComparison.OrdinalIgnoreCase);
+        return contentEnd < 0
+            ? html[(contentStart + 1)..]
+            : html[(contentStart + 1)..contentEnd];
     }
 
     [RelayCommand]
