@@ -93,6 +93,16 @@ public partial class AccountModel : ObservableObject
     /// <summary>Inactive accounts remain configured but do not connect, receive, send, or appear in the main account tree.</summary>
     public bool IsActive { get; set; } = true;
 
+    /// <summary>
+    /// Logical local folder-tree root shared by one or more accounts. Null means this account owns
+    /// its own root. This affects presentation and folder navigation only; messages retain their
+    /// real AccountId for provenance, replies, POP3 receipts, and SMTP selection.
+    /// </summary>
+    public Guid? FolderTreeRootId { get; set; }
+
+    /// <summary>Display name copied to every account that shares the logical root.</summary>
+    public string? FolderTreeRootName { get; set; }
+
     /// <summary>DPAPI-protected password payloads, Base64 encoded. Empty for OAuth and local archives.</summary>
     public string EncryptedPop3Password { get; set; } = string.Empty;
     public bool SmtpUsesPop3Credentials { get; set; } = true;

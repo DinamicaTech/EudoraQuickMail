@@ -32,7 +32,7 @@ public sealed class FolderTreeNode : INotifyPropertyChanged
     /// </summary>
     public bool IsCalendarNode { get; init; }
 
-    public string Label { get; init; } = string.Empty;
+    public string Label { get; set; } = string.Empty;
 
     public ObservableCollection<FolderTreeNode> Children { get; } = [];
     public FolderTreeNode? Parent { get; set; }

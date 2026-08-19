@@ -4681,28 +4681,43 @@ public partial class MainViewModel : ObservableObject, IDisposable
         allMailGroup.Children.Add(new FolderTreeNode { Folder = AllWatchedFolder, Label = AllWatchedFolder.DisplayName });
         roots.Add(allMailGroup);
 
-        foreach (var account in Accounts)
+        foreach (var rootGroup in Accounts.GroupBy(a => a.FolderTreeRootId ?? a.Id))
         {
-            if (_cachedFolders.TryGetValue(account.Id, out var folders) && folders.Count > 0)
+            var groupAccounts = rootGroup.ToList();
+            var rootName = groupAccounts.Select(a => a.FolderTreeRootName)
+                .FirstOrDefault(n => !string.IsNullOrWhiteSpace(n))
+                ?? groupAccounts.FirstOrDefault(a => a.Id == rootGroup.Key)?.AccountLabel
+                ?? groupAccounts[0].AccountLabel;
+            var rootNode = new FolderTreeNode
             {
-                var accountRoots = FolderTreeBuilder.Build(folders, account);
+                IsHeader = true,
+                Label = rootName,
+                IsExpanded = true,
+                AccountId = rootGroup.Key,
+            };
 
-                roots.AddRange(accountRoots);
-            }
-            else
+            var accountRootNodes = new List<(AccountModel Account, FolderTreeNode Node)>();
+            foreach (var account in groupAccounts)
             {
-                // Placeholder node for accounts that have not yet loaded folders. A shared mailbox (#31)
-                // stays here through PR 1 (no backend access yet) — a navigable top-level node with no
-                // children — so it must carry the account id + shared flag for the node key and name.
-                roots.Add(new FolderTreeNode
+                if (_cachedFolders.TryGetValue(account.Id, out var folders) && folders.Count > 0)
                 {
-                    IsHeader = true,
-                    Label    = account.AccountLabel,
-                    Folder   = null,
-                    AccountId       = account.Id,
-                    IsSharedAccount = account.IsShared,
-                });
+                    foreach (var node in FolderTreeBuilder.Build(folders))
+                        accountRootNodes.Add((account, node));
+                }
             }
+
+            // Accounts sharing a tree are interleaved directly below the common root. Only an
+            // actual name collision gets an account suffix; otherwise the tree remains clean.
+            foreach (var labelGroup in accountRootNodes.GroupBy(x => x.Node.Label, StringComparer.OrdinalIgnoreCase))
+                foreach (var item in labelGroup)
+                {
+                    if (labelGroup.Count() > 1)
+                        item.Node.Label = $"{item.Node.Label} — {item.Account.AccountLabel}";
+                    item.Node.Parent = rootNode;
+                    rootNode.Children.Add(item.Node);
+                }
+
+            roots.Add(rootNode);
         }
 
         // Restore expansion captured above (additive: header groups keep their built-in expanded

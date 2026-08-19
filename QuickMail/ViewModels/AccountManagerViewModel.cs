@@ -23,6 +23,20 @@ public partial class AccountManagerViewModel : AccountEditorViewModel
     private readonly IContactSyncService? _contactSync;
     private readonly IGraphCalendarSyncService? _graphCalendarSync;
 
+    public sealed record FolderRootOption(Guid Id, string Name)
+    {
+        public override string ToString() => Name;
+    }
+
+    public ObservableCollection<FolderRootOption> FolderRootOptions { get; } = [];
+    [ObservableProperty] private FolderRootOption? _selectedFolderRoot;
+    [ObservableProperty] private string _folderRootDisplayName = string.Empty;
+
+    partial void OnSelectedFolderRootChanged(FolderRootOption? value)
+    {
+        if (value != null) FolderRootDisplayName = value.Name;
+    }
+
     [ObservableProperty]
     private ObservableCollection<AccountModel> _accounts = [];
 
@@ -128,6 +142,7 @@ public partial class AccountManagerViewModel : AccountEditorViewModel
         _contactSync    = contactSync;
         _graphCalendarSync = graphCalendarSync;
         Accounts = new ObservableCollection<AccountModel>(accountService.LoadAccounts());
+        RefreshFolderRootOptions();
 
         if (featureGate.IsEnabled(FeatureFlag.GoogleAuth)) EnsureGoogleSignInListed();
     }
@@ -135,6 +150,11 @@ public partial class AccountManagerViewModel : AccountEditorViewModel
     partial void OnSelectedAccountChanged(AccountModel? value)
     {
         if (value == null) return;
+        RefreshFolderRootOptions();
+        var rootId = value.FolderTreeRootId ?? value.Id;
+        SelectedFolderRoot = FolderRootOptions.FirstOrDefault(r => r.Id == rootId)
+            ?? new FolderRootOption(rootId, value.FolderTreeRootName ?? value.AccountLabel);
+        FolderRootDisplayName = value.FolderTreeRootName ?? SelectedFolderRoot.Name;
         // Resolve before the field copy: accounts saved before the provider catalog existed have no
         // ProviderId, so Resolve falls back to matching their IMAP host.
         var resolved = Catalog.Resolve(value);
@@ -182,6 +202,21 @@ public partial class AccountManagerViewModel : AccountEditorViewModel
         // from downgrading it from "STARTTLS required" to "STARTTLS if the server feels like it".
         RequireStartTls = value.RequireStartTls;
         IsAdvancedExpanded = false;
+    }
+
+    private void RefreshFolderRootOptions()
+    {
+        var selectedId = SelectedFolderRoot?.Id;
+        FolderRootOptions.Clear();
+        foreach (var group in Accounts.Where(a => !a.IsShared)
+                     .GroupBy(a => a.FolderTreeRootId ?? a.Id))
+        {
+            var owner = group.FirstOrDefault(a => a.Id == group.Key) ?? group.First();
+            var name = group.Select(a => a.FolderTreeRootName).FirstOrDefault(n => !string.IsNullOrWhiteSpace(n))
+                ?? owner.AccountLabel;
+            FolderRootOptions.Add(new FolderRootOption(group.Key, name));
+        }
+        SelectedFolderRoot = FolderRootOptions.FirstOrDefault(r => r.Id == selectedId);
     }
 
     /// <summary>
@@ -426,6 +461,15 @@ public partial class AccountManagerViewModel : AccountEditorViewModel
         account.Pop3AcceptInvalidCert = Pop3AcceptInvalidCert;
         account.CheckIncomingMail = CheckIncomingMail;
         account.IsActive = IsActive;
+        var rootId = SelectedFolderRoot?.Id ?? account.Id;
+        var rootName = string.IsNullOrWhiteSpace(FolderRootDisplayName)
+            ? SelectedFolderRoot?.Name ?? account.AccountLabel
+            : FolderRootDisplayName.Trim();
+        account.FolderTreeRootId = rootId == account.Id ? null : rootId;
+        // Keep the name on every member. This lets an active account retain the shared root label
+        // even when the account that originally created that root is later disabled.
+        foreach (var member in Accounts.Where(a => (a.FolderTreeRootId ?? a.Id) == rootId || a.Id == account.Id))
+            member.FolderTreeRootName = rootName;
         account.SmtpHost = SmtpHost;
         account.SmtpPort = SmtpPort;
         account.SmtpUseSsl = SmtpUseSsl;

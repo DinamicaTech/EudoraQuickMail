@@ -131,6 +131,19 @@
                          AutomationProperties.LabeledBy="{Binding ElementName=LblUsername}"
                          TabIndex="8"/>
 
+                <Separator Margin="0,12,0,6"/>
+                <TextBlock Text="Folder tree" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                <Label x:Name="LblFolderRoot" Content="Tree _root:" Target="{Binding ElementName=FolderRootCombo}" Padding="0" Margin="0,0,0,2"/>
+                <ComboBox x:Name="FolderRootCombo"
+                          ItemsSource="{Binding FolderRootOptions}"
+                          SelectedItem="{Binding SelectedFolderRoot, Mode=TwoWay}"
+                          DisplayMemberPath="Name"
+                          AutomationProperties.LabeledBy="{Binding ElementName=LblFolderRoot}"/>
+                <Label x:Name="LblFolderRootName" Content="Root display _name:" Target="{Binding ElementName=FolderRootNameBox}" Padding="0" Margin="0,6,0,2"/>
+                <TextBox x:Name="FolderRootNameBox"
+                         Text="{Binding FolderRootDisplayName, UpdateSourceTrigger=PropertyChanged}"
+                         AutomationProperties.LabeledBy="{Binding ElementName=LblFolderRootName}"/>
+
                 <!-- #31: a shared mailbox has no credentials or connection of its own — it reads through
                      its parent account and shows mail only. In place of the connection/auth/sync
                      surface (hidden below), a read-only summary says what it is. A read-only TextBox,

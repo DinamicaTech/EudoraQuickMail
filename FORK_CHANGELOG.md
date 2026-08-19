@@ -10,6 +10,7 @@ before a public release.
 
 ## Unreleased
 
+- Accounts can now share a named logical folder-tree root while messages retain their original account identity.
 - The Eudora import confirmation now explicitly explains that it replaces only the previous Eudora message import and preserves all other accounts and mail.
 - Connection test results now open in a readable modal dialog instead of being hidden behind the account form buttons.
 
