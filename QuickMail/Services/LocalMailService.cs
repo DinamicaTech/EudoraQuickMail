@@ -8,9 +8,14 @@ namespace QuickMail.Services;
 public sealed class LocalMailService : IMailService
 {
     private readonly LocalStoreService _store;
+    private readonly IAccountService? _accountService;
     private readonly Dictionary<Guid, AccountModel> _accounts = [];
 
-    public LocalMailService(LocalStoreService store) => _store = store;
+    public LocalMailService(LocalStoreService store, IAccountService? accountService = null)
+    {
+        _store = store;
+        _accountService = accountService;
+    }
 
     public async Task ConnectAsync(AccountModel account, string? password = null, CancellationToken ct = default)
     {
@@ -177,8 +182,11 @@ public sealed class LocalMailService : IMailService
 
     private MailMessageDetail FromCompose(Guid accountId, string folder, string id, ComposeModel compose)
     {
+        // Saving to SQLite needs an identity, not a live POP3 connection. Accounts with incoming
+        // checks disabled (and imported/local-only accounts) may never have passed ConnectAsync.
         var account = _accounts.GetValueOrDefault(accountId)
-            ?? throw new InvalidOperationException("Local account is not connected.");
+            ?? _accountService?.LoadAccounts().FirstOrDefault(a => a.Id == accountId)
+            ?? throw new InvalidOperationException("The sender account no longer exists.");
         return new MailMessageDetail
         {
             AccountId = accountId, FolderName = folder, MessageId = id, From = account.Username,

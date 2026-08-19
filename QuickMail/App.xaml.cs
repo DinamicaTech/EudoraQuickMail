@@ -282,7 +282,7 @@ public partial class App : Application
             var imapBackend       = _imapBackend;
             _graphBackend         = new GraphMailService(msOAuthService, configService);
             var graphBackend      = _graphBackend;
-            var localBackend      = new LocalMailService(localStore);
+            var localBackend      = new LocalMailService(localStore, accountService);
             _graphSendMail        = new GraphSendMailService(msOAuthService);
             var accountSecrets    = new DpapiAccountSecretProtector();
             var smtpService       = new SmtpService(oauthService, _graphSendMail, accountSecrets);
