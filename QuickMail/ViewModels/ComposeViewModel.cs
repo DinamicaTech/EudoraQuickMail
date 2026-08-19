@@ -358,6 +358,7 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
         try
         {
             await SaveDraftCoreAsync(account, _autoSaveCts.Token);
+            LocalFolderChanged?.Invoke(account.Id);
             AutoSaveText = $"Auto-saved {DateTime.Now:t}";
             _autoSaveFailureAnnounced = false;
         }

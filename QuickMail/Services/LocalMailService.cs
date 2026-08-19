@@ -133,8 +133,27 @@ public sealed class LocalMailService : IMailService
         var messages = await _store.LoadFolderSummariesAsync(accountId, inbox.FullName);
         return (messages.Count, messages.Count(m => !m.IsRead));
     }
-    public async Task<string?> FindDraftsFolderNameAsync(Guid accountId, CancellationToken ct = default) =>
-        (await GetFoldersAsync(accountId, ct)).FirstOrDefault(f => f.Kind == SpecialFolderKind.Drafts)?.FullName;
+    public async Task<string?> FindDraftsFolderNameAsync(Guid accountId, CancellationToken ct = default)
+    {
+        var folders = await GetFoldersAsync(accountId, ct);
+        var existing = folders.FirstOrDefault(f => f.Kind == SpecialFolderKind.Drafts);
+        if (existing != null) return existing.FullName;
+
+        // Older/imported accounts can predate local system-folder creation. A draft must never be
+        // lost merely because that migration did not run, so repair the catalogue on first use.
+        var draft = new MailFolderModel
+        {
+            AccountId = accountId,
+            FullName = "Draft",
+            DisplayName = "Draft",
+            ParentId = null,
+            Kind = SpecialFolderKind.Drafts,
+            ExcludeFromAllMail = true,
+        };
+        folders.Add(draft);
+        await _store.SaveFoldersAsync(accountId, folders);
+        return draft.FullName;
+    }
 
     public async Task<string> AppendDraftAsync(Guid accountId, ComposeModel draft, string? replaceMessageId,
         CancellationToken ct = default)

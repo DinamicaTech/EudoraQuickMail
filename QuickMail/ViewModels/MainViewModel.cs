@@ -6826,6 +6826,19 @@ public partial class MainViewModel : ObservableObject, IDisposable
                             ? "Scheduled" : "SMTP error";
             }
             SetMessages(sorted);
+            // Scheduled uses a total-message badge rather than unread count. Refresh it from the
+            // authoritative list every time the user opens the folder; queue changes can occur on
+            // the scheduler thread between the ordinary folder-count sweeps.
+            if (TryParseRootAggregate(fullName, out _, out var refreshedKind)
+                && refreshedKind == SpecialFolderKind.Scheduled
+                && SelectedFolder != null)
+            {
+                SelectedFolder.MessageCount = sorted.Count;
+                if (FolderTree != null)
+                    foreach (var node in FlattenAllNodes(FolderTree))
+                        if (ReferenceEquals(node.Folder, SelectedFolder))
+                            node.NotifyUnreadChanged();
+            }
             StatusText = sorted.Count == 0
                 ? $"No messages in {displayName}."
                 : $"{sorted.Count} {(sorted.Count == 1 ? "message" : "messages")} in {displayName}.";
