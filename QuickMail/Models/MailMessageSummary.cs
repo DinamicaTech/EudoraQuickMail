@@ -115,6 +115,11 @@ public partial class MailMessageSummary : ObservableObject
     [ObservableProperty]
     private bool _isWatched;
 
+    /// <summary>Queue/delivery state for local outgoing messages; empty for ordinary mail.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(StatusDisplay))]
+    private string _deliveryStatus = string.Empty;
+
     // ── Computed display ──────────────────────────────────────────────────────
 
     /// <summary>
@@ -125,6 +130,7 @@ public partial class MailMessageSummary : ObservableObject
     {
         get
         {
+            if (!string.IsNullOrWhiteSpace(DeliveryStatus)) return DeliveryStatus;
             if (IsFlagged)   return FlagLabel;
             if (IsReplied)   return "Replied";
             if (IsForwarded) return "Fwd";

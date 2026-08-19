@@ -1441,7 +1441,7 @@
                              is not shadowed by a local style here. -->
                         <ListView.View>
                             <GridView>
-                                <GridViewColumn Width="65">
+                                <GridViewColumn Width="90">
                                     <GridViewColumn.Header>
                                         <GridViewColumnHeader Content="Status" Tag="Status"
                                                    AutomationProperties.IsColumnHeader="True"/>

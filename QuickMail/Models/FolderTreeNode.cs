@@ -38,6 +38,10 @@ public sealed class FolderTreeNode : INotifyPropertyChanged
     public FolderTreeNode? Parent { get; set; }
     private int RecursiveUnreadCount => (Folder?.SuppressUnreadCount == false ? Folder.UnreadCount : 0)
         + Children.Sum(child => child.RecursiveUnreadCount);
+    private int RecursiveMessageCount => (Folder?.MessageCount ?? 0)
+        + Children.Sum(child => child.RecursiveMessageCount);
+    private bool UsesTotalCount => Folder?.Kind is SpecialFolderKind.Trash or SpecialFolderKind.Scheduled;
+    private int DisplayCount => UsesTotalCount ? RecursiveMessageCount : RecursiveUnreadCount;
 
     /// <summary>
     /// Accessibility name announced by screen readers (AutomationProperties.Name).
@@ -49,7 +53,7 @@ public sealed class FolderTreeNode : INotifyPropertyChanged
     /// Do not move the count back out of the Name without checking with a screen-reader user first.
     /// </summary>
     public string AutomationName =>
-        ShowUnread ? $"{Label}, {RecursiveUnreadCount} unread"
+        ShowCount ? UsesTotalCount ? $"{Label}, {DisplayCount} messages" : $"{Label}, {DisplayCount} unread"
         : IsDefaultCalendar ? $"{Label}, default calendar"
         : IsSharedAccount ? $"{Label}, shared mailbox"
         : Label;
@@ -80,7 +84,7 @@ public sealed class FolderTreeNode : INotifyPropertyChanged
 
     // Gmail's All Mail / Important / Starred report unread counts that overlap the Inbox and include
     // archived mail, so they're hidden here to avoid a misleading count (issue #227).
-    private bool ShowUnread => RecursiveUnreadCount > 0;
+    private bool ShowCount => DisplayCount > 0;
 
     /// <summary>
     /// UIA ItemStatus string used by AutomationProperties.ItemStatus on the TreeViewItem.
@@ -88,14 +92,14 @@ public sealed class FolderTreeNode : INotifyPropertyChanged
     /// Empty for folders with no unread messages and for header/group nodes.
     /// </summary>
     public string ItemStatusLabel =>
-        ShowUnread ? $"{RecursiveUnreadCount} unread" : string.Empty;
+        ShowCount ? UsesTotalCount ? $"{DisplayCount} messages" : $"{DisplayCount} unread" : string.Empty;
 
     /// <summary>
     /// Visual unread badge shown next to the folder label, e.g. "(5)".
     /// Empty string for folders with no unread messages and for header/group nodes.
     /// </summary>
     public string UnreadDisplay =>
-        ShowUnread ? $"({RecursiveUnreadCount})" : string.Empty;
+        ShowCount ? $"({DisplayCount})" : string.Empty;
 
     private bool _isExpanded;
 

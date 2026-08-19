@@ -17,6 +17,7 @@ public sealed class LocalMailService : IMailService
         _accounts[account.Id] = account;
         if (account.BackendKind is BackendKind.Pop3Smtp or BackendKind.LocalArchive)
         {
+            await _store.RefreshLocalFolderCountsAsync(account.Id, ct);
             var folders = await GetFoldersAsync(account.Id, ct);
             // Repair rows written while Scheduled temporarily occupied persisted value 4 and
             // shifted Trash/Junk. Folder names are authoritative for these local system folders.

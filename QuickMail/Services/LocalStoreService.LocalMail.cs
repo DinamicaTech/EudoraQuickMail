@@ -5,6 +5,22 @@ namespace QuickMail.Services;
 
 public partial class LocalStoreService
 {
+    public async Task RefreshLocalFolderCountsAsync(Guid accountId, CancellationToken ct = default)
+    {
+        await using var conn = await OpenAsync();
+        await using var command = conn.CreateCommand();
+        command.CommandText = """
+            UPDATE Folder SET
+                message_count=(SELECT COUNT(*) FROM MessageSummary s
+                               WHERE s.account_id=Folder.account_id AND s.folder_name=Folder.full_name),
+                unread_count=(SELECT COUNT(*) FROM MessageSummary s
+                              WHERE s.account_id=Folder.account_id AND s.folder_name=Folder.full_name AND s.is_read=0)
+            WHERE account_id=$aid;
+            """;
+        command.Parameters.AddWithValue("$aid", accountId.ToString());
+        await command.ExecuteNonQueryAsync(ct);
+    }
+
     public async Task<bool> ContainsPop3UidAsync(Guid accountId, string uidl, CancellationToken ct = default)
     {
         await using var conn = await OpenAsync();
@@ -148,6 +164,7 @@ public partial class LocalStoreService
             receipt.Parameters.AddWithValue("$now", DateTimeOffset.UtcNow.UtcTicks);
             await receipt.ExecuteNonQueryAsync(ct);
         }
+        await UpdateFolderCountsAsync(conn, tx, message.AccountId, message.FolderName, ct);
         await tx.CommitAsync(ct);
     }
 
@@ -496,6 +513,8 @@ public partial class LocalStoreService
                 "UPDATE AttachmentContent SET folder_name=$dest WHERE account_id=$aid AND folder_name=$source AND unique_id=$uid;",
                 accountId, sourceFolder, id, destinationFolder, ct);
         }
+        await UpdateFolderCountsAsync(conn, tx, accountId, sourceFolder, ct);
+        await UpdateFolderCountsAsync(conn, tx, accountId, destinationFolder, ct);
         await tx.CommitAsync(ct);
     }
 
@@ -528,7 +547,26 @@ public partial class LocalStoreService
             for (var i = 0; i < chunk.Count; i++) command.Parameters.AddWithValue($"$u{i}", chunk[i]);
             await command.ExecuteNonQueryAsync(ct);
         }
+        await UpdateFolderCountsAsync(conn, tx, accountId, folderName, ct);
         await tx.CommitAsync(ct);
+    }
+
+    private static async Task UpdateFolderCountsAsync(SqliteConnection conn, SqliteTransaction tx,
+        Guid accountId, string folderName, CancellationToken ct)
+    {
+        await using var command = conn.CreateCommand();
+        command.Transaction = tx;
+        command.CommandText = """
+            UPDATE Folder SET
+                message_count=(SELECT COUNT(*) FROM MessageSummary
+                               WHERE account_id=$aid AND folder_name=$fn),
+                unread_count=(SELECT COUNT(*) FROM MessageSummary
+                              WHERE account_id=$aid AND folder_name=$fn AND is_read=0)
+            WHERE account_id=$aid AND full_name=$fn;
+            """;
+        command.Parameters.AddWithValue("$aid", accountId.ToString());
+        command.Parameters.AddWithValue("$fn", folderName);
+        await command.ExecuteNonQueryAsync(ct);
     }
 
     private static async Task ExecuteKeyMutationAsync(SqliteConnection conn, SqliteTransaction tx, string sql,

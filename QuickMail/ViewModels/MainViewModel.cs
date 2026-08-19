@@ -4742,9 +4742,16 @@ public partial class MainViewModel : ObservableObject, IDisposable
                     SpecialFolderKind.Trash => "Trash", SpecialFolderKind.Junk => "Junk",
                     _ => kind.ToString(),
                 };
+                var physicalFolders = groupAccounts
+                    .Where(a => _cachedFolders.ContainsKey(a.Id))
+                    .SelectMany(a => _cachedFolders[a.Id])
+                    .Where(f => f.Kind == kind).ToList();
+                var aggregateFolder = CreateRootAggregateFolder(rootGroup.Key, kind, label);
+                aggregateFolder.UnreadCount = physicalFolders.Sum(f => f.UnreadCount);
+                aggregateFolder.MessageCount = physicalFolders.Sum(f => f.MessageCount);
                 var node = new FolderTreeNode
                 {
-                    Folder = CreateRootAggregateFolder(rootGroup.Key, kind, label), Label = label, Parent = rootNode,
+                    Folder = aggregateFolder, Label = label, Parent = rootNode,
                 };
                 rootNode.Children.Add(node);
             }
@@ -6773,6 +6780,18 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
             await ResolveFlagNamesAsync(all);
             var sorted = all.OrderByDescending(m => m.Date).ToList();
+            if (TryParseRootAggregate(fullName, out _, out var aggregateKind)
+                && aggregateKind == SpecialFolderKind.Scheduled
+                && System.Windows.Application.Current is App { ScheduledSender: { } scheduler })
+            {
+                var queue = (await scheduler.GetSnapshotAsync())
+                    .Where(item => item.LocalMessageId != null)
+                    .ToDictionary(item => item.LocalMessageId!, StringComparer.Ordinal);
+                foreach (var message in sorted)
+                    if (queue.TryGetValue(message.MessageId, out var item))
+                        message.DeliveryStatus = string.IsNullOrWhiteSpace(item.LastError)
+                            ? "Scheduled" : "SMTP error";
+            }
             SetMessages(sorted);
             StatusText = sorted.Count == 0
                 ? $"No messages in {displayName}."

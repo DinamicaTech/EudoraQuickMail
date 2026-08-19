@@ -63,6 +63,13 @@ public sealed class ScheduledSendService : IDisposable
         finally { _gate.Release(); }
     }
 
+    public async Task<IReadOnlyList<ScheduledMail>> GetSnapshotAsync()
+    {
+        await _gate.WaitAsync();
+        try { return (await LoadAsync()).ToList(); }
+        finally { _gate.Release(); }
+    }
+
     public async Task ReplaceAsync(Guid id, ComposeModel message, DateTimeOffset sendAtUtc)
     {
         if (sendAtUtc <= DateTimeOffset.Now) throw new ArgumentOutOfRangeException(nameof(sendAtUtc));
