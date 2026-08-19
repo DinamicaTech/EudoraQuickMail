@@ -10,6 +10,7 @@ before a public release.
 
 ## Unreleased
 
+- Read/unread changes now update recursive folder badges immediately, and badge counts use the current regional thousands separator.
 - Scheduled rows now show `Scheduled` or `SMTP error` in the Status column; folder badges count unread mail recursively and total items for Trash/Scheduled.
 - Reopened scheduled messages now restore their saved HTML/Markdown/plain-text mode and do not append the signature a second time.
 - Shared roots now present Inbox, Draft, Scheduled, Sent, Trash, and Junk as one logical aggregate folder across their member accounts.

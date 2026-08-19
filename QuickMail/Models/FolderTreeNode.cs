@@ -53,7 +53,7 @@ public sealed class FolderTreeNode : INotifyPropertyChanged
     /// Do not move the count back out of the Name without checking with a screen-reader user first.
     /// </summary>
     public string AutomationName =>
-        ShowCount ? UsesTotalCount ? $"{Label}, {DisplayCount} messages" : $"{Label}, {DisplayCount} unread"
+        ShowCount ? UsesTotalCount ? $"{Label}, {DisplayCount:N0} messages" : $"{Label}, {DisplayCount:N0} unread"
         : IsDefaultCalendar ? $"{Label}, default calendar"
         : IsSharedAccount ? $"{Label}, shared mailbox"
         : Label;
@@ -92,14 +92,14 @@ public sealed class FolderTreeNode : INotifyPropertyChanged
     /// Empty for folders with no unread messages and for header/group nodes.
     /// </summary>
     public string ItemStatusLabel =>
-        ShowCount ? UsesTotalCount ? $"{DisplayCount} messages" : $"{DisplayCount} unread" : string.Empty;
+        ShowCount ? UsesTotalCount ? $"{DisplayCount:N0} messages" : $"{DisplayCount:N0} unread" : string.Empty;
 
     /// <summary>
     /// Visual unread badge shown next to the folder label, e.g. "(5)".
     /// Empty string for folders with no unread messages and for header/group nodes.
     /// </summary>
     public string UnreadDisplay =>
-        ShowCount ? $"({DisplayCount})" : string.Empty;
+        ShowCount ? $"({DisplayCount:N0})" : string.Empty;
 
     private bool _isExpanded;
 

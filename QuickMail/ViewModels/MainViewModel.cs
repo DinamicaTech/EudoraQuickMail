@@ -5347,6 +5347,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             // manual refresh (issue #227 follow-up).
             if (wasUnread)
             {
+                ApplyOptimisticReadCountDelta([summary], -1);
                 ScheduleFolderCountRefresh(summary.AccountId);
 
                 // Mark read on the server explicitly rather than relying on the body fetch's
@@ -6860,6 +6861,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         foreach (var m in unread)
             m.IsRead = true;
+        ApplyOptimisticReadCountDelta(unread, -1);
 
         var label = unread.Count == 1 ? "message" : $"{unread.Count} messages";
         StatusText = $"Marked {label} as read.";
@@ -6888,9 +6890,30 @@ public partial class MainViewModel : ObservableObject, IDisposable
         var read = messages.Where(m => m.IsRead).ToList();
         if (read.Count == 0) return Task.CompletedTask;
         foreach (var message in read) message.IsRead = false;
+        ApplyOptimisticReadCountDelta(read, 1);
         StatusText = read.Count == 1 ? "Marked message as unread." : $"Marked {read.Count} messages as unread.";
         return _localStore.UpdateIsReadBatchAsync(
             read.Select(m => (m.AccountId, m.FolderName, m.MessageId)), false);
+    }
+
+    private void ApplyOptimisticReadCountDelta(IEnumerable<MailMessageSummary> messages, int deltaPerMessage)
+    {
+        foreach (var group in messages.GroupBy(m => (m.AccountId, m.FolderName)))
+        {
+            if (!_cachedFolders.TryGetValue(group.Key.AccountId, out var folders)) continue;
+            var folder = folders.FirstOrDefault(f =>
+                string.Equals(f.FullName, group.Key.FolderName, StringComparison.OrdinalIgnoreCase));
+            if (folder == null) continue;
+            folder.UnreadCount = Math.Max(0, folder.UnreadCount + deltaPerMessage * group.Count());
+        }
+
+        foreach (var account in Accounts)
+            if (_cachedFolders.TryGetValue(account.Id, out var folders))
+                account.TotalUnread = folders.Where(f => !f.SuppressUnreadCount).Sum(f => f.UnreadCount);
+
+        // Rebuild also recalculates the synthetic shared-root aggregates. Expansion state is
+        // preserved by BuildFolderTree, and message-list focus is unaffected.
+        BuildFolderTree();
     }
 
     [RelayCommand]

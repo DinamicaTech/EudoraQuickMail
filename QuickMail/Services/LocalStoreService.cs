@@ -802,22 +802,13 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
         LogService.Log($"LocalStoreService: purged calendar events for {orphans.Count} unknown account(s).");
     }
 
-    public async Task UpdateIsReadAsync(Guid accountId, string folderName, string messageId, bool isRead)
-    {
-        await using var conn = await OpenAsync();
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandText =
-            "UPDATE MessageSummary SET is_read=$read " +
-            "WHERE unique_id=$uid AND account_id=$aid AND folder_name=$fn;";
-        cmd.Parameters.AddWithValue("$read", isRead ? 1 : 0);
-        cmd.Parameters.AddWithValue("$uid",  messageId);
-        cmd.Parameters.AddWithValue("$aid",  accountId.ToString());
-        cmd.Parameters.AddWithValue("$fn",   folderName);
-        await cmd.ExecuteNonQueryAsync();
-    }
+    public Task UpdateIsReadAsync(Guid accountId, string folderName, string messageId, bool isRead) =>
+        UpdateIsReadBatchAsync([(accountId, folderName, messageId)], isRead);
 
     public async Task UpdateIsReadBatchAsync(IEnumerable<(Guid AccountId, string FolderName, string MessageId)> items, bool isRead)
     {
+        var materialized = items.ToList();
+        if (materialized.Count == 0) return;
         await using var conn = await OpenAsync();
         await using var tx = await conn.BeginTransactionAsync();
         await using var cmd = conn.CreateCommand();
@@ -830,13 +821,17 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
         var pAid  = cmd.Parameters.Add("$aid",  Microsoft.Data.Sqlite.SqliteType.Text);
         var pFn   = cmd.Parameters.Add("$fn",   Microsoft.Data.Sqlite.SqliteType.Text);
         pRead.Value = isRead ? 1 : 0;
-        foreach (var (accountId, folderName, messageId) in items)
+        foreach (var (accountId, folderName, messageId) in materialized)
         {
             pUid.Value = messageId;
             pAid.Value = accountId.ToString();
             pFn.Value  = folderName;
             await cmd.ExecuteNonQueryAsync();
         }
+        foreach (var (accountId, folderName) in materialized
+                     .Select(i => (i.AccountId, i.FolderName)).Distinct())
+            await UpdateFolderCountsAsync(conn, (Microsoft.Data.Sqlite.SqliteTransaction)tx,
+                accountId, folderName, CancellationToken.None);
         await tx.CommitAsync();
     }
 
