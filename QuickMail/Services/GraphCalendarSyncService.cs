@@ -90,7 +90,12 @@ public sealed class GraphCalendarSyncService : IGraphCalendarSyncService
     /// Gmail mail is IMAP). No-op when no Google client is wired or no such account exists.
     /// </summary>
     private bool IsGoogleEligible(AccountModel account)
-        => _google != null && account.AuthType == AuthType.OAuth2Google && !IsGraphEligible(account);
+        => _google != null && !IsGraphEligible(account)
+           && (account.AuthType == AuthType.OAuth2Google
+               || string.Equals(account.CalendarProvider, "google", StringComparison.OrdinalIgnoreCase));
+
+    private static string GoogleIdentity(AccountModel account)
+        => string.IsNullOrWhiteSpace(account.CalendarIdentity) ? account.Username : account.CalendarIdentity;
 
     /// <summary>
     /// iCloud accounts (IMAP host <c>imap.mail.me.com</c>) have a CalDAV calendar at
@@ -238,14 +243,14 @@ public sealed class GraphCalendarSyncService : IGraphCalendarSyncService
 
         // Enumerate the account's calendars, then pull each one's events, tagging rows with the
         // calendar they came from so each shows as its own selectable node.
-        var calendars = await _google!.GetCalendarListAsync(account.Username, ct);
+        var calendars = await _google!.GetCalendarListAsync(GoogleIdentity(account), ct);
 
         var union = new List<CalendarEvent>();
         foreach (var cal in calendars)
         {
             if (string.IsNullOrEmpty(cal.Id) || cal.Deleted) continue;
             var calName = string.IsNullOrWhiteSpace(cal.Summary) ? "Calendar" : cal.Summary.Trim();
-            var items = await _google!.GetEventsAsync(account.Username, timeMin, timeMax, cal.Id, ct);
+            var items = await _google!.GetEventsAsync(GoogleIdentity(account), timeMin, timeMax, cal.Id, ct);
             union.AddRange(items
                 .Where(e => !string.IsNullOrEmpty(e.Id))
                 // Cancelled occurrences can appear despite the default filters; they are deletions.
@@ -625,7 +630,7 @@ public sealed class GraphCalendarSyncService : IGraphCalendarSyncService
         // Dispatch order mirrors the read path (SyncOneAccountAsync): Graph → Google → iCloud.
         if (IsGoogleEligible(account))
         {
-            await _google!.DeleteEventAsync(account.Username, evt.Uid, GoogleCalendarId(evt), ct);
+            await _google!.DeleteEventAsync(GoogleIdentity(account), evt.Uid, GoogleCalendarId(evt), ct);
             await _store.DeleteCalendarEventAsync(evt.Uid, account.Id);
             LogService.Log($"CalendarSync: deleted Google event on {account.AccountLabel} ({evt.Uid}).");
             return;
@@ -653,7 +658,7 @@ public sealed class GraphCalendarSyncService : IGraphCalendarSyncService
     private async Task<CalendarEvent> CreateGoogleEventAsync(AccountModel account, CalendarEvent evt, CancellationToken ct)
     {
         var calId = GoogleCalendarId(evt);
-        var created = await _google!.CreateEventAsync(account.Username, BuildGoogleWriteBody(evt), calId, ct);
+        var created = await _google!.CreateEventAsync(GoogleIdentity(account), BuildGoogleWriteBody(evt), calId, ct);
         var mapped = MapGoogleEvent(created, account.Id, calId, evt.CalendarName);
         await _store.UpsertCalendarEventAsync(mapped);
         LogService.Log($"CalendarSync: created Google event on {account.AccountLabel} ({mapped.Uid}).");
@@ -663,7 +668,7 @@ public sealed class GraphCalendarSyncService : IGraphCalendarSyncService
     private async Task<CalendarEvent> UpdateGoogleEventAsync(AccountModel account, CalendarEvent evt, CancellationToken ct)
     {
         var calId = GoogleCalendarId(evt);
-        var updated = await _google!.UpdateEventAsync(account.Username, evt.Uid, BuildGoogleWriteBody(evt), calId, ct);
+        var updated = await _google!.UpdateEventAsync(GoogleIdentity(account), evt.Uid, BuildGoogleWriteBody(evt), calId, ct);
         var mapped = MapGoogleEvent(updated, account.Id, calId, evt.CalendarName);
         await _store.UpsertCalendarEventAsync(mapped);
         LogService.Log($"CalendarSync: updated Google event on {account.AccountLabel} ({mapped.Uid}).");

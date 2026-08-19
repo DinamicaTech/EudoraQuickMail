@@ -231,6 +231,26 @@
                               Click="SyncCalendarCheckBox_Click"
                               AutomationProperties.Name="Sync calendar from this account"
                               Margin="0,0,0,4" TabIndex="14"/>
+                    <TextBlock Text="{Binding CalendarConnectionText}"
+                               Foreground="{DynamicResource Theme.TextSecondary}" Margin="0,2,0,6"/>
+                    <StackPanel Orientation="Horizontal">
+                        <Button Content="Connect / reconnect _Google Calendar…"
+                                Command="{Binding ConnectGoogleCalendarCommand}" Margin="0,0,8,0"
+                                Visibility="{Binding CanConnectGoogleCalendar, Converter={StaticResource BoolToVisibility}}"/>
+                        <Button Content="_Disconnect Google Calendar"
+                                Command="{Binding DisconnectGoogleCalendarCommand}">
+                            <Button.Style>
+                                <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding HasIndependentGoogleCalendar}" Value="True">
+                                            <Setter Property="Visibility" Value="Visible"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Button.Style>
+                        </Button>
+                    </StackPanel>
                 </StackPanel>
 
                 <!-- Server settings live behind the same expander as the Add Account dialog, so an

@@ -76,5 +76,10 @@ public interface IOAuthService
     /// </summary>
     Task RequestCalendarConsentAsync(AccountModel account, CancellationToken ct = default);
 
+    Task<OAuthResult> ConnectGoogleCalendarAsync(string loginHint, CancellationToken ct = default) =>
+        throw new System.NotSupportedException("Google Calendar linking is not available.");
+
+    Task DisconnectGoogleCalendarAsync(string username) => Task.CompletedTask;
+
     Task SignOutAsync(AccountModel account);
 }

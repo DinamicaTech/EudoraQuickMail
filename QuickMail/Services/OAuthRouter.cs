@@ -93,6 +93,12 @@ public class OAuthRouter : IOAuthService
             : _microsoft.RequestCalendarConsentAsync(account, ct);
     }
 
+    public Task<OAuthResult> ConnectGoogleCalendarAsync(string loginHint, CancellationToken ct = default)
+        => _google.AuthorizeCalendarAsync(loginHint, ct);
+
+    public Task DisconnectGoogleCalendarAsync(string username)
+        => _google.SignOutCalendarAsync(username);
+
     public Task SignOutAsync(AccountModel account)
     {
         return account.AuthType == AuthType.OAuth2Google

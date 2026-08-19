@@ -26,5 +26,11 @@ public interface IGoogleOAuthService
     /// </summary>
     Task<OAuthResult> AuthorizeContactsAsync(string loginHint, CancellationToken ct = default);
 
+    Task<OAuthResult> AuthorizeCalendarAsync(string loginHint, CancellationToken ct = default) =>
+        Task.FromException<OAuthResult>(new System.NotSupportedException());
+    Task<string> GetCalendarAccessTokenAsync(string username, CancellationToken ct = default) =>
+        GetAccessTokenAsync(username, ct);
+    Task SignOutCalendarAsync(string username) => Task.CompletedTask;
+
     Task SignOutAsync(string username);
 }

@@ -60,7 +60,7 @@ public sealed class GoogleCalendarClient : IDisposable
         string? pageToken = null;
         do
         {
-            var token = await _oauth.GetAccessTokenAsync(username, ct);
+            var token = await _oauth.GetCalendarAccessTokenAsync(username, ct);
             var url = $"{_baseUrl}/users/me/calendarList?maxResults=250" +
                       (string.IsNullOrEmpty(pageToken) ? string.Empty : $"&pageToken={Uri.EscapeDataString(pageToken)}");
 
@@ -102,7 +102,7 @@ public sealed class GoogleCalendarClient : IDisposable
         string? pageToken = null;
         do
         {
-            var token = await _oauth.GetAccessTokenAsync(username, ct);
+            var token = await _oauth.GetCalendarAccessTokenAsync(username, ct);
             var url = $"{_baseUrl}/{basePath}" +
                       (string.IsNullOrEmpty(pageToken) ? string.Empty : $"&pageToken={Uri.EscapeDataString(pageToken)}");
 
@@ -150,7 +150,7 @@ public sealed class GoogleCalendarClient : IDisposable
     internal async Task DeleteEventAsync(
         string username, string eventId, string calendarId = "primary", CancellationToken ct = default)
     {
-        var token = await _oauth.GetAccessTokenAsync(username, ct);
+        var token = await _oauth.GetCalendarAccessTokenAsync(username, ct);
         using var req = new HttpRequestMessage(
             HttpMethod.Delete,
             $"{_baseUrl}/calendars/{Uri.EscapeDataString(calendarId)}/events/{Uri.EscapeDataString(eventId)}");
@@ -169,7 +169,7 @@ public sealed class GoogleCalendarClient : IDisposable
     private async Task<GoogleCalendarEvent> SendWriteAsync(
         string username, HttpMethod method, string path, GoogleEventWriteBody body, CancellationToken ct)
     {
-        var token = await _oauth.GetAccessTokenAsync(username, ct);
+        var token = await _oauth.GetCalendarAccessTokenAsync(username, ct);
         using var req = new HttpRequestMessage(method, $"{_baseUrl}/{path}");
         req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
         req.Content = JsonContent.Create(body, options: WriteJsonOpts);

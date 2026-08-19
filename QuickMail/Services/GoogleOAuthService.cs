@@ -51,6 +51,9 @@ public partial class GoogleOAuthService : IGoogleOAuthService
     private static string TokenKey(string username)
         => $"QuickMail:GoogleToken:{username.ToLowerInvariant()}";
 
+    private static string CalendarTokenKey(string username)
+        => $"QuickMail:GoogleCalendarToken:{username.ToLowerInvariant()}";
+
     private readonly ICredentialService _credentialService;
 
     // In-memory cache: lowercase username → live UserCredential (holds access token + auto-refresh).
@@ -63,7 +66,8 @@ public partial class GoogleOAuthService : IGoogleOAuthService
         _credentialService = credentialService;
     }
 
-    private static GoogleAuthorizationCodeFlow CreateFlow(string[]? scopes, IDataStore? dataStore = null)
+    private static GoogleAuthorizationCodeFlow CreateFlow(string[]? scopes, IDataStore? dataStore = null,
+                                                           bool forceConsent = false)
     {
         return new GoogleAuthorizationCodeFlow(new GoogleAuthorizationCodeFlow.Initializer
         {
@@ -74,6 +78,8 @@ public partial class GoogleOAuthService : IGoogleOAuthService
             },
             Scopes    = scopes,
             DataStore = dataStore ?? new NoOpDataStore(),
+            IncludeGrantedScopes = true,
+            Prompt = forceConsent ? "consent" : null,
         });
     }
 
@@ -107,6 +113,43 @@ public partial class GoogleOAuthService : IGoogleOAuthService
 
     public Task<OAuthResult> AuthorizeContactsAsync(string loginHint, CancellationToken ct = default)
         => AuthorizeInteractiveAsync(loginHint, MailContactsAndCalendarScopes, ct);
+
+    public Task<OAuthResult> AuthorizeCalendarAsync(string loginHint, CancellationToken ct = default)
+        => AuthorizeCalendarInteractiveAsync(loginHint, ct);
+
+    public async Task<string> GetCalendarAccessTokenAsync(string username, CancellationToken ct = default)
+    {
+        var refreshToken = _credentialService.GetSecret(CalendarTokenKey(username));
+        if (string.IsNullOrEmpty(refreshToken))
+            return await GetAccessTokenAsync(username, ct); // existing Google-mail authorization
+        var credential = new UserCredential(CreateFlow(null, new NoOpDataStore()), username,
+            new TokenResponse { RefreshToken = refreshToken });
+        return await credential.GetAccessTokenForRequestAsync(cancellationToken: ct);
+    }
+
+    private async Task<OAuthResult> AuthorizeCalendarInteractiveAsync(string loginHint, CancellationToken ct)
+    {
+        var scopes = new[] { "openid", "email", CalendarScopes[0] };
+        // prompt=consent guarantees a refresh token even if this Google identity previously
+        // authorized QuickMail for Gmail or contacts; the independent calendar connection must
+        // survive an application restart rather than relying on the short-lived access token.
+        var flow = CreateFlow(scopes, new NoOpDataStore(), forceConsent: true);
+        var credential = await new AuthorizationCodeInstalledApp(flow, new LocalServerCodeReceiver())
+            .AuthorizeAsync(string.IsNullOrWhiteSpace(loginHint) ? "calendar-user" : loginHint, ct);
+        var email = ExtractEmailFromIdToken(credential.Token.IdToken) ?? loginHint;
+        if (string.IsNullOrWhiteSpace(email))
+            throw new InvalidOperationException("Google sign-in completed but no calendar identity was returned.");
+        if (string.IsNullOrWhiteSpace(credential.Token.RefreshToken))
+            throw new InvalidOperationException("Google did not return an offline calendar token. Please reconnect and grant access.");
+        _credentialService.SaveSecret(CalendarTokenKey(email), credential.Token.RefreshToken);
+        return new OAuthResult(await credential.GetAccessTokenForRequestAsync(cancellationToken: ct), email);
+    }
+
+    public Task SignOutCalendarAsync(string username)
+    {
+        _credentialService.DeleteSecret(CalendarTokenKey(username));
+        return Task.CompletedTask;
+    }
 
     private async Task<OAuthResult> AuthorizeInteractiveAsync(string loginHint, string[] scopes, CancellationToken ct)
     {

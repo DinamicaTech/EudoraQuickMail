@@ -148,6 +148,16 @@ public partial class AccountModel : ObservableObject
     public bool SyncCalendar { get; set; } = false;
 
     /// <summary>
+    /// Optional calendar identity linked independently of the mail transport. "google" lets a
+    /// POP3/SMTP, local archive, or other account own a Google Calendar connection without changing
+    /// how that account sends or receives mail. Empty keeps the provider-native behaviour.
+    /// </summary>
+    public string? CalendarProvider { get; set; }
+
+    /// <summary>Email address confirmed by the calendar provider during OAuth sign-in.</summary>
+    public string? CalendarIdentity { get; set; }
+
+    /// <summary>
     /// Plain-text signature appended to new messages and replies/forwards.
     /// Empty string means no signature. Stored in accounts.json.
     /// </summary>

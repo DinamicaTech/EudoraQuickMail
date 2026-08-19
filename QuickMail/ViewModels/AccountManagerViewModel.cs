@@ -106,9 +106,25 @@ public partial class AccountManagerViewModel : AccountEditorViewModel
     /// accounts show no checkbox.
     /// </summary>
     public bool CanSyncCalendar =>
-        _graphCalendarSync != null && SelectedAccount is { IsShared: false } acct &&
-        (acct.AuthType is AuthType.OAuth2Microsoft or AuthType.OAuth2Google
-         || ProviderCatalog.IsICloud(acct));
+        _graphCalendarSync != null && SelectedAccount is { IsShared: false };
+
+    public string CalendarConnectionText => SelectedAccount switch
+    {
+        { CalendarProvider: "google", CalendarIdentity: { Length: > 0 } identity }
+            => $"Google Calendar: {identity}",
+        { AuthType: AuthType.OAuth2Google } account => $"Google Calendar: {account.Username}",
+        { AuthType: AuthType.OAuth2Microsoft } => "Microsoft Calendar (mail identity)",
+        { } account when ProviderCatalog.IsICloud(account) => "iCloud Calendar (account credentials)",
+        _ => "No calendar connected",
+    };
+
+    public bool HasIndependentGoogleCalendar =>
+        string.Equals(SelectedAccount?.CalendarProvider, "google", StringComparison.OrdinalIgnoreCase)
+        && !string.IsNullOrWhiteSpace(SelectedAccount?.CalendarIdentity);
+
+    public bool CanConnectGoogleCalendar => SelectedAccount is { IsShared: false } account
+        && account.AuthType is not (AuthType.OAuth2Microsoft or AuthType.OAuth2Google)
+        && !ProviderCatalog.IsICloud(account);
 
     protected override bool IsGoogleAuthEnabled => _featureGate.IsEnabled(FeatureFlag.GoogleAuth);
 
@@ -192,6 +208,9 @@ public partial class AccountManagerViewModel : AccountEditorViewModel
         Signature = value.Signature;
         SyncContacts = value.SyncContacts;
         SyncCalendar = value.SyncCalendar;
+        OnPropertyChanged(nameof(CalendarConnectionText));
+        OnPropertyChanged(nameof(HasIndependentGoogleCalendar));
+        OnPropertyChanged(nameof(CanConnectGoogleCalendar));
         StatusText = string.Empty;
         // These are the account's saved values, not something typed just now — clear the edit flag so
         // switching between accounts doesn't look like a hand edit. Advanced starts collapsed; the
@@ -290,6 +309,17 @@ public partial class AccountManagerViewModel : AccountEditorViewModel
             if (enabled)
             {
                 if (!CanSyncCalendar) return; // box is hidden for these accounts; defensive
+                if (account.AuthType is not (AuthType.OAuth2Microsoft or AuthType.OAuth2Google)
+                    && !ProviderCatalog.IsICloud(account)
+                    && !HasIndependentGoogleCalendar)
+                {
+                    StatusText = "Opening Google to connect a calendar…";
+                    var linked = await _oauth.ConnectGoogleCalendarAsync(account.Username);
+                    account.CalendarProvider = "google";
+                    account.CalendarIdentity = linked.Username;
+                    OnPropertyChanged(nameof(CalendarConnectionText));
+                    OnPropertyChanged(nameof(HasIndependentGoogleCalendar));
+                }
                 account.SyncCalendar = true;
                 // Only Microsoft needs an explicit calendar-scope consent; Google's is granted at
                 // mail sign-in and iCloud uses the account's app-specific password — neither prompts,
@@ -325,6 +355,48 @@ public partial class AccountManagerViewModel : AccountEditorViewModel
         }
     }
 
+    [RelayCommand]
+    private async Task ConnectGoogleCalendarAsync()
+    {
+        if (SelectedAccount is not { IsShared: false } account) return;
+        try
+        {
+            StatusText = "Opening Google to connect a calendar…";
+            var linked = await _oauth.ConnectGoogleCalendarAsync(account.CalendarIdentity ?? account.Username);
+            account.CalendarProvider = "google";
+            account.CalendarIdentity = linked.Username;
+            account.SyncCalendar = true;
+            SyncCalendar = true;
+            _accountService.SaveAccounts([.. Accounts]);
+            OnPropertyChanged(nameof(CalendarConnectionText));
+            OnPropertyChanged(nameof(HasIndependentGoogleCalendar));
+            var count = _graphCalendarSync == null ? 0 : await _graphCalendarSync.SyncAccountCalendarAsync(account);
+            StatusText = $"Google Calendar connected as {linked.Username}. {count:N0} events synchronized.";
+        }
+        catch (Exception ex)
+        {
+            StatusText = $"Google Calendar was not connected: {ex.Message}";
+            LogService.Log("ConnectGoogleCalendar", ex);
+        }
+    }
+
+    [RelayCommand]
+    private async Task DisconnectGoogleCalendarAsync()
+    {
+        if (SelectedAccount is not { } account || !HasIndependentGoogleCalendar) return;
+        var identity = account.CalendarIdentity!;
+        await _oauth.DisconnectGoogleCalendarAsync(identity);
+        account.CalendarProvider = null;
+        account.CalendarIdentity = null;
+        account.SyncCalendar = false;
+        SyncCalendar = false;
+        _accountService.SaveAccounts([.. Accounts]);
+        if (_graphCalendarSync != null) await _graphCalendarSync.RemoveAccountCalendarAsync(account.Id);
+        OnPropertyChanged(nameof(CalendarConnectionText));
+        OnPropertyChanged(nameof(HasIndependentGoogleCalendar));
+        StatusText = "Google Calendar disconnected. No remote events were deleted.";
+    }
+
     public AddAccountViewModel CreateAddAccountViewModel() =>
         new(_featureGate, MailService, OAuthService, Catalog, _autoDiscover, _sendMail);
 
@@ -347,6 +419,9 @@ public partial class AccountManagerViewModel : AccountEditorViewModel
         edited.IsDefault = original.IsDefault;
         edited.ArchiveFolderFullName = original.ArchiveFolderFullName;
         edited.TenantId = original.TenantId;
+        edited.CalendarProvider = original.CalendarProvider;
+        edited.CalendarIdentity = original.CalendarIdentity;
+        edited.SyncCalendar = original.SyncCalendar;
         if (edited.BackendKind != BackendKind.Pop3Smtp && !string.IsNullOrEmpty(password))
             _credentials.SavePassword(edited.Id, password);
         Accounts[index] = edited;

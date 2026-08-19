@@ -544,6 +544,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
            && (a.BackendKind == BackendKind.MicrosoftGraph
                || a.AuthType == AuthType.OAuth2Microsoft
                || a.AuthType == AuthType.OAuth2Google
+               || string.Equals(a.CalendarProvider, "google", StringComparison.OrdinalIgnoreCase)
                || ProviderCatalog.IsICloud(a));
 
     // Sentinel prefix for per-account "All Mail" virtual folders, e.g. "\u0000AccountMail:{guid}".
