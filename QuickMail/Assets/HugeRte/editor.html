@@ -223,6 +223,19 @@
       });
     };
 
+    window.quickmailReplaceSignature = signatureBase64 => {
+      if (!quickMailEditor) return;
+      const body = quickMailEditor.getBody();
+      body.querySelectorAll('[data-quickmail-signature]').forEach(node => node.remove());
+      if (signatureBase64) {
+        const holder = body.ownerDocument.createElement('div');
+        holder.innerHTML = decodeUtf8Base64(signatureBase64);
+        while (holder.firstChild) body.appendChild(holder.firstChild);
+      }
+      quickMailEditor.focus();
+      emitContent();
+    };
+
     window.quickmailExec = (command, value) => {
       if (!quickMailEditor) return;
       quickMailEditor.execCommand(command, false, value ?? null);

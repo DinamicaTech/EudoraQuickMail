@@ -722,7 +722,7 @@
         <!--  F6 pane ring: AccountList(1) → FolderList(2) → MessageList(3) → Toolbar → StatusBar → wrap -->
         <!--  Arrow keys navigate within the focused pane (TabNavigation=Once on each)      -->
         <!--  Enter triggers action; focus never changes unless user does it                 -->
-        <!--  Ctrl+0 = toolbar | Ctrl+1/2/3 = jump directly to any pane                    -->
+        <!--  Ctrl+0 = Sent/Outbox | Ctrl+1 = Inbox; Ctrl+Alt+1/2/3 = pane navigation       -->
         <Grid Grid.Row="2">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition x:Name="FolderPaneColumn" Width="200" MinWidth="120"/>

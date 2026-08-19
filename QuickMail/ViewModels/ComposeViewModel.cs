@@ -157,9 +157,6 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
     private string _appliedPlainSignatureBlock = string.Empty;
     private bool _seedComplete;
 
-    private const string HtmlSignatureStart = "<!--quickmail-signature-start-->";
-    private const string HtmlSignatureEnd = "<!--quickmail-signature-end-->";
-
     public bool IsDirty => _isDirty;
     public bool IsSent  => _isSent;
 
@@ -293,12 +290,10 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
 
         if (CurrentMode == ComposeMode.Html)
         {
-            var currentHtml = RichBodyProvider?.Invoke().Html ?? string.Empty;
-            currentHtml = RemoveMarkedHtmlSignature(currentHtml);
-            if (account != null && !string.IsNullOrWhiteSpace(account.Signature))
-                currentHtml = AppendBeforeClosingBody(currentHtml,
-                    BuildHtmlSignatureBlock(account, HtmlStripper.ToPlainText(currentHtml)));
-            LoadHtmlIntoEditorRequested?.Invoke(currentHtml);
+            var signature = account != null && !string.IsNullOrWhiteSpace(account.Signature)
+                ? BuildHtmlSignatureBlock(account, RichBodyProvider?.Invoke().PlainText ?? string.Empty)
+                : null;
+            ReplaceHtmlSignatureRequested?.Invoke(signature);
         }
 
         _isDirty = wasDirty;
@@ -320,15 +315,7 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
                 .Replace("\r\n", "<br>", StringComparison.Ordinal)
                 .Replace("\n", "<br>", StringComparison.Ordinal);
         var separator = string.IsNullOrWhiteSpace(body) ? string.Empty : "<br>-- <br>";
-        return $"{HtmlSignatureStart}<div class=\"quickmail-signature\">{separator}{signatureFragment}</div>{HtmlSignatureEnd}";
-    }
-
-    private static string RemoveMarkedHtmlSignature(string html)
-    {
-        var start = html.IndexOf(HtmlSignatureStart, StringComparison.Ordinal);
-        if (start < 0) return html;
-        var end = html.IndexOf(HtmlSignatureEnd, start, StringComparison.Ordinal);
-        return end < 0 ? html[..start] : html.Remove(start, end + HtmlSignatureEnd.Length - start);
+        return $"<div class=\"quickmail-signature\" data-quickmail-signature=\"true\">{separator}{signatureFragment}</div>";
     }
 
     private static string AppendBeforeClosingBody(string html, string fragment)
@@ -628,6 +615,22 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
     /// The View converts the HTML fragment into the editor document.
     /// </summary>
     public event Action<string>? LoadHtmlIntoEditorRequested;
+
+    /// <summary>Raised when changing From must replace the signature in the live HTML editor.</summary>
+    public event Action<string?>? ReplaceHtmlSignatureRequested;
+
+    /// <summary>
+    /// Loads the rich body prepared during Seed when the window was constructed directly in HTML
+    /// mode. In that path SetMode(Html) is intentionally a no-op, so the View calls this once.
+    /// </summary>
+    public bool LoadSeededHtmlBody()
+    {
+        if (string.IsNullOrWhiteSpace(_seededHtmlBody)) return false;
+        var html = _seededHtmlBody;
+        _seededHtmlBody = null;
+        LoadHtmlIntoEditorRequested?.Invoke(html);
+        return true;
+    }
 
     /// <summary>
     /// Raised to insert plain text (e.g. a template) at the rich editor's caret

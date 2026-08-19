@@ -1861,6 +1861,7 @@ public partial class ComposeWindow : Window
         RichBodyBox.Document.PagePadding = new Thickness(4);
 
         _vm.LoadHtmlIntoEditorRequested += html => _ = LoadHtmlIntoWebEditorAsync(html);
+        _vm.ReplaceHtmlSignatureRequested += html => _ = ReplaceHtmlSignatureAsync(html);
 
         _vm.InsertTextIntoEditorRequested += text =>
         {
@@ -2057,6 +2058,16 @@ public partial class ComposeWindow : Window
             $"window.quickmailLoad({JsonSerializer.Serialize(base64)})");
     }
 
+    private async Task ReplaceHtmlSignatureAsync(string? signatureHtml)
+    {
+        if (!_htmlEditorReady || HtmlBodyEditor.CoreWebView2 is null) return;
+        var base64 = signatureHtml is null
+            ? null
+            : Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(signatureHtml));
+        await HtmlBodyEditor.CoreWebView2.ExecuteScriptAsync(
+            $"window.quickmailReplaceSignature({JsonSerializer.Serialize(base64)})");
+    }
+
     /// <summary>
     /// Applies the initial editing mode after the View's event handlers are wired:
     /// drafts restore their saved mode; templates stay plain text; new composes use the configured default.
@@ -2076,6 +2087,11 @@ public partial class ComposeWindow : Window
             targetMode = _configService.Load().DefaultComposeMode;
 
         if (targetMode == ComposeMode.PlainText) return;
+        if (targetMode == ComposeMode.Html && _vm.CurrentMode == ComposeMode.Html)
+        {
+            _vm.LoadSeededHtmlBody();
+            return;
+        }
         _vm.SetMode(targetMode);
     }
 

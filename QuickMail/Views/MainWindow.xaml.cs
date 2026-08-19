@@ -1802,11 +1802,15 @@ public partial class MainWindow : Window
         {
             switch (key)
             {
-                case Key.D0: ToolbarFirstButton.Focus(); e.Handled = true; return;
+                case Key.D0:
+                    e.Handled = true;
+                    await OpenShortcutFolderAsync(MainViewModel.AllSentFolder);
+                    return;
 
                 case Key.D1:
-                    if (_vm.ShowTabStrip) { _vm.ActivateTabByIndex(1); e.Handled = true; return; }
-                    AccountList.Focus(); e.Handled = true; return;
+                    e.Handled = true;
+                    await OpenShortcutFolderAsync(MainViewModel.AllInboxesFolder);
+                    return;
 
                 case Key.D2:
                     if (_vm.ShowTabStrip) { _vm.ActivateTabByIndex(2); e.Handled = true; return; }
@@ -2080,6 +2084,13 @@ public partial class MainWindow : Window
             await _vm.SelectFolderCommand.ExecuteAsync(node.Folder);
             FocusActiveMessagePanel();
         }
+    }
+
+    private async Task OpenShortcutFolderAsync(MailFolderModel folder)
+    {
+        await _vm.SelectFolderCommand.ExecuteAsync(folder);
+        SyncFolderTreeSelection(focusNode: false);
+        FocusActiveMessagePanel();
     }
 
     private async void AllMessagesAccount_Click(object sender, RoutedEventArgs e)
