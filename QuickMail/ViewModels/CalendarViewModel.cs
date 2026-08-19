@@ -458,7 +458,9 @@ public partial class CalendarViewModel : ObservableObject
         else
         {
             var google = (_graphAccountsProvider?.Invoke() ?? [])
-                .FirstOrDefault(a => a.SyncCalendar && a.AuthType == AuthType.OAuth2Google);
+                .FirstOrDefault(a => a.SyncCalendar
+                    && (a.AuthType == AuthType.OAuth2Google
+                        || string.Equals(a.CalendarProvider, "google", StringComparison.OrdinalIgnoreCase)));
             if (google != null) editor.SelectTarget(google.Id, null);
         }
         editor.Saved += evt => _ = SaveNewEventAsync(evt);

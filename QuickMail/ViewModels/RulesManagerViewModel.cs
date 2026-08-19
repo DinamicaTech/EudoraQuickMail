@@ -126,7 +126,7 @@ public partial class RulesManagerViewModel : ObservableObject
     public bool HasRules => Rules.Count > 0;
 
     public string CurrentFolderName { get; }
-    public string ApplyToCurrentFolderLabel => $"Apply to {CurrentFolderName}";
+    public string ApplyToCurrentFolderLabel => $"Save and apply to {CurrentFolderName}";
 
     /// <summary>
     /// Account options for the ComboBox. Every rule belongs to exactly one account — the "All
@@ -399,6 +399,9 @@ public partial class RulesManagerViewModel : ObservableObject
         {
             var matched = await ApplyToCurrentFolderRequested.Invoke(SelectedRule);
             StatusText = $"Applied rule to {CurrentFolderName}: {matched:N0} message{(matched == 1 ? "" : "s")} matched.";
+            Announce(StatusText, AnnouncementCategory.Result);
+            CloseRequested?.Invoke();
+            return;
         }
         catch (Exception ex)
         {

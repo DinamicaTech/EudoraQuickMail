@@ -282,7 +282,8 @@
                         <Button Content="{Binding ApplyToCurrentFolderLabel}"
                                 Command="{Binding ApplyToCurrentFolderCommand}"
                                 MinWidth="110" Margin="0,0,8,0"
-                                AutomationProperties.Name="{Binding ApplyToCurrentFolderLabel}"/>
+                                AutomationProperties.Name="{Binding ApplyToCurrentFolderLabel}"
+                                ToolTip="Save this rule, apply it to every message in the current folder, and close"/>
                         <Button Content="Save" Command="{Binding SaveRuleCommand}"
                                 MinWidth="60" Margin="0,0,8,0"
                                 AutomationProperties.Name="Save rule"
