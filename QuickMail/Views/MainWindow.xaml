@@ -1287,7 +1287,7 @@
                         <ListBox x:Name="MonthGrid"
                                  Grid.Row="2"
                                  AutomationProperties.Name="Month grid"
-                                 Visibility="{Binding CalendarVm.IsMonthView, Converter={StaticResource BoolToVisibilityConverter}}"
+                                 Visibility="Collapsed"
                                  ItemsSource="{Binding CalendarVm.MonthCells}"
                                  SelectedItem="{Binding CalendarVm.SelectedMonthCell, Mode=TwoWay}"
                                  BorderThickness="0"
@@ -1326,7 +1326,7 @@
                         <ListView x:Name="CalendarList"
                                   Grid.Row="2"
                                   AutomationProperties.Name="Calendar events"
-                                  Visibility="{Binding CalendarVm.IsListView, Converter={StaticResource BoolToVisibilityConverter}}"
+                                  Visibility="{Binding CalendarVm.IsAgendaView, Converter={StaticResource BoolToVisibilityConverter}}"
                                   ItemsSource="{Binding CalendarVm.Events}"
                                   SelectedItem="{Binding CalendarVm.SelectedEvent, Mode=TwoWay}"
                                   BorderThickness="0"
@@ -1367,6 +1367,14 @@
                                 </GridView>
                             </ListView.View>
                         </ListView>
+
+                        <!-- FullCalendar Standard renders the interactive Day / Week / Month views.
+                             The bundle is vendored locally: calendar browsing remains available offline. -->
+                        <wv2:WebView2 x:Name="CalendarWebView"
+                                      Grid.Row="2"
+                                      Visibility="{Binding CalendarVm.IsAgendaView, Converter={StaticResource InverseBoolToVisibilityConverter}}"
+                                      AutomationProperties.Name="Interactive calendar"
+                                      NavigationCompleted="CalendarWebView_NavigationCompleted"/>
 
                         <GridSplitter Grid.Row="3" Height="4" HorizontalAlignment="Stretch"
                                       ResizeBehavior="PreviousAndNext" ResizeDirection="Rows"

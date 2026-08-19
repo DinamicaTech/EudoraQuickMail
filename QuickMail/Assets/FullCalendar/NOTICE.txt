@@ -1,0 +1,8 @@
+FullCalendar Standard 6.1.20
+Copyright (c) Adam Shaw
+
+Licensed under the MIT License:
+https://github.com/fullcalendar/fullcalendar-workspace/blob/v6.1.20/LICENSE.md
+
+The vendored index.global.min.js file is the unmodified FullCalendar Standard global bundle
+published as fullcalendar@6.1.20. Premium resource/timeline plugins are not included.

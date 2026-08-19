@@ -132,6 +132,8 @@ public partial class MainWindow : Window
     private UIElement? _announceTarget;
     private bool _webViewReady;
     private CoreWebView2Environment? _webViewEnvironment;
+    private bool _calendarWebViewReady;
+    private bool _calendarWebViewInitializing;
     private readonly TypeAheadPrefixTracker _typeAhead = new();
     private int _messageBodyRenderVersion;
 
@@ -404,6 +406,13 @@ public partial class MainWindow : Window
             vm.CalendarVm.ListFocusRequested += () =>
                 Dispatcher.InvokeAsync(FocusCalendarList, DispatcherPriority.Input);
             vm.CalendarVm.ExportRequested += SaveAppointmentIcs;
+            vm.CalendarVm.Events.CollectionChanged += (_, _) => _ = RefreshFullCalendarAsync();
+            vm.CalendarVm.PropertyChanged += (_, e) =>
+            {
+                if (e.PropertyName is nameof(CalendarViewModel.ViewMode)
+                    or nameof(CalendarViewModel.ReferenceDate))
+                    _ = RefreshFullCalendarAsync();
+            };
         }
 
         vm.PropertyChanged += async (_, e) =>
@@ -421,6 +430,9 @@ public partial class MainWindow : Window
                 && !_webViewReady
                 && _webViewEnvironment != null)
                 _ = InitReadingPaneWebViewAsync();
+
+            if (e.PropertyName == nameof(MainViewModel.IsCalendarView) && _vm.IsCalendarView)
+                _ = InitCalendarWebViewAsync();
         };
 
         // Re-focus the active message panel whenever the message collections are replaced
@@ -1727,6 +1739,9 @@ public partial class MainWindow : Window
             FocusMessageListFirstItem();
             return;
         }
+
+        if (_vm.IsCalendarView)
+            await InitCalendarWebViewAsync();
 
         if (key == Key.F && modifiers == ModifierKeys.Shift
             && _vm.IsMessagesView && MessageList.SelectedItems.Count > 0
@@ -3351,6 +3366,141 @@ public partial class MainWindow : Window
         AccessibilityHelper.Announce(this,
             $"{count} message{(count == 1 ? "" : "s")} selected.",
             category: AnnouncementCategory.Result);
+    }
+
+    // One-time setup of FullCalendar. Day/week/month are browser-rendered, while Agenda remains
+    // the native accessible list. The JS bundle is shipped locally and never contacts a CDN.
+    private async Task InitCalendarWebViewAsync()
+    {
+        if (_calendarWebViewReady || _calendarWebViewInitializing || _webViewEnvironment == null)
+            return;
+
+        _calendarWebViewInitializing = true;
+        try
+        {
+            await CalendarWebView.EnsureCoreWebView2Async(_webViewEnvironment);
+            CalendarWebView.CoreWebView2.Settings.AreDefaultContextMenusEnabled = false;
+            CalendarWebView.CoreWebView2.Settings.AreDevToolsEnabled = false;
+            CalendarWebView.CoreWebView2.Settings.IsStatusBarEnabled = false;
+            CalendarWebView.CoreWebView2.WebMessageReceived += CalendarWebView_WebMessageReceived;
+            CalendarWebView.CoreWebView2.ProcessFailed += (_, args) =>
+                LogService.Log($"[ERROR] FullCalendar WebView2 failed: {args.ProcessFailedKind}, {args.Reason}");
+
+            var bundlePath = Path.Combine(AppContext.BaseDirectory, "Assets", "FullCalendar", "index.global.min.js");
+            var bundle = await File.ReadAllTextAsync(bundlePath);
+            CalendarWebView.NavigateToString(BuildFullCalendarHtml(bundle));
+        }
+        catch (Exception ex)
+        {
+            LogService.Log("FullCalendar initialization failed", ex);
+            CalendarWebView.Visibility = Visibility.Collapsed;
+            CalendarList.Visibility = Visibility.Visible;
+        }
+        finally
+        {
+            _calendarWebViewInitializing = false;
+        }
+    }
+
+    private static string BuildFullCalendarHtml(string bundle) => $$$"""
+        <!doctype html><html><head><meta charset="utf-8"><style>
+        :root{color-scheme:light dark;--fc-border-color:#d6dce5;--fc-button-bg-color:#0f6cbd;
+        --fc-button-border-color:#0f6cbd;--fc-button-hover-bg-color:#115ea3;--fc-button-active-bg-color:#0c3b5e;
+        --fc-today-bg-color:rgba(15,108,189,.10);font-family:"Segoe UI",Arial,sans-serif}
+        html,body,#calendar{height:100%;margin:0}body{box-sizing:border-box;padding:8px;background:Canvas;color:CanvasText}
+        .fc{font-size:13px}.fc .fc-toolbar-title{font-size:1.35rem;font-weight:600}
+        .fc .fc-button{border-radius:3px;box-shadow:none}.fc .fc-event{border-radius:3px;padding:1px 3px;cursor:pointer}
+        .fc .fc-col-header-cell-cushion,.fc .fc-daygrid-day-number{color:CanvasText;text-decoration:none}
+        .fc .fc-daygrid-day.fc-day-today{background:rgba(15,108,189,.10)}
+        @media(prefers-color-scheme:dark){:root{--fc-border-color:#454545}.fc-theme-standard td,.fc-theme-standard th{border-color:#454545}}
+        </style><script>{{{bundle}}}</script></head><body><div id="calendar"></div><script>
+        const calendar=new FullCalendar.Calendar(document.getElementById('calendar'),{
+          initialView:'dayGridMonth',height:'100%',nowIndicator:true,navLinks:true,selectable:true,
+          firstDay:1,dayMaxEvents:true,eventDisplay:'block',
+          headerToolbar:{left:'prev,next today',center:'title',right:'timeGridDay,timeGridWeek,dayGridMonth'},
+          buttonText:{today:'Today',day:'Day',week:'Week',month:'Month'},
+          eventClick:i=>chrome.webview.postMessage({type:'select',id:i.event.id}),
+          eventDidMount:i=>i.el.addEventListener('dblclick',()=>chrome.webview.postMessage({type:'open',id:i.event.id})),
+          dateClick:i=>chrome.webview.postMessage({type:'date',date:i.dateStr}),
+          datesSet:i=>{if(!window.hostUpdating)chrome.webview.postMessage({type:'navigate',view:i.view.type,date:calendar.getDate().toISOString()})}
+        });
+        calendar.render();
+        window.setCalendarData=p=>{window.hostUpdating=true;calendar.changeView(p.view,p.date);calendar.removeAllEvents();calendar.addEventSource(p.events);window.hostUpdating=false};
+        </script></body></html>
+        """;
+
+    private async void CalendarWebView_NavigationCompleted(object sender, CoreWebView2NavigationCompletedEventArgs e)
+    {
+        if (!e.IsSuccess) return;
+        _calendarWebViewReady = true;
+        await RefreshFullCalendarAsync();
+    }
+
+    private async Task RefreshFullCalendarAsync()
+    {
+        if (!_calendarWebViewReady || CalendarWebView.CoreWebView2 == null || _vm.CalendarVm == null)
+            return;
+
+        var calendar = _vm.CalendarVm;
+        var view = calendar.ViewMode switch
+        {
+            CalendarViewMode.Day => "timeGridDay",
+            CalendarViewMode.Week => "timeGridWeek",
+            _ => "dayGridMonth",
+        };
+        var events = calendar.VisibleEvents.Where(e => e.StartTime.HasValue).Select((e, index) => new
+        {
+            id = index.ToString(CultureInfo.InvariantCulture),
+            title = string.IsNullOrWhiteSpace(e.Summary) ? "(no title)" : e.Summary,
+            start = e.StartTime!.Value.ToString("yyyy-MM-dd'T'HH:mm:ss", CultureInfo.InvariantCulture),
+            end = e.EndTime?.ToString("yyyy-MM-dd'T'HH:mm:ss", CultureInfo.InvariantCulture),
+            allDay = e.IsAllDay,
+            backgroundColor = e.IsCancelled ? "#a4262c" : e.IsGraph ? "#0f6cbd" : e.IsUserCreated ? "#107c10" : "#8764b8",
+            borderColor = "transparent"
+        }).ToArray();
+        var payload = JsonSerializer.Serialize(new
+        {
+            view,
+            date = calendar.ReferenceDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+            events
+        });
+        try { await CalendarWebView.CoreWebView2.ExecuteScriptAsync($"window.setCalendarData({payload})"); }
+        catch (Exception ex) { LogService.Log("FullCalendar refresh failed", ex); }
+    }
+
+    private void CalendarWebView_WebMessageReceived(object? sender, CoreWebView2WebMessageReceivedEventArgs args)
+    {
+        if (_vm.CalendarVm == null) return;
+        try
+        {
+            using var document = JsonDocument.Parse(args.WebMessageAsJson);
+            var root = document.RootElement;
+            var type = root.GetProperty("type").GetString();
+            if (type == "navigate" && DateTime.TryParse(root.GetProperty("date").GetString(), out var navigatedDate))
+            {
+                var requestedView = root.GetProperty("view").GetString();
+                if (requestedView == "timeGridDay") _vm.CalendarVm.ShowDayCommand.Execute(null);
+                else if (requestedView == "timeGridWeek") _vm.CalendarVm.ShowWeekCommand.Execute(null);
+                else _vm.CalendarVm.ShowMonthCommand.Execute(null);
+                _vm.CalendarVm.GoToDate(navigatedDate);
+                return;
+            }
+            if (type == "date" && DateTime.TryParse(root.GetProperty("date").GetString(), out var date))
+            {
+                _vm.CalendarVm.GoToDate(date);
+                return;
+            }
+
+            if (!root.TryGetProperty("id", out var idElement)
+                || !int.TryParse(idElement.GetString(), out var index)
+                || index < 0 || index >= _vm.CalendarVm.VisibleEvents.Count)
+                return;
+
+            var calendarEvent = _vm.CalendarVm.VisibleEvents[index];
+            _vm.CalendarVm.SelectedEvent = calendarEvent;
+            if (type == "open") ActivateSelectedCalendarEvent();
+        }
+        catch (Exception ex) { LogService.Log("FullCalendar message handling failed", ex); }
     }
 
     // One-time setup of the reading pane WebView2. Skipped at startup in Window mode;
