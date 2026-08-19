@@ -219,6 +219,7 @@ public class ConfigService : IConfigService
                     case "showcombinedviews": config.ShowCombinedViews = ParseBool(value); break;
                     case "showcalendar":      config.ShowCalendar      = ParseBool(value); break;
                     case "showaccountspanel": config.ShowAccountsPanel = ParseBool(value); break;
+                    case "showtodayagenda":   config.ShowTodayAgenda   = ParseBool(value); break;
                     case "syncdays":
                         if (int.TryParse(value, out var sd)) config.SyncDays = Math.Max(0, sd);
                         break;
@@ -360,10 +361,14 @@ public class ConfigService : IConfigService
                         if (double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var fpw))
                             config.Windowing.FolderPaneWidth = Math.Clamp(fpw, 120, 800);
                         break;
-                    case "accountpaneheight":
-                        if (double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var aph))
-                            config.Windowing.AccountPaneHeight = Math.Clamp(aph, 60, 800);
-                        break;
+                        case "accountpaneheight":
+                            if (double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var aph))
+                                config.Windowing.AccountPaneHeight = Math.Clamp(aph, 60, 800);
+                            break;
+                        case "todayagendaheight":
+                            if (double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var tah))
+                                config.Windowing.TodayAgendaHeight = Math.Clamp(tah, 80, 800);
+                            break;
                     case "readingpaneheight":
                         if (double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var rph))
                             config.Windowing.ReadingPaneHeight = Math.Clamp(rph, 120, 1200);
@@ -462,6 +467,10 @@ public class ConfigService : IConfigService
 
         sb.AppendLine($"ShowAccountsPanel = {(config.ShowAccountsPanel ? "on" : "off")}");
         sb.AppendLine("# Show the account selector above the unified folder tree.");
+        sb.AppendLine();
+
+        sb.AppendLine($"ShowTodayAgenda = {(config.ShowTodayAgenda ? "on" : "off")}");
+        sb.AppendLine("# Show today's compact appointment list above the folder tree.");
         sb.AppendLine();
 
         sb.AppendLine($"SyncDays = {config.SyncDays}");
@@ -819,6 +828,7 @@ public class ConfigService : IConfigService
         sb.AppendLine();
         sb.AppendLine($"FolderPaneWidth = {config.Windowing.FolderPaneWidth.ToString("0.##", CultureInfo.InvariantCulture)}");
         sb.AppendLine($"AccountPaneHeight = {config.Windowing.AccountPaneHeight.ToString("0.##", CultureInfo.InvariantCulture)}");
+        sb.AppendLine($"TodayAgendaHeight = {config.Windowing.TodayAgendaHeight.ToString("0.##", CultureInfo.InvariantCulture)}");
         sb.AppendLine($"ReadingPaneHeight = {config.Windowing.ReadingPaneHeight.ToString("0.##", CultureInfo.InvariantCulture)}");
         sb.AppendLine("# Persisted sizes of the main navigation panels.");
         sb.AppendLine();

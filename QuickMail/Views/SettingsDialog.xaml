@@ -128,6 +128,9 @@
                                 <CheckBox Content="Show _Accounts panel"
                                           IsChecked="{Binding ShowAccountsPanel, Mode=TwoWay}"
                                           Margin="0,6,0,0"/>
+                                <CheckBox Content="Show _Today agenda"
+                                          IsChecked="{Binding ShowTodayAgenda, Mode=TwoWay}"
+                                          Margin="0,6,0,0"/>
                             </StackPanel>
                         </GroupBox>
 

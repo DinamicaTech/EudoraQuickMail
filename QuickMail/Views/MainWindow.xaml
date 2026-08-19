@@ -737,6 +737,9 @@
                     <RowDefinition x:Name="AccountPaneRow" Height="*" MinHeight="60"/>
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
+                    <RowDefinition x:Name="TodayAgendaRow" Height="190" MinHeight="80"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
                     <RowDefinition Height="2*" MinHeight="80"/>
                 </Grid.RowDefinitions>
 
@@ -807,12 +810,58 @@
                               ResizeDirection="Rows" ResizeBehavior="PreviousAndNext"
                               DragCompleted="PaneSplitter_DragCompleted"/>
 
-                <TextBlock Grid.Row="3" Text="Folders" FontWeight="SemiBold" Padding="6,4"
+                <DockPanel x:Name="TodayAgendaHeader" Grid.Row="3" LastChildFill="True"
+                           Background="{DynamicResource Theme.ChromeBackground}">
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                        <Button Content="+" Width="26" Padding="2,0" ToolTip="New appointment"
+                                Click="TodayAgendaNew_Click" AutomationProperties.Name="New appointment"/>
+                        <Button Content="↻" Width="26" Padding="2,0" ToolTip="Refresh today"
+                                Click="TodayAgendaRefresh_Click" AutomationProperties.Name="Refresh today's agenda"/>
+                    </StackPanel>
+                    <TextBlock Text="{Binding CalendarVm.TodayAgendaTitle}" FontWeight="SemiBold" Padding="6,4"/>
+                </DockPanel>
+
+                <Grid x:Name="TodayAgendaPanel" Grid.Row="4">
+                    <TextBlock Text="No events today" HorizontalAlignment="Center" VerticalAlignment="Center"
+                               Foreground="{DynamicResource Theme.TextSecondary}"
+                               Visibility="{Binding CalendarVm.HasTodayEvents, Converter={StaticResource InverseBoolToVisibilityConverter}}"/>
+                    <ListBox x:Name="TodayAgendaList"
+                             ItemsSource="{Binding CalendarVm.TodayEvents}"
+                             SelectedItem="{Binding CalendarVm.SelectedEvent, Mode=TwoWay}"
+                             BorderThickness="0,0,1,0"
+                             MouseDoubleClick="TodayAgendaList_MouseDoubleClick"
+                             AutomationProperties.Name="Today's appointments">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <Grid Margin="3,2" ToolTip="{Binding DetailText}">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="{Binding CompactTimeDisplay}" MinWidth="72" Margin="0,0,6,0"
+                                               FontSize="{DynamicResource Theme.FontSizeSmall}"/>
+                                    <StackPanel Grid.Column="1">
+                                        <TextBlock Text="{Binding Summary}" TextTrimming="CharacterEllipsis"/>
+                                        <TextBlock Text="{Binding Location}" TextTrimming="CharacterEllipsis"
+                                                   Foreground="{DynamicResource Theme.TextSecondary}"
+                                                   FontSize="{DynamicResource Theme.FontSizeSmall}"/>
+                                    </StackPanel>
+                                </Grid>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                </Grid>
+
+                <GridSplitter x:Name="TodayAgendaSplitter" Grid.Row="5" Height="5" HorizontalAlignment="Stretch"
+                              ResizeDirection="Rows" ResizeBehavior="PreviousAndNext"
+                              DragCompleted="PaneSplitter_DragCompleted"/>
+
+                <TextBlock Grid.Row="6" Text="Folders" FontWeight="SemiBold" Padding="6,4"
                            Focusable="False"
                            Background="{DynamicResource Theme.ChromeBackground}"/>
 
                 <!-- True TreeView so screen readers announce level, expanded/collapsed state correctly. -->
-                <TreeView Grid.Row="4"
+                <TreeView Grid.Row="7"
                           x:Name="FolderList"
                           AutomationProperties.Name="Folder list"
                           ItemsSource="{Binding FolderTree}"

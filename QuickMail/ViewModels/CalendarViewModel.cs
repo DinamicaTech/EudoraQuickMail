@@ -83,6 +83,11 @@ public partial class CalendarViewModel : ObservableObject
     public IReadOnlyList<CalendarEvent> VisibleEvents => _filteredEvents;
     private List<CalendarEvent> _filteredEvents = [];
 
+    /// <summary>Today's appointments, independent of the full calendar's current view/filter.</summary>
+    public BatchObservableCollection<CalendarEvent> TodayEvents { get; } = [];
+    public bool HasTodayEvents => TodayEvents.Count > 0;
+    public string TodayAgendaTitle => $"Today — {DateTime.Today:ddd, d MMM}";
+
     [ObservableProperty]
     private bool _isTodayFilter;
 
@@ -806,6 +811,8 @@ public partial class CalendarViewModel : ObservableObject
             .Where(e => e.ResponseStatus != CalendarResponseStatus.Cancelled)
             .ToList();
 
+        RebuildTodayEvents(baseEvents);
+
         // The date window for the current view. Null = Agenda "all" (one-offs are not date-bounded).
         var monthGridStart = WeekStart(new DateTime(ReferenceDate.Year, ReferenceDate.Month, 1));
         (DateTime Start, DateTime End)? window = ViewMode switch
@@ -888,6 +895,37 @@ public partial class CalendarViewModel : ObservableObject
 
         if (ViewMode == CalendarViewMode.Month)
             RebuildMonthCells(monthGridStart);
+    }
+
+    private void RebuildTodayEvents(IReadOnlyList<CalendarEvent> baseEvents)
+    {
+        var start = DateTime.Today;
+        var end = start.AddDays(1);
+        var result = new List<CalendarEvent>();
+        foreach (var e in baseEvents)
+        {
+            var rule = e.IsRecurring ? RecurrenceRule.Parse(e.RecurrenceRule) : null;
+            if (rule != null && e.StartTime.HasValue)
+            {
+                var excluded = new HashSet<DateTime>(e.GetExDates());
+                foreach (var occurrence in RecurrenceExpander.Expand(e.StartTime.Value, rule, start, end))
+                    if (!excluded.Contains(occurrence)) result.Add(CloneOccurrence(e, occurrence));
+            }
+            else if (e.StartTime.HasValue && e.StartTime.Value < end
+                     && (e.EndTime ?? e.StartTime.Value) >= start)
+            {
+                result.Add(e);
+            }
+        }
+
+        var ordered = result.OrderByDescending(e => e.IsAllDay)
+            .ThenBy(e => e.StartTimeTicks ?? long.MaxValue).ToList();
+        using (TodayEvents.BeginBatchScope())
+        {
+            TodayEvents.Clear();
+            foreach (var evt in ordered) TodayEvents.Add(evt);
+        }
+        OnPropertyChanged(nameof(HasTodayEvents));
     }
 
     /// <summary>Builds the 42 day cells (6 full weeks) for the Month grid.</summary>

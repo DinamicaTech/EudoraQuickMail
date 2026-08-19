@@ -27,5 +27,6 @@ public class WindowingPreferences
 
     public double FolderPaneWidth { get; set; } = 200;
     public double AccountPaneHeight { get; set; } = 180;
+    public double TodayAgendaHeight { get; set; } = 190;
     public double ReadingPaneHeight { get; set; } = 300;
 }

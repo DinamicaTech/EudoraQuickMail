@@ -158,6 +158,15 @@ public partial class CalendarEvent : ObservableObject
         ? new DateTime(EndTimeTicks.Value, DateTimeKind.Utc).ToLocalTime()
         : null;
 
+    /// <summary>Compact time range used by the always-visible Today agenda.</summary>
+    public string CompactTimeDisplay => IsAllDay
+        ? "All day"
+        : StartTime.HasValue
+            ? EndTime.HasValue
+                ? $"{StartTime.Value:t}–{EndTime.Value:t}"
+                : StartTime.Value.ToString("t")
+            : string.Empty;
+
     /// <summary>
     /// Human-readable, screen-reader-friendly one-line summary for the calendar list, carrying NO
     /// field labels (that's the labeled variant's job) — just the values, comma-separated. Example:

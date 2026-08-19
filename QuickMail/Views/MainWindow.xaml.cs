@@ -271,7 +271,9 @@ public partial class MainWindow : Window
 
         _truthProbe       = truthProbe;
         InitializeComponent();
-        ApplyAccountsPanelVisibility(_configService.Load().ShowAccountsPanel);
+        var initialConfig = _configService.Load();
+        ApplyAccountsPanelVisibility(initialConfig.ShowAccountsPanel);
+        ApplyTodayAgendaVisibility(initialConfig.ShowTodayAgenda);
         DataContext = vm;
         MessageList.AddHandler(GridViewColumnHeader.ClickEvent,
             new RoutedEventHandler(MessageColumnHeader_Click), handledEventsToo: true);
@@ -943,7 +945,11 @@ public partial class MainWindow : Window
         AccessibilityHelper.RegisterDebugInputTrace(this);
         var paneConfig = _configService.Load().Windowing;
         FolderPaneColumn.Width = new GridLength(Math.Clamp(paneConfig.FolderPaneWidth, 120, 800));
-        AccountPaneRow.Height = new GridLength(Math.Clamp(paneConfig.AccountPaneHeight, 60, 800));
+        var navigationConfig = _configService.Load();
+        AccountPaneRow.Height = navigationConfig.ShowAccountsPanel
+            ? new GridLength(Math.Clamp(paneConfig.AccountPaneHeight, 60, 800)) : new GridLength(0);
+        TodayAgendaRow.Height = navigationConfig.ShowTodayAgenda
+            ? new GridLength(Math.Clamp(paneConfig.TodayAgendaHeight, 80, 800)) : new GridLength(0);
         ReadingPaneRow.Height = _vm.IsMessageOpen
             ? new GridLength(Math.Clamp(paneConfig.ReadingPaneHeight, 120, 1200))
             : new GridLength(0);
@@ -1497,6 +1503,8 @@ public partial class MainWindow : Window
 
         // Show local cache immediately so the UI is never blank on startup.
         await _vm.InitialLoadAsync();
+        if (navigationConfig.ShowTodayAgenda && _vm.CalendarVm != null)
+            _vm.CalendarVm.LoadAsync().LogFaults("load Today agenda");
         FocusActiveMessagePanel();
 
         // Populate the Views menu from saved views loaded at startup.
@@ -2092,7 +2100,10 @@ public partial class MainWindow : Window
     {
         var cfg = _configService.Load();
         cfg.Windowing.FolderPaneWidth = FolderPaneColumn.ActualWidth;
-        cfg.Windowing.AccountPaneHeight = AccountPaneRow.ActualHeight;
+        if (AccountPaneRow.ActualHeight >= 60)
+            cfg.Windowing.AccountPaneHeight = AccountPaneRow.ActualHeight;
+        if (TodayAgendaRow.ActualHeight >= 80)
+            cfg.Windowing.TodayAgendaHeight = TodayAgendaRow.ActualHeight;
         if (_vm.IsMessageOpen && ReadingPaneRow.ActualHeight >= 120)
             cfg.Windowing.ReadingPaneHeight = ReadingPaneRow.ActualHeight;
         _configService.Save(cfg);
@@ -6530,6 +6541,9 @@ public partial class MainWindow : Window
             var cfg = _configService.Load();
             _vm.ApplySettings(cfg);
             ApplyAccountsPanelVisibility(cfg.ShowAccountsPanel);
+            ApplyTodayAgendaVisibility(cfg.ShowTodayAgenda);
+            if (cfg.ShowTodayAgenda && _vm.CalendarVm != null)
+                _vm.CalendarVm.LoadAsync().LogFaults("load Today agenda after settings");
             _registry.ApplyUserOverrides(cfg.CustomHotkeys);
             // The plain-text preference may have changed; re-render the open message so a
             // Settings change takes effect live (focus is preserved). Theme changes already
@@ -6710,8 +6724,31 @@ public partial class MainWindow : Window
         AccountsPanel.Visibility = visibility;
         AccountsSplitter.Visibility = visibility;
         AccountPaneRow.MinHeight = visible ? 60 : 0;
-        AccountPaneRow.Height = visible ? new GridLength(1, GridUnitType.Star) : new GridLength(0);
+        AccountPaneRow.Height = visible
+            ? new GridLength(Math.Clamp(_configService.Load().Windowing.AccountPaneHeight, 60, 800))
+            : new GridLength(0);
     }
+
+    private void ApplyTodayAgendaVisibility(bool visible)
+    {
+        var visibility = visible ? Visibility.Visible : Visibility.Collapsed;
+        TodayAgendaHeader.Visibility = visibility;
+        TodayAgendaPanel.Visibility = visibility;
+        TodayAgendaSplitter.Visibility = visibility;
+        TodayAgendaRow.MinHeight = visible ? 80 : 0;
+        TodayAgendaRow.Height = visible
+            ? new GridLength(Math.Clamp(_configService.Load().Windowing.TodayAgendaHeight, 80, 800))
+            : new GridLength(0);
+    }
+
+    private async void TodayAgendaRefresh_Click(object sender, RoutedEventArgs e)
+        => await SyncSelectedCalendarDayAsync(DateTime.Today);
+
+    private void TodayAgendaNew_Click(object sender, RoutedEventArgs e)
+        => _vm.CalendarVm?.NewEventCommand.Execute(null);
+
+    private void TodayAgendaList_MouseDoubleClick(object sender, MouseButtonEventArgs e)
+        => ActivateSelectedCalendarEvent();
 
     private async void MessageContextMenu_MarkRead_Click(object sender, RoutedEventArgs e) =>
         await _vm.MarkMessagesReadAsync(MessageList.SelectedItems.Cast<MailMessageSummary>()
