@@ -180,7 +180,7 @@ public partial class LocalStoreService
         if (string.IsNullOrWhiteSpace(query.Text)) return new LocalSearchResult([], 0);
         var parsed = QuickSearchParser.Parse(query.Text);
         var limit = Math.Clamp(query.Limit, 1, LocalMailConstants.MaxRenderedMessages);
-        var accountFilter = query.AccountId.HasValue ? " AND s.account_id=$aid" : string.Empty;
+        var accountFilter = BuildAccountFilter("s.", query.AccountId, query.AccountIds);
         var folderFilter = !string.IsNullOrWhiteSpace(query.FolderName)
             ? query.IncludeDescendants ? " AND (s.folder_name=$fn OR (s.folder_name >= $ds AND s.folder_name < $de))" : " AND s.folder_name=$fn"
             : string.Empty;
@@ -315,7 +315,7 @@ public partial class LocalStoreService
     { foreach (SqliteParameter p in source.Parameters) destination.Parameters.AddWithValue(p.ParameterName, p.Value); }
     private static void AddScopeParameters(SqliteCommand command, LocalSearchQuery query)
     {
-        if (query.AccountId.HasValue) command.Parameters.AddWithValue("$aid", query.AccountId.Value.ToString());
+        AddAccountParameters(command, query.AccountId, query.AccountIds);
         if (!string.IsNullOrWhiteSpace(query.FolderName)) command.Parameters.AddWithValue("$fn", query.FolderName);
         if (!string.IsNullOrWhiteSpace(query.FolderName) && query.IncludeDescendants) AddDescendantRange(command, query.FolderName);
     }
@@ -365,7 +365,8 @@ public partial class LocalStoreService
             predicates.Add(join + predicate);
         }
         var scope = string.Empty;
-        if (query.AccountId.HasValue) { scope += " AND s.account_id=$aid"; count.Parameters.AddWithValue("$aid", query.AccountId.Value.ToString()); }
+        scope += BuildAccountFilter("s.", query.AccountId, query.AccountIds);
+        AddAccountParameters(count, query.AccountId, query.AccountIds);
         if (!string.IsNullOrWhiteSpace(query.FolderName))
         {
             scope += query.IncludeDescendants
@@ -412,11 +413,11 @@ public partial class LocalStoreService
 
     public async Task<LocalSearchResult> LoadLocalPageAsync(Guid? accountId, string? folderName, int limit, int offset,
         LocalSearchSort sort = LocalSearchSort.NewestFirst, bool includeDescendants = false,
-        CancellationToken ct = default)
+        CancellationToken ct = default, IReadOnlyCollection<Guid>? accountIds = null)
     {
         limit = Math.Clamp(limit, 1, LocalMailConstants.MaxRenderedMessages);
         offset = Math.Max(0, offset);
-        var accountFilter = accountId.HasValue ? " AND account_id=$aid" : string.Empty;
+        var accountFilter = BuildAccountFilter(string.Empty, accountId, accountIds);
         var folderFilter = !string.IsNullOrWhiteSpace(folderName)
             ? includeDescendants ? " AND (folder_name=$fn OR (folder_name >= $ds AND folder_name < $de))" : " AND folder_name=$fn"
             : string.Empty;
@@ -438,7 +439,7 @@ public partial class LocalStoreService
         await using var conn = await OpenAsync();
         await using var count = conn.CreateCommand();
         count.CommandText = $"SELECT count(*) FROM MessageSummary WHERE 1=1{accountFilter}{folderFilter};";
-        if (accountId.HasValue) count.Parameters.AddWithValue("$aid", accountId.Value.ToString());
+        AddAccountParameters(count, accountId, accountIds);
         if (!string.IsNullOrWhiteSpace(folderName)) count.Parameters.AddWithValue("$fn", folderName);
         if (!string.IsNullOrWhiteSpace(folderName) && includeDescendants) AddDescendantRange(count, folderName);
         var total = Convert.ToInt64(await count.ExecuteScalarAsync(ct) ?? 0);
@@ -451,7 +452,7 @@ public partial class LocalStoreService
             FROM MessageSummary WHERE 1=1{accountFilter}{folderFilter}
             ORDER BY {order} LIMIT $limit OFFSET $offset;
             """;
-        if (accountId.HasValue) cmd.Parameters.AddWithValue("$aid", accountId.Value.ToString());
+        AddAccountParameters(cmd, accountId, accountIds);
         if (!string.IsNullOrWhiteSpace(folderName)) cmd.Parameters.AddWithValue("$fn", folderName);
         if (!string.IsNullOrWhiteSpace(folderName) && includeDescendants) AddDescendantRange(cmd, folderName);
         cmd.Parameters.AddWithValue("$limit", limit);
@@ -466,6 +467,26 @@ public partial class LocalStoreService
     {
         command.Parameters.AddWithValue("$ds", folderName + "/");
         command.Parameters.AddWithValue("$de", folderName + "0");
+    }
+
+    private static string BuildAccountFilter(string prefix, Guid? accountId, IReadOnlyCollection<Guid>? accountIds)
+    {
+        if (accountId.HasValue) return $" AND {prefix}account_id=$aid";
+        if (accountIds is not { Count: > 0 }) return string.Empty;
+        return $" AND {prefix}account_id IN ({string.Join(',', accountIds.Select((_, i) => "$a" + i))})";
+    }
+
+    private static void AddAccountParameters(SqliteCommand command, Guid? accountId, IReadOnlyCollection<Guid>? accountIds)
+    {
+        if (accountId.HasValue)
+        {
+            command.Parameters.AddWithValue("$aid", accountId.Value.ToString());
+            return;
+        }
+        if (accountIds is null) return;
+        var i = 0;
+        foreach (var id in accountIds)
+            command.Parameters.AddWithValue("$a" + i++, id.ToString());
     }
 
     private static void AddSearchParameters(SqliteCommand command, LocalSearchQuery query)

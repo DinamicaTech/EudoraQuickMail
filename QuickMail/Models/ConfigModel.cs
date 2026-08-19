@@ -38,6 +38,12 @@ public class ConfigModel
     /// </summary>
     public bool RememberViewPerFolder { get; set; } = true;
 
+    /// <summary>Show the global cross-account aggregate group in the folder tree.</summary>
+    public bool ShowCombinedViews { get; set; } = true;
+
+    /// <summary>Show Calendar and its sources in the folder tree.</summary>
+    public bool ShowCalendar { get; set; } = true;
+
     /// <summary>
     /// How many days of mail to sync. 0 = sync all mail (no date filter).
     /// Supported values: 7, 30, 180, 365, or 0 (all).

@@ -216,6 +216,8 @@ public class ConfigService : IConfigService
                     case "rememberviewperfolder":
                         config.RememberViewPerFolder = ParseBool(value);
                         break;
+                    case "showcombinedviews": config.ShowCombinedViews = ParseBool(value); break;
+                    case "showcalendar":      config.ShowCalendar      = ParseBool(value); break;
                     case "syncdays":
                         if (int.TryParse(value, out var sd)) config.SyncDays = Math.Max(0, sd);
                         break;
@@ -447,6 +449,14 @@ public class ConfigService : IConfigService
         sb.AppendLine("# Remember the view mode, filter, and sort each folder was last given, and");
         sb.AppendLine("# open that folder the same way next time. Stored in folderviews.json.");
         sb.AppendLine("# When off, the view mode and sort above apply to every folder. Values: on, off.");
+        sb.AppendLine();
+
+        sb.AppendLine($"ShowCombinedViews = {(config.ShowCombinedViews ? "on" : "off")}");
+        sb.AppendLine("# Show the global cross-account aggregate views in the folder tree.");
+        sb.AppendLine();
+
+        sb.AppendLine($"ShowCalendar = {(config.ShowCalendar ? "on" : "off")}");
+        sb.AppendLine("# Show Calendar and its sources in the folder tree.");
         sb.AppendLine();
 
         sb.AppendLine($"SyncDays = {config.SyncDays}");

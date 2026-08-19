@@ -119,6 +119,12 @@
                                            Foreground="{DynamicResource Theme.TextSecondary}"
                                            FontSize="{DynamicResource Theme.FontSizeSmall}"
                                            Margin="0,4,0,0"/>
+                                <CheckBox Content="Show _Combined views"
+                                          IsChecked="{Binding ShowCombinedViews, Mode=TwoWay}"
+                                          Margin="0,10,0,0"/>
+                                <CheckBox Content="Show _Calendar"
+                                          IsChecked="{Binding ShowCalendar, Mode=TwoWay}"
+                                          Margin="0,6,0,0"/>
                             </StackPanel>
                         </GroupBox>
 

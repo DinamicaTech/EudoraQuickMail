@@ -7,7 +7,8 @@ public sealed record LocalSearchQuery(
     int Limit = LocalMailConstants.MaxRenderedMessages,
     int Offset = 0,
     LocalSearchSort Sort = LocalSearchSort.NewestFirst,
-    bool IncludeDescendants = false);
+    bool IncludeDescendants = false,
+    IReadOnlyCollection<Guid>? AccountIds = null);
 
 public enum LocalSearchSort
 {
@@ -27,4 +28,5 @@ public sealed record LocalSearchResult(IReadOnlyList<MailMessageSummary> Message
 public sealed record AdvancedSearchCriterion(string Field, string Operator, string Value, string Join = "AND");
 public sealed record AdvancedSearchQuery(IReadOnlyList<AdvancedSearchCriterion> Criteria,
     Guid? AccountId = null, string? FolderName = null, int Limit = LocalMailConstants.MaxRenderedMessages,
-    int Offset = 0, LocalSearchSort Sort = LocalSearchSort.NewestFirst, bool IncludeDescendants = false);
+    int Offset = 0, LocalSearchSort Sort = LocalSearchSort.NewestFirst, bool IncludeDescendants = false,
+    IReadOnlyCollection<Guid>? AccountIds = null);

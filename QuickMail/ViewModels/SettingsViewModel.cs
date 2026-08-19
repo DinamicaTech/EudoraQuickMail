@@ -28,6 +28,12 @@ public partial class SettingsViewModel : ObservableObject
     private bool _rememberViewPerFolder = true;
 
     [ObservableProperty]
+    private bool _showCombinedViews = true;
+
+    [ObservableProperty]
+    private bool _showCalendar = true;
+
+    [ObservableProperty]
     private int _syncDays;
 
     [ObservableProperty]
@@ -438,6 +444,8 @@ public partial class SettingsViewModel : ObservableObject
         ReadAsPlainText = cfg.ReadAsPlainText;
         ViewMode = cfg.ViewMode;
         RememberViewPerFolder = cfg.RememberViewPerFolder;
+        ShowCombinedViews = cfg.ShowCombinedViews;
+        ShowCalendar = cfg.ShowCalendar;
         SyncDays = cfg.SyncDays;
         InitialSyncCount = cfg.InitialSyncCount;
         MailSyncPollMinutes = cfg.MailSyncPollMinutes;
@@ -524,6 +532,8 @@ public partial class SettingsViewModel : ObservableObject
         cfg.ReadAsPlainText = ReadAsPlainText;
         cfg.ViewMode = ViewMode;
         cfg.RememberViewPerFolder = RememberViewPerFolder;
+        cfg.ShowCombinedViews = ShowCombinedViews;
+        cfg.ShowCalendar = ShowCalendar;
         cfg.SyncDays = SyncDays;
         cfg.InitialSyncCount = InitialSyncCount;
         cfg.MailSyncPollMinutes = MailSyncPollMinutes;

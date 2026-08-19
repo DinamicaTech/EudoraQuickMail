@@ -290,6 +290,19 @@ public partial class MainViewModel : ObservableObject, IDisposable
         DisplayName = "All Trash"
     };
     private const string RootAggregatePrefix = "\u0000RootAggregate:";
+    private const string RootMailPrefix = "\u0000RootMail:";
+
+    private static MailFolderModel CreateRootMailFolder(Guid rootId, string name) => new()
+    {
+        FullName = $"{RootMailPrefix}{rootId:D}", DisplayName = name, IsContainer = true,
+    };
+
+    private static bool TryParseRootMail(string? fullName, out Guid rootId)
+    {
+        rootId = Guid.Empty;
+        return fullName != null && fullName.StartsWith(RootMailPrefix, StringComparison.Ordinal)
+            && Guid.TryParse(fullName.AsSpan(RootMailPrefix.Length), out rootId);
+    }
 
     private static MailFolderModel CreateRootAggregateFolder(Guid rootId, SpecialFolderKind kind, string name) => new()
     {
@@ -693,6 +706,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         // Per-account "All Mail" sentinels have a real AccountId, not Guid.Empty.
         if (TryGetAccountIdFromSentinel(folder.FullName, out _)) return true;
         if (TryParseRootAggregate(folder.FullName, out _, out _)) return true;
+        if (TryParseRootMail(folder.FullName, out _)) return true;
 
         // Saved-view sentinels.
         if (TryGetViewIdFromSentinel(folder.FullName, out _))    return true;
@@ -1095,9 +1109,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
             };
             var realFolder = SelectedFolder is { IsHeader: false } selected && !IsVirtualFolder(selected)
                 ? selected.FullName : null;
+            var rootAccountIds = RootAccountIdsFor(SelectedFolder);
             var query = new LocalSearchQuery(value, accountScope, realFolder,
                 LocalMailConstants.MaxRenderedMessages, LocalPageOffset, sort,
-                SelectedFolder?.IsContainer == true);
+                SelectedFolder?.IsContainer == true, rootAccountIds);
             var found = await ((ILocalMailboxStore)_localStore).SearchLocalMessagesAsync(query, cts.Token);
             if (cts.IsCancellationRequested) return;
             IEnumerable<MailMessageSummary> visible = found.Messages;
@@ -1139,7 +1154,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
             ? selected.FullName : null;
         var found = await store.SearchLocalMessagesAdvancedAsync(new AdvancedSearchQuery(
             criteria, accountScope, folderScope, LocalMailConstants.MaxRenderedMessages, 0,
-            LocalSortFor(ActiveSort), SelectedFolder?.IsContainer == true));
+            LocalSortFor(ActiveSort), SelectedFolder?.IsContainer == true,
+            RootAccountIdsFor(SelectedFolder)));
         Messages = new BatchObservableCollection<MailMessageSummary>(found.Messages);
         _advancedSearchCriteria = criteria.ToList();
         LocalPageOffset = 0;
@@ -1179,7 +1195,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
         var sort = LocalSortFor(ActiveSort);
         var page = await store.LoadLocalPageAsync(accountId, folderName,
             LocalMailConstants.MaxRenderedMessages, LocalPageOffset, sort,
-            includeDescendants: SelectedFolder?.IsContainer == true);
+            includeDescendants: SelectedFolder?.IsContainer == true,
+            accountIds: RootAccountIdsFor(SelectedFolder));
         LocalTotalMessages = page.TotalMatches;
         SetMessages(page.Messages.ToList());
         StatusText = $"Showing {LocalPageStatus} messages";
@@ -1200,6 +1217,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
         MessageSort.AttachmentsLast => LocalSearchSort.AttachmentsLast,
         _ => LocalSearchSort.NewestFirst,
     };
+
+    private IReadOnlyCollection<Guid>? RootAccountIdsFor(MailFolderModel? folder)
+    {
+        if (!TryParseRootMail(folder?.FullName, out var rootId)) return null;
+        return Accounts.Where(a => (a.FolderTreeRootId ?? a.Id) == rootId)
+            .Select(a => a.Id).ToArray();
+    }
 
     [ObservableProperty]
     private ObservableCollection<ConversationGroup> _conversations = [];
@@ -2390,6 +2414,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             CalendarVm.ShowFieldLabels = cfg.CalendarListShowFieldLabels;
         RemindersEnabled = cfg.CalendarReminders;
         ReminderLeadMinutes = cfg.CalendarReminderMinutes;
+        BuildFolderTree();
 
         var newPreviewLines = cfg.PreviewLines;
         var newShowPreview  = newPreviewLines > 0;
@@ -4580,7 +4605,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         // "Calendar" — top-level virtual folder that opens the event list.
         // Shown only when a calendar service is wired (skipped in tests / online-only builds).
-        if (CalendarVm != null)
+        var navigationSettings = _configService.Load();
+        if (CalendarVm != null && navigationSettings.ShowCalendar)
         {
             var calNode = new FolderTreeNode
             {
@@ -4696,7 +4722,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
         allMailGroup.Children.Add(new FolderTreeNode { Folder = AllTrashFolder,   Label = AllTrashFolder.DisplayName });
         allMailGroup.Children.Add(new FolderTreeNode { Folder = AllFlaggedFolder, Label = AllFlaggedFolder.DisplayName });
         allMailGroup.Children.Add(new FolderTreeNode { Folder = AllWatchedFolder, Label = AllWatchedFolder.DisplayName });
-        roots.Add(allMailGroup);
+        if (navigationSettings.ShowCombinedViews)
+            roots.Add(allMailGroup);
 
         foreach (var rootGroup in Accounts.GroupBy(a => a.FolderTreeRootId ?? a.Id))
         {
@@ -4707,7 +4734,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 ?? groupAccounts[0].AccountLabel;
             var rootNode = new FolderTreeNode
             {
-                IsHeader = true,
+                // A root still expands like a container, but it is also a real navigation target:
+                // selecting it opens the recursive union of every account attached to this tree.
+                IsHeader = false,
+                Folder = CreateRootMailFolder(rootGroup.Key, rootName),
                 Label = rootName,
                 IsExpanded = true,
                 AccountId = rootGroup.Key,
@@ -5855,6 +5885,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private Task FetchVirtualAsync(MailFolderModel folder)
     {
         if (folder.FullName == AllMailFolder.FullName)    return FetchAllMailAsync();
+        if (TryParseRootMail(folder.FullName, out var rootId)) return FetchRootMailAsync(rootId, folder);
         if (IsFolderScopedAggregate(folder.FullName))     return FetchVirtualFolderAsync(folder.FullName);
         if (folder.FullName == AllFlaggedFolder.FullName) return FetchAllFlaggedAsync();
         if (folder.FullName == AllWatchedFolder.FullName) return FetchWatchedAsync();
@@ -6883,6 +6914,39 @@ public partial class MainViewModel : ObservableObject, IDisposable
             ScheduleFolderCountRefresh(accountId);
 
         return Task.CompletedTask;
+    }
+
+    private async Task FetchRootMailAsync(Guid rootId, MailFolderModel expectedFolder)
+    {
+        if (_localStore is not ILocalMailboxStore store) return;
+        var accountIds = Accounts
+            .Where(a => (a.FolderTreeRootId ?? a.Id) == rootId)
+            .Select(a => a.Id).ToArray();
+        var loadVersion = Interlocked.Increment(ref _folderLoadVersion);
+        StatusText = $"Loading {expectedFolder.DisplayName}…";
+        IsBusy = true;
+        _folderCts?.Cancel();
+        ReplaceCts(ref _folderCts, out var ct);
+        try
+        {
+            var page = await store.LoadLocalPageAsync(null, null,
+                LocalMailConstants.MaxRenderedMessages, LocalPageOffset, LocalSortFor(ActiveSort),
+                false, ct, accountIds);
+            if (!IsCurrentFolderLoad(loadVersion, expectedFolder)) return;
+            LocalTotalMessages = page.TotalMatches;
+            SetMessages(page.Messages.ToList());
+            StatusText = $"Showing {LocalPageStatus} messages in {expectedFolder.DisplayName}";
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (loadVersion == _folderLoadVersion) StatusText = $"Failed to load {expectedFolder.DisplayName}: {ex.Message}";
+            LogService.Log("FetchRootMail", ex);
+        }
+        finally
+        {
+            if (loadVersion == _folderLoadVersion) IsBusy = false;
+        }
     }
 
     public Task MarkMessagesUnreadAsync(IReadOnlyList<MailMessageSummary> messages)
