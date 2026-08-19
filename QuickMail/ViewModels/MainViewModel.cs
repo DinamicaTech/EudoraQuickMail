@@ -1116,6 +1116,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 SelectedFolder?.IsContainer == true, rootAccountIds);
             var found = await ((ILocalMailboxStore)_localStore).SearchLocalMessagesAsync(query, cts.Token);
             if (cts.IsCancellationRequested) return;
+            await ResolveFlagNamesAsync(found.Messages);
             IEnumerable<MailMessageSummary> visible = found.Messages;
             if (ActiveFilter != MessageFilter.All) visible = visible.Where(MatchesFilter);
             visible = ActiveSort switch
@@ -4228,7 +4229,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     // Populates FlagName and FlagColorHex on messages that have a FlagId set but no
     // display name — which is the case for every cache load, since ReadSummariesAsync
     // only reads flag_id. Skips gracefully when _flagService is not wired up.
-    private async Task ResolveFlagNamesAsync(IList<MailMessageSummary> messages)
+    private async Task ResolveFlagNamesAsync(IReadOnlyList<MailMessageSummary> messages)
     {
         if (_flagService == null) return;
         var flagged = messages.Where(m => m.FlagId != null).ToList();
@@ -8911,7 +8912,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     // ── Search command ────────────────────────────────────────────────────────
 
     [RelayCommand]
-    private void ClearSearch()
+    private async Task ClearSearchAsync()
     {
         _advancedSearchCriteria = null;
         ActiveFilter = MessageFilter.All;
@@ -8919,7 +8920,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
         LocalPageOffset = 0;
         SearchText     = string.Empty;
         IsSearchActive = false;
-        ApplyFiltersAndSearch();
+        if (_localStore is ILocalMailboxStore
+            && Accounts.Any(a => a.BackendKind is BackendKind.Pop3Smtp or BackendKind.LocalArchive))
+            await ReloadCurrentLocalPageAsync();
+        else
+            ApplyFiltersAndSearch();
     }
 
     // ── Filter command ────────────────────────────────────────────────────────

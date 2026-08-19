@@ -179,6 +179,18 @@ public partial class LocalStoreService
     {
         if (string.IsNullOrWhiteSpace(query.Text)) return new LocalSearchResult([], 0);
         var parsed = QuickSearchParser.Parse(query.Text);
+        var terms = parsed.Groups.SelectMany(g => g.Alternatives).ToList();
+        var requiresFts = terms.Any(t => t.Field is QuickSearchField.Any or QuickSearchField.To
+            or QuickSearchField.From or QuickSearchField.Cc or QuickSearchField.Subject
+            or QuickSearchField.Body or QuickSearchField.AttachmentContent);
+        var requiresDetail = terms.Any(t => t.Field is QuickSearchField.AttachmentCount
+            or QuickSearchField.AttachmentName or QuickSearchField.AttachmentContent);
+        var ftsJoin = requiresFts
+            ? "JOIN LocalMessageFts f ON f.account_id=s.account_id AND f.unique_id=s.unique_id AND f.folder_name=s.folder_name"
+            : string.Empty;
+        var detailJoin = requiresDetail
+            ? "LEFT JOIN MessageDetail d ON d.account_id=s.account_id AND d.unique_id=s.unique_id AND d.folder_name=s.folder_name"
+            : string.Empty;
         var limit = Math.Clamp(query.Limit, 1, LocalMailConstants.MaxRenderedMessages);
         var accountFilter = BuildAccountFilter("s.", query.AccountId, query.AccountIds);
         var folderFilter = !string.IsNullOrWhiteSpace(query.FolderName)
@@ -187,7 +199,7 @@ public partial class LocalStoreService
         var order = query.Sort switch
         {
             LocalSearchSort.OldestFirst => "s.date_ticks ASC",
-            LocalSearchSort.Relevance => "bm25(LocalMessageFts)",
+            LocalSearchSort.Relevance when requiresFts => "bm25(LocalMessageFts)",
             LocalSearchSort.FromAscending => "s.from_disp COLLATE NOCASE ASC",
             LocalSearchSort.FromDescending => "s.from_disp COLLATE NOCASE DESC",
             LocalSearchSort.ToAscending => "s.to_addr COLLATE NOCASE ASC",
@@ -209,8 +221,8 @@ public partial class LocalStoreService
             CopyParameters(predicateCommand, count);
             count.CommandText = $"""
                 SELECT count(*) FROM MessageSummary s
-                JOIN LocalMessageFts f ON f.account_id=s.account_id AND f.unique_id=s.unique_id AND f.folder_name=s.folder_name
-                LEFT JOIN MessageDetail d ON d.account_id=s.account_id AND d.unique_id=s.unique_id AND d.folder_name=s.folder_name
+                {ftsJoin}
+                {detailJoin}
                 WHERE ({predicate}){accountFilter}{folderFilter};
                 """;
             AddScopeParameters(count, query);
@@ -224,8 +236,8 @@ public partial class LocalStoreService
                    s.subject,s.date_ticks,s.is_read,s.preview_text,s.is_replied,s.is_forwarded,
                    s.has_attachments,s.is_mailing_list,s.flag_id
             FROM MessageSummary s
-            JOIN LocalMessageFts f ON s.account_id=f.account_id AND s.unique_id=f.unique_id AND s.folder_name=f.folder_name
-            LEFT JOIN MessageDetail d ON d.account_id=s.account_id AND d.unique_id=s.unique_id AND d.folder_name=s.folder_name
+            {ftsJoin}
+            {detailJoin}
             WHERE ({predicate}){accountFilter}{folderFilter}
             ORDER BY {order} LIMIT $limit OFFSET $offset;
             """;

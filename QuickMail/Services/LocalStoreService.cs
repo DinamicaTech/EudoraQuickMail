@@ -85,6 +85,8 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
         RunMigration(conn, "ALTER TABLE MessageSummary ADD COLUMN is_mailing_list INTEGER NOT NULL DEFAULT 0;");
         RunMigration(conn, "ALTER TABLE MessageDetail ADD COLUMN attachments_json TEXT DEFAULT NULL;");
         RunMigration(conn, "ALTER TABLE MessageSummary ADD COLUMN flag_id TEXT DEFAULT NULL;");
+        cmd.CommandText = "CREATE INDEX IF NOT EXISTS idx_summary_flag_date ON MessageSummary(flag_id, date_ticks DESC) WHERE flag_id IS NOT NULL;";
+        cmd.ExecuteNonQuery();
         RunMigration(conn, "ALTER TABLE MessageDetail ADD COLUMN calendar_ics TEXT DEFAULT NULL;");
         RunMigration(conn, "ALTER TABLE MessageDetail ADD COLUMN raw_headers TEXT NOT NULL DEFAULT '';");
         // Stable RFC 5322 Message-ID for collapsing duplicate copies across folders (issue #220).
