@@ -356,7 +356,7 @@ public class SyncService : ISyncService
         try
         {
             LogService.Debug($"ApplyRules: {account.AccountLabel}/{folder.FullName} — {newArrivals.Count} new of {fetched.Count} fetched");
-            (matchedCount, removedMessages) = await _rules.ApplyRulesAsync(newArrivals, account.Id, ct);
+            (matchedCount, removedMessages) = await _rules.ApplyAutomaticRulesAsync(newArrivals, account.Id, ct);
             LogService.Debug($"ApplyRules: done — {matchedCount} matched, {removedMessages.Count} removed");
         }
         catch (OperationCanceledException) { throw; }

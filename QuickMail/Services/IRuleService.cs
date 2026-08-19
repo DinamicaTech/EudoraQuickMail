@@ -26,6 +26,12 @@ public interface IRuleService
         Guid accountId,
         CancellationToken ct);
 
+    /// <summary>Apply only rules explicitly enabled for automatic incoming-mail processing.</summary>
+    Task<(int MatchedCount, List<MailMessageSummary> RemovedMessages)> ApplyAutomaticRulesAsync(
+        List<MailMessageSummary> incoming,
+        Guid accountId,
+        CancellationToken ct) => ApplyRulesAsync(incoming, accountId, ct);
+
     /// <summary>
     /// Test a rule against a set of messages without executing any actions.
     /// Returns the subset of messages that would match.

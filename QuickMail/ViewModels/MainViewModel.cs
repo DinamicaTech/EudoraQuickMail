@@ -7733,7 +7733,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             Name = $"Rule for {source.From}",
             FromContains = source.From,
             SubjectContains = string.IsNullOrWhiteSpace(source.Subject) ? null : source.Subject,
-            AccountId = source.AccountId,
+            AccountId = null,
         };
 
         CreateRuleFromMessageRequested?.Invoke(this, template);

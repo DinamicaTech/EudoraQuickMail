@@ -139,6 +139,11 @@
                               Style="{StaticResource RuleCheckBox}"
                               AutomationProperties.Name="Rule enabled"/>
 
+                    <CheckBox Content="Apply automatically to incoming mail"
+                              IsChecked="{Binding SelectedRule.ApplyAutomatically}"
+                              Style="{StaticResource RuleCheckBox}"
+                              AutomationProperties.Name="Apply rule automatically to incoming mail"/>
+
                     <!-- Conditions -->
                     <TextBlock Text="Conditions" FontWeight="SemiBold" Margin="0,12,0,4"/>
                     <Separator Margin="0,0,0,6"/>

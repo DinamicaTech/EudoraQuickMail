@@ -155,9 +155,22 @@ public class RuleService : IRuleService
         List<MailMessageSummary> incoming,
         Guid accountId,
         CancellationToken ct)
+        => await ApplyRulesCoreAsync(incoming, accountId, ct, automaticOnly: false);
+
+    public async Task<(int MatchedCount, List<MailMessageSummary> RemovedMessages)> ApplyAutomaticRulesAsync(
+        List<MailMessageSummary> incoming,
+        Guid accountId,
+        CancellationToken ct)
+        => await ApplyRulesCoreAsync(incoming, accountId, ct, automaticOnly: true);
+
+    private async Task<(int MatchedCount, List<MailMessageSummary> RemovedMessages)> ApplyRulesCoreAsync(
+        List<MailMessageSummary> incoming,
+        Guid accountId,
+        CancellationToken ct,
+        bool automaticOnly)
     {
         var rules = LoadRules();
-        var enabledRules = rules.Where(r => r.IsEnabled).ToList();
+        var enabledRules = rules.Where(r => r.IsEnabled && (!automaticOnly || r.ApplyAutomatically)).ToList();
         LogService.Debug($"ApplyRulesAsync: {enabledRules.Count} enabled rules, {incoming.Count} incoming messages for account {accountId}");
         if (enabledRules.Count == 0) return (0, []);
 

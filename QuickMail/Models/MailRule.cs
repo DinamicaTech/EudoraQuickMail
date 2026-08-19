@@ -41,6 +41,9 @@ public class MailRule
     /// <summary>When false, the rule is skipped during evaluation.</summary>
     public bool IsEnabled { get; set; } = true;
 
+    /// <summary>Run automatically for newly-arrived Inbox mail; manual application ignores this flag.</summary>
+    public bool ApplyAutomatically { get; set; } = true;
+
     // ── Conditions (all ANDed) ──────────────────────────────────────────────
 
     /// <summary>When true, the FromContains condition is active.</summary>
@@ -50,19 +53,19 @@ public class MailRule
     public string? FromContains { get; set; }
 
     /// <summary>When true, the ToContains condition is active.</summary>
-    public bool UseToCondition { get; set; } = true;
+    public bool UseToCondition { get; set; }
 
     /// <summary>Case-insensitive substring match against MailMessageSummary.To.</summary>
     public string? ToContains { get; set; }
 
     /// <summary>When true, the SubjectContains condition is active.</summary>
-    public bool UseSubjectCondition { get; set; } = true;
+    public bool UseSubjectCondition { get; set; }
 
     /// <summary>Case-insensitive substring match against MailMessageSummary.Subject.</summary>
     public string? SubjectContains { get; set; }
 
     /// <summary>When true, the BodyContains condition is active.</summary>
-    public bool UseBodyCondition { get; set; } = true;
+    public bool UseBodyCondition { get; set; }
 
     /// <summary>Case-insensitive substring match against MailMessageSummary.Preview.</summary>
     public string? BodyContains { get; set; }
@@ -77,10 +80,10 @@ public class MailRule
 
     // ── Action ──────────────────────────────────────────────────────────────
 
-    public RuleAction Action { get; set; } = RuleAction.MarkAsRead;
+    public RuleAction Action { get; set; } = RuleAction.MoveToFolder;
 
     /// <summary>Additionally marks a matched message read before another primary action.</summary>
-    public bool AlsoMarkAsRead { get; set; }
+    public bool AlsoMarkAsRead { get; set; } = true;
 
     /// <summary>
     /// Destination folder full name (e.g. "INBOX/Priority"). Required when

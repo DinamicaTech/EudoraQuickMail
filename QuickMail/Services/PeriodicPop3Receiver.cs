@@ -43,7 +43,7 @@ public sealed class PeriodicPop3Receiver : IDisposable
                         ? await _receiver.CheckNowAsync(account, _stop.Token)
                         : await _receiver.CheckAutomaticallyAsync(account, _stop.Token);
                     if (_rules is not null && result.NewMessages is { Count: > 0 })
-                        await _rules.ApplyRulesAsync(result.NewMessages.ToList(), account.Id, _stop.Token);
+                        await _rules.ApplyAutomaticRulesAsync(result.NewMessages.ToList(), account.Id, _stop.Token);
                     Completed?.Invoke(account, result);
                 }
                 catch (OperationCanceledException) when (_stop.IsCancellationRequested) { return; }

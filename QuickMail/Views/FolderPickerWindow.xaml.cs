@@ -715,6 +715,23 @@ public partial class FolderPickerWindow : Window
         if (dlg.ShowDialog() != true) return;
 
         var name = dlg.FolderName;
+        var existing = _treeFolders.GetValueOrDefault(accountId)?.LastOrDefault(f =>
+            string.Equals(f.DisplayName, name, StringComparison.OrdinalIgnoreCase)
+            && (parentFullName == null
+                ? string.IsNullOrEmpty(f.ParentId)
+                : string.Equals(f.ParentId, parentFullName, StringComparison.OrdinalIgnoreCase)
+                  || string.Equals(f.FullName, parentFullName + "/" + name, StringComparison.OrdinalIgnoreCase)
+                  || string.Equals(f.FullName, parentFullName + "." + name, StringComparison.OrdinalIgnoreCase)));
+        if (existing != null)
+        {
+            SelectedFolder = existing;
+            SelectedAccount = _treeAccounts?.FirstOrDefault(a => a.Id == accountId);
+            if (_commitCreatedFolder) DialogResult = true;
+            else _ = Dispatcher.InvokeAsync(
+                () => SelectCreatedTreeNode(accountId, parentFullName, existing.DisplayName),
+                DispatcherPriority.Input);
+            return;
+        }
         var updated = await _folderCreator(accountId, parentFullName, name);
         if (updated == null) return; // failure is surfaced by the caller (main-window status text)
 
