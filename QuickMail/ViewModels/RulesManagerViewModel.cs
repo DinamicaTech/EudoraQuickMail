@@ -214,7 +214,7 @@ public partial class RulesManagerViewModel : ObservableObject
             UseBodyCondition = false,
             Action = RuleAction.MoveToFolder,
             AlsoMarkAsRead = true,
-            ApplyAutomatically = true,
+            ApplyAutomatically = false,
         };
         StampDisplay(rule);
         Rules.Add(rule);

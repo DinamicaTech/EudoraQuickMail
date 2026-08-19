@@ -120,6 +120,25 @@ public partial class RulesManagerWindow : Window
         return label.Length == 0 ? string.Empty : char.ToUpperInvariant(label[0]) + label[1..];
     }
 
+    private void FromContainsTextBox_MouseDoubleClick(object sender, MouseButtonEventArgs e)
+    {
+        if (_vm.SelectedRule is not { } rule || string.IsNullOrWhiteSpace(rule.FromContains)) return;
+
+        var value = rule.FromContains.Trim();
+        var at = value.LastIndexOf('@');
+        if (at < 0 || at + 1 >= value.Length) return;
+
+        var domain = value[(at + 1)..]
+            .TrimStart()
+            .Split([' ', '\t', '\r', '\n', '>', '<', ',', ';'], StringSplitOptions.RemoveEmptyEntries)
+            .FirstOrDefault();
+        if (string.IsNullOrWhiteSpace(domain)) return;
+
+        rule.FromContains = "@" + domain;
+        FromContainsTextBox.CaretIndex = rule.FromContains.Length;
+        e.Handled = true;
+    }
+
     private void OnCloseRequested()
     {
         Close();

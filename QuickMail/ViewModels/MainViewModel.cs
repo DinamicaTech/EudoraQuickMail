@@ -7732,6 +7732,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             Name = $"Rule for {source.From}",
             FromContains = source.From,
+            ApplyAutomatically = false,
             SubjectContains = string.IsNullOrWhiteSpace(source.Subject) ? null : source.Subject,
             AccountId = null,
         };

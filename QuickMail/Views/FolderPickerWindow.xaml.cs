@@ -43,6 +43,7 @@ public partial class FolderPickerWindow : Window
     private readonly Func<Guid, string?, string, Task<IReadOnlyList<MailFolderModel>?>>? _folderCreator;
     private readonly string _defaultNewFolderName;
     private readonly bool _commitCreatedFolder;
+    private readonly bool _mergeLogicalRoots;
 
     // Retained for the tree view so it can be rebuilt after a folder is created. Not needed by the
     // flat list, which reuses its own ObservableCollection (_items) directly.
@@ -93,13 +94,15 @@ public partial class FolderPickerWindow : Window
         Func<Guid, string?, string, Task<IReadOnlyList<MailFolderModel>?>>? folderCreator = null,
         MailFolderModel? excludeFolder = null,
         string? defaultNewFolderName = null,
-        bool commitCreatedFolder = false)
+        bool commitCreatedFolder = false,
+        bool mergeLogicalRoots = false)
     {
         _initialFolder = initialFolder;
         _useTreeView = useTreeView;
         _folderCreator = folderCreator;
         _defaultNewFolderName = defaultNewFolderName ?? string.Empty;
         _commitCreatedFolder = commitCreatedFolder;
+        _mergeLogicalRoots = mergeLogicalRoots;
         _excludeFolder = excludeFolder;
 
         InitializeComponent();
@@ -270,7 +273,35 @@ public partial class FolderPickerWindow : Window
         foreach (var vf in _treeVirtualFolders)
             roots.Add(new FolderTreeNode { Folder = vf, Label = vf.DisplayName });
 
-        foreach (var account in _treeAccounts)
+        if (_mergeLogicalRoots)
+        {
+            foreach (var rootGroup in _treeAccounts.GroupBy(a => a.FolderTreeRootId ?? a.Id))
+            {
+                var groupAccounts = rootGroup.ToList();
+                var rootName = groupAccounts.Select(a => a.FolderTreeRootName)
+                    .FirstOrDefault(n => !string.IsNullOrWhiteSpace(n))
+                    ?? groupAccounts.FirstOrDefault(a => a.Id == rootGroup.Key)?.AccountLabel
+                    ?? groupAccounts[0].AccountLabel;
+                var root = new FolderTreeNode { IsHeader = true, Label = rootName, IsExpanded = true };
+
+                // A shared local tree may be backed by several accounts. Folder paths are the
+                // logical identity here; retain one physical representative for the eventual move.
+                var mergedFolders = groupAccounts
+                    .Where(a => _treeFolders.ContainsKey(a.Id))
+                    .SelectMany(a => _treeFolders[a.Id])
+                    .Where(f => !f.IsHeader)
+                    .GroupBy(f => f.FullName, StringComparer.OrdinalIgnoreCase)
+                    .Select(g => g.First())
+                    .ToList();
+                foreach (var node in FolderTreeBuilder.Build(mergedFolders))
+                {
+                    node.Parent = root;
+                    root.Children.Add(node);
+                }
+                if (root.Children.Count > 0) roots.Add(root);
+            }
+        }
+        else foreach (var account in _treeAccounts)
         {
             if (!_treeFolders.TryGetValue(account.Id, out var folders) || folders.Count == 0)
                 continue;
@@ -477,7 +508,8 @@ public partial class FolderPickerWindow : Window
             useTreeView: true,
             folderCreator: folderCreator,
             defaultNewFolderName: defaultNewFolderName,
-            commitCreatedFolder: true);
+            commitCreatedFolder: true,
+            mergeLogicalRoots: true);
     }
 
     /// <summary>
