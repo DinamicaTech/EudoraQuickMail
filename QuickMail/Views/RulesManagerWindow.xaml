@@ -4,7 +4,7 @@
         xmlns:local="clr-namespace:QuickMail.Views"
         Title="Rules Manager"
         AutomationProperties.Name="Rules Manager"
-        Width="750" Height="560"
+        Width="750" Height="760"
         MinWidth="600" MinHeight="440"
         WindowStartupLocation="CenterScreen"
         ResizeMode="CanResizeWithGrip"
@@ -232,6 +232,11 @@
                               DisplayMemberPath="DisplayName"
                               Style="{StaticResource RuleComboBox}"
                               AutomationProperties.Name="Rule action"/>
+
+                    <CheckBox Content="Also mark as read"
+                              IsChecked="{Binding SelectedRule.AlsoMarkAsRead}"
+                              Style="{StaticResource RuleCheckBox}"
+                              AutomationProperties.Name="Also mark matching messages as read"/>
 
                     <!-- Target folder -->
                     <TextBlock Text="Target folder"/>

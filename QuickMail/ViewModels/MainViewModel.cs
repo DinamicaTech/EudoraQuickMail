@@ -6830,7 +6830,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             // authoritative list every time the user opens the folder; queue changes can occur on
             // the scheduler thread between the ordinary folder-count sweeps.
             if (TryParseRootAggregate(fullName, out _, out var refreshedKind)
-                && refreshedKind == SpecialFolderKind.Scheduled
+                && refreshedKind is SpecialFolderKind.Drafts or SpecialFolderKind.Scheduled
                 && SelectedFolder != null)
             {
                 SelectedFolder.MessageCount = sorted.Count;
@@ -7743,6 +7743,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
     public bool IsSelectedFolderDrafts =>
         SelectedFolder != null &&
         (SelectedFolder.Kind == SpecialFolderKind.Drafts ||
+         (TryParseRootAggregate(SelectedFolder.FullName, out _, out var rootKind)
+          && rootKind == SpecialFolderKind.Drafts) ||
          string.Equals(SelectedFolder.FullName, AllDraftsFolder.FullName, StringComparison.Ordinal));
 
     public bool IsSelectedFolderScheduled => SelectedFolder?.Kind == SpecialFolderKind.Scheduled;

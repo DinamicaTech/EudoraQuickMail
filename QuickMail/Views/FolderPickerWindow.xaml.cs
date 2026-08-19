@@ -41,6 +41,8 @@ public partial class FolderPickerWindow : Window
     // refreshes the owning account, and returns that account's refreshed folder list so the
     // picker can rebuild in place and select the new folder (issue #250, move/copy-message flow).
     private readonly Func<Guid, string?, string, Task<IReadOnlyList<MailFolderModel>?>>? _folderCreator;
+    private readonly string _defaultNewFolderName;
+    private readonly bool _commitCreatedFolder;
 
     // Retained for the tree view so it can be rebuilt after a folder is created. Not needed by the
     // flat list, which reuses its own ObservableCollection (_items) directly.
@@ -89,15 +91,20 @@ public partial class FolderPickerWindow : Window
         IReadOnlyDictionary<Guid, MailFolderModel>? accountMailFolders = null,
         bool useTreeView = false,
         Func<Guid, string?, string, Task<IReadOnlyList<MailFolderModel>?>>? folderCreator = null,
-        MailFolderModel? excludeFolder = null)
+        MailFolderModel? excludeFolder = null,
+        string? defaultNewFolderName = null,
+        bool commitCreatedFolder = false)
     {
         _initialFolder = initialFolder;
         _useTreeView = useTreeView;
         _folderCreator = folderCreator;
+        _defaultNewFolderName = defaultNewFolderName ?? string.Empty;
+        _commitCreatedFolder = commitCreatedFolder;
         _excludeFolder = excludeFolder;
 
         InitializeComponent();
         Title = title;
+        Loaded += (_, _) => Height = Math.Min(Height, SystemParameters.WorkArea.Height * 0.9);
 
         // Alt+N → New Folder (see FolderPicker_PreviewKeyDown). Window-level so it fires from the
         // tree, the buttons, or anywhere else in the picker.
@@ -269,7 +276,6 @@ public partial class FolderPickerWindow : Window
                 continue;
 
             var nodes = FolderTreeBuilder.Build(folders, _treeAccounts.Count > 1 ? account : null);
-            ExpandAll(nodes);
             roots.AddRange(nodes);
         }
 
@@ -444,7 +450,9 @@ public partial class FolderPickerWindow : Window
         IReadOnlyDictionary<Guid, List<MailFolderModel>> cachedFolders,
         Guid? accountId,
         string? currentFolderKey,
-        string title)
+        string title,
+        Func<Guid, string?, string, Task<IReadOnlyList<MailFolderModel>?>>? folderCreator = null,
+        string? defaultNewFolderName = null)
     {
         var scopedAccounts = accountId is Guid id ? accounts.Where(a => a.Id == id).ToList() : [];
         var scopedFolders  = accountId is Guid fid && cachedFolders.TryGetValue(fid, out var owned) && owned.Count > 0
@@ -466,7 +474,10 @@ public partial class FolderPickerWindow : Window
             folders,
             title: title,
             initialFolder: initial,
-            useTreeView: true);
+            useTreeView: true,
+            folderCreator: folderCreator,
+            defaultNewFolderName: defaultNewFolderName,
+            commitCreatedFolder: true);
     }
 
     /// <summary>
@@ -695,7 +706,12 @@ public partial class FolderPickerWindow : Window
         if (!TryResolveTreeCreateTarget(out var accountId, out var parentFullName, out var parentLabel))
             return;
 
-        var dlg = new NewFolderDialog { Owner = this, ParentFolderName = parentLabel };
+        var dlg = new NewFolderDialog
+        {
+            Owner = this,
+            ParentFolderName = parentLabel,
+            DefaultFolderName = _defaultNewFolderName,
+        };
         if (dlg.ShowDialog() != true) return;
 
         var name = dlg.FolderName;
@@ -703,6 +719,21 @@ public partial class FolderPickerWindow : Window
         if (updated == null) return; // failure is surfaced by the caller (main-window status text)
 
         _treeFolders[accountId] = updated.ToList();
+
+        if (_commitCreatedFolder)
+        {
+            var created = updated.LastOrDefault(f =>
+                string.Equals(f.DisplayName, name, StringComparison.OrdinalIgnoreCase)
+                && (parentFullName == null || string.Equals(f.ParentId, parentFullName, StringComparison.OrdinalIgnoreCase)
+                    || f.FullName.StartsWith(parentFullName, StringComparison.OrdinalIgnoreCase)));
+            if (created != null)
+            {
+                SelectedFolder = created;
+                SelectedAccount = _treeAccounts?.FirstOrDefault(a => a.Id == accountId);
+                DialogResult = true;
+                return;
+            }
+        }
         RebuildTreeView();
 
         // Container generation for the freshly-assigned ItemsSource completes on a later dispatcher

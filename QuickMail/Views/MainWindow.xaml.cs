@@ -5539,6 +5539,9 @@ public partial class MainWindow : Window
     /// </summary>
     private async Task OpenMessageFromListAsync(MailMessageSummary summary)
     {
+        // Mouse-up can arrive before the TwoWay SelectedItem binding has committed. Draft and
+        // Scheduled commands read SelectedMessage, so make the row being opened authoritative.
+        _vm.SelectedMessage = summary;
         if (_vm.IsSelectedFolderScheduled)
         {
             await _vm.OpenScheduledCommand.ExecuteAsync(null);
@@ -6961,7 +6964,9 @@ public partial class MainWindow : Window
                 selectedMessagesForTest: selectedMessages,
                 configService: _configService);
             rulesVm.RunOnExistingRequested += RunClientRulesOnExisting;
-            dialog = new RulesManagerWindow(rulesVm, accounts, _vm.CachedFolders);
+            dialog = new RulesManagerWindow(rulesVm, accounts, _vm.CachedFolders,
+                (accountId, parentFullName, name) =>
+                    _vm.CreateFolderReturningFoldersAsync(accountId, parentFullName, name));
         }
 
         _rulesWindow = dialog;

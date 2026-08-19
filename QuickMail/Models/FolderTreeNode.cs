@@ -40,7 +40,7 @@ public sealed class FolderTreeNode : INotifyPropertyChanged
         + Children.Sum(child => child.RecursiveUnreadCount);
     private int RecursiveMessageCount => (Folder?.MessageCount ?? 0)
         + Children.Sum(child => child.RecursiveMessageCount);
-    private bool UsesTotalCount => Folder?.Kind is SpecialFolderKind.Trash or SpecialFolderKind.Scheduled;
+    private bool UsesTotalCount => Folder?.Kind is SpecialFolderKind.Drafts or SpecialFolderKind.Trash or SpecialFolderKind.Scheduled;
     private int DisplayCount => UsesTotalCount ? RecursiveMessageCount : RecursiveUnreadCount;
 
     /// <summary>

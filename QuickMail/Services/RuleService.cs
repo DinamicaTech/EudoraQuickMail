@@ -268,6 +268,8 @@ public class RuleService : IRuleService
         Guid accountId,
         CancellationToken ct)
     {
+        if (rule.AlsoMarkAsRead && rule.Action != RuleAction.MarkAsRead)
+            await MarkAsReadAsync(matched, ct);
         switch (rule.Action)
         {
             case RuleAction.MarkAsRead:

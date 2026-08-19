@@ -119,7 +119,8 @@ public partial class RulesManagerViewModel : ObservableObject
     /// longer be created unscoped.
     /// </summary>
     public List<AccountOption> AccountOptions =>
-        _accounts.Select(a => new AccountOption { Id = a.Id, DisplayName = a.AccountLabel }).ToList();
+        [new AccountOption { Id = null, DisplayName = "All accounts" },
+         .. _accounts.Select(a => new AccountOption { Id = a.Id, DisplayName = a.AccountLabel })];
 
     /// <summary>
     /// The account a new rule is scoped to by default: the Account Manager default account, or — when
@@ -204,7 +205,14 @@ public partial class RulesManagerViewModel : ObservableObject
         // the Account Manager default account (or the sole account) so the rule is valid immediately
         // and the Account combo lands on a real selection rather than blank. (No accounts is a
         // degenerate state in which rules aren't usable anyway.)
-        var rule = new MailRule { Name = "New rule", AccountId = DefaultAccountId };
+        var rule = new MailRule
+        {
+            Name = "New rule", AccountId = null,
+            UseFromCondition = true,
+            UseToCondition = false,
+            UseSubjectCondition = false,
+            UseBodyCondition = false,
+        };
         StampDisplay(rule);
         Rules.Add(rule);
         SelectedRule = rule;

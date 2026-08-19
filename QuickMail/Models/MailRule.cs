@@ -79,6 +79,9 @@ public class MailRule
 
     public RuleAction Action { get; set; } = RuleAction.MarkAsRead;
 
+    /// <summary>Additionally marks a matched message read before another primary action.</summary>
+    public bool AlsoMarkAsRead { get; set; }
+
     /// <summary>
     /// Destination folder full name (e.g. "INBOX/Priority"). Required when
     /// Action == MoveToFolder; ignored otherwise.

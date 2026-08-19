@@ -29,16 +29,19 @@ public partial class RulesManagerWindow : Window
     private readonly RulesManagerViewModel _vm;
     private readonly IEnumerable<AccountModel> _accounts;
     private readonly IReadOnlyDictionary<Guid, List<MailFolderModel>> _cachedFolders;
+    private readonly Func<Guid, string?, string, Task<IReadOnlyList<MailFolderModel>?>>? _folderCreator;
 
     public RulesManagerWindow(
         RulesManagerViewModel vm,
         IEnumerable<AccountModel> accounts,
-        IReadOnlyDictionary<Guid, List<MailFolderModel>> cachedFolders)
+        IReadOnlyDictionary<Guid, List<MailFolderModel>> cachedFolders,
+        Func<Guid, string?, string, Task<IReadOnlyList<MailFolderModel>?>>? folderCreator = null)
     {
         InitializeComponent();
         _vm = vm;
         _accounts = accounts;
         _cachedFolders = cachedFolders;
+        _folderCreator = folderCreator;
         DataContext = vm;
 
         // Wire VM events
@@ -48,7 +51,11 @@ public partial class RulesManagerWindow : Window
         vm.PickFolderRequested += OnPickFolderRequested;
 
         // Focus the client rule list on open (#348).
-        Loaded += (_, _) => FocusFirstRule();
+        Loaded += (_, _) =>
+        {
+            Height = Math.Min(Height, SystemParameters.WorkArea.Height * 0.9);
+            FocusFirstRule();
+        };
     }
 
     /// <summary>Moves keyboard focus to the next (or previous) window pane for F6 / Shift+F6.</summary>
@@ -91,7 +98,9 @@ public partial class RulesManagerWindow : Window
     {
         var picker = FolderPickerWindow.ForRuleTarget(
             _accounts, _cachedFolders, accountId, currentFolder,
-            title: "Choose Target Folder");
+            title: "Choose Target Folder",
+            folderCreator: _folderCreator,
+            defaultNewFolderName: SuggestedFolderName(_vm.SelectedRule?.FromContains));
         picker.Owner = this;
 
         if (picker.ShowDialog() == true && picker.SelectedFolder is MailFolderModel folder)
@@ -99,6 +108,16 @@ public partial class RulesManagerWindow : Window
             return folder.FullName;
         }
         return null;
+    }
+
+    private static string SuggestedFolderName(string? from)
+    {
+        if (string.IsNullOrWhiteSpace(from)) return string.Empty;
+        var at = from.LastIndexOf('@');
+        if (at < 0 || at + 1 >= from.Length) return string.Empty;
+        var domain = from[(at + 1)..].Trim(' ', '<', '>', '"').Split(',')[0];
+        var label = domain.Split('.', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? string.Empty;
+        return label.Length == 0 ? string.Empty : char.ToUpperInvariant(label[0]) + label[1..];
     }
 
     private void OnCloseRequested()

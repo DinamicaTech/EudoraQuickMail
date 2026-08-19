@@ -21,6 +21,15 @@ public partial class NewFolderDialog : Window
     /// <summary>The folder name entered by the user. Only meaningful when DialogResult == true.</summary>
     public string FolderName => FolderNameBox.Text.Trim();
 
+    public string DefaultFolderName
+    {
+        set
+        {
+            FolderNameBox.Text = value ?? string.Empty;
+            FolderNameBox.SelectAll();
+        }
+    }
+
     public NewFolderDialog()
     {
         InitializeComponent();
