@@ -416,16 +416,15 @@ public class RulesManagerViewModelTests
     }
 
     [Fact]
-    public void AccountOptions_ListsAccountsOnly_NoAllAccountsEntry()
+    public void AccountOptions_StartWithAllAccounts()
     {
-        // "All accounts" was retired (#333 D1): every rule is scoped to one account, so the options
-        // are real accounts only — no null-Id entry that would let a user create an unscoped rule.
         var account = new AccountModel { Id = Guid.NewGuid(), AccountName = "Work" };
         var vm = new RulesManagerViewModel(new StubRuleService(), accounts: [account]);
 
         var options = vm.AccountOptions;
-        Assert.DoesNotContain(options, o => o.Id is null);
-        Assert.Equal(account.Id, Assert.Single(options).Id);
+        Assert.Null(options[0].Id);
+        Assert.Equal("All accounts", options[0].DisplayName);
+        Assert.Equal(account.Id, options[1].Id);
     }
 
     // ── Account-in-row display (rule name, account) ─────────────────────────────

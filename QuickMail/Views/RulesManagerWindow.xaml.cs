@@ -134,8 +134,10 @@ public partial class RulesManagerWindow : Window
             .FirstOrDefault();
         if (string.IsNullOrWhiteSpace(domain)) return;
 
-        rule.FromContains = "@" + domain;
-        FromContainsTextBox.CaretIndex = rule.FromContains.Length;
+        // MailRule is deliberately a plain persisted model, not an observable view-model. Setting
+        // only its property would therefore leave the bound TextBox showing the old address.
+        FromContainsTextBox.Text = "@" + domain;
+        FromContainsTextBox.CaretIndex = FromContainsTextBox.Text.Length;
         e.Handled = true;
     }
 

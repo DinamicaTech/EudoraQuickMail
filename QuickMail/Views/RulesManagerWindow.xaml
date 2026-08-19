@@ -164,7 +164,7 @@
                     <TextBox x:Name="FromContainsTextBox"
                              Text="{Binding SelectedRule.FromContains, UpdateSourceTrigger=PropertyChanged}"
                              Style="{StaticResource RuleTextBox}"
-                             MouseDoubleClick="FromContainsTextBox_MouseDoubleClick"
+                             PreviewMouseDoubleClick="FromContainsTextBox_MouseDoubleClick"
                              IsReadOnly="{Binding IsFromEnabled, Converter={StaticResource InverseBoolConverter}, FallbackValue=True}"
                              IsTabStop="{Binding IsFromEnabled}"
                              AutomationProperties.Name="From contains"

@@ -56,88 +56,57 @@ public class RuleService : IRuleService
             _cache = [];
         }
         _loaded = true;
-        MigrateAllAccountRules();
+        ConsolidateLegacyAllAccountCopies();
         return _cache;
     }
 
     /// <summary>
-    /// One-time migration (#333, D1): the "All accounts" rule scope is retired, so every rule must
-    /// belong to exactly one account. Each unscoped rule (null <see cref="MailRule.AccountId"/>) is
-    /// duplicated into one rule per <b>non-Graph</b> account; Graph accounts receive none — server
-    /// rules replace client rules there, and an all-account client rule must not silently run on a
-    /// Graph mailbox (D2).
-    /// <para>
-    /// <b>Idempotent by construction.</b> The migration is defined as "eliminate null AccountId", so
-    /// the absence of any unscoped rule <i>is</i> the completion signal — a second run finds nothing
-    /// to do. It runs here in <see cref="LoadRules"/>, before any consumer sees the list, so no caller
-    /// can observe a null AccountId. It persists once at the end via the atomic <see cref="SaveRules"/>,
-    /// so the file is either fully migrated or untouched — never half-duplicated.
-    /// </para>
+    /// Repairs the obsolete per-account expansion used before global client rules were restored.
+    /// Only semantically identical copies covering every non-Graph account are consolidated, so a
+    /// genuinely account-specific rule is never broadened accidentally.
     /// </summary>
-    private void MigrateAllAccountRules()
+    private void ConsolidateLegacyAllAccountCopies()
     {
-        if (_accountService is null) return;                    // no account context (some unit tests)
-        if (_cache.All(r => r.AccountId is not null)) return;   // already migrated / nothing unscoped
+        if (_accountService is null || _cache.Count < 2) return;
 
         var accounts = _accountService.LoadAccounts();
-        // Never migrate against an EMPTY account list: it would drop every unscoped rule, and an empty
-        // read can be transient (startup ordering, a locked/corrupt accounts.json). Defer until
-        // accounts exist. A genuine Graph-only profile still drops below (accounts present, but none
-        // non-Graph) — the drop path only fires when there is real account context. (Review of #364.)
-        if (accounts.Count == 0) return;
+        var targetIds = accounts.Where(a => a.BackendKind != BackendKind.MicrosoftGraph)
+            .Select(a => a.Id).ToHashSet();
+        if (targetIds.Count < 2) return;
 
-        var targets = accounts.Where(a => a.BackendKind != BackendKind.MicrosoftGraph).ToList();
-
-        var migrated = new List<MailRule>(_cache.Count);
-        int converted = 0, dropped = 0;
-
-        foreach (var rule in _cache)
+        var repaired = new List<MailRule>(_cache.Count);
+        var consolidated = 0;
+        foreach (var group in _cache.GroupBy(SemanticKey))
         {
-            if (rule.AccountId is not null) { migrated.Add(rule); continue; }
-
-            converted++;
-            if (targets.Count == 0)
+            var copies = group.Where(r => r.AccountId is Guid id && targetIds.Contains(id)).ToList();
+            var coversAllAccounts = copies.Count == targetIds.Count
+                && copies.Select(r => r.AccountId!.Value).Distinct().Count() == targetIds.Count;
+            if (!coversAllAccounts)
             {
-                // Graph-only profile: an all-account CLIENT rule has no valid target (it must not run
-                // on a Graph account, D2), so it is dropped. Destructive, hence logged per rule — the
-                // release notes call this out. Affected population: a Microsoft-only profile carrying
-                // legacy all-account client rules.
-                dropped++;
-                LogService.Log($"Rules migration: dropped all-account rule '{rule.Name}' — no non-Graph account to assign it to.");
+                repaired.AddRange(group);
                 continue;
             }
 
-            foreach (var account in targets)
-                migrated.Add(CloneForAccount(rule, account.Id));
+            var representative = group.FirstOrDefault(r => r.AccountId is null) ?? copies[0];
+            representative.AccountId = null;
+            repaired.Add(representative);
+            repaired.AddRange(group.Where(r => r.AccountId is Guid id && !targetIds.Contains(id)));
+            consolidated += copies.Count - 1;
         }
 
-        _cache = migrated;
-        SaveRules(_cache);   // atomic write; also refreshes _cache/_loaded
-        LogService.Log($"Rules migration: converted {converted} all-account rule(s) across {targets.Count} non-Graph account(s); dropped {dropped}.");
+        if (consolidated == 0) return;
+        _cache = repaired;
+        SaveRules(_cache);
+        LogService.Log($"Rules repair: consolidated {consolidated} obsolete per-account rule copies into global rules.");
     }
 
-    /// <summary>
-    /// Copies a rule and binds it to one account. The copy gets a <b>fresh Id</b> — reusing the
-    /// source id across N per-account copies would collide, breaking selection and delete-by-id.
-    /// </summary>
-    private static MailRule CloneForAccount(MailRule source, Guid accountId) => new()
-    {
-        Id = Guid.NewGuid(),
-        Name = source.Name,
-        IsEnabled = source.IsEnabled,
-        UseFromCondition = source.UseFromCondition,
-        FromContains = source.FromContains,
-        UseToCondition = source.UseToCondition,
-        ToContains = source.ToContains,
-        UseSubjectCondition = source.UseSubjectCondition,
-        SubjectContains = source.SubjectContains,
-        UseBodyCondition = source.UseBodyCondition,
-        BodyContains = source.BodyContains,
-        MustHaveAttachments = source.MustHaveAttachments,
-        AccountId = accountId,
-        Action = source.Action,
-        TargetFolder = source.TargetFolder,
-    };
+    private static string SemanticKey(MailRule r) => string.Join('\u001f',
+        r.Name, r.IsEnabled, r.ApplyAutomatically,
+        r.UseFromCondition, r.FromContains,
+        r.UseToCondition, r.ToContains,
+        r.UseSubjectCondition, r.SubjectContains,
+        r.UseBodyCondition, r.BodyContains,
+        r.MustHaveAttachments, r.Action, r.AlsoMarkAsRead, r.TargetFolder);
 
     public void SaveRules(List<MailRule> rules)
     {
