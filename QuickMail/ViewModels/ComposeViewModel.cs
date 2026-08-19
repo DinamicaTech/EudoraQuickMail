@@ -243,14 +243,37 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
             && SenderAccount != null && !string.IsNullOrWhiteSpace(SenderAccount.Signature))
         {
             var sig = SenderAccount.Signature;
+            var bodyBeforeSignature = Body;
+            var plainSignature = SenderAccount.SignatureIsHtml
+                ? HtmlStripper.ToPlainText(sig)
+                : sig;
             // Add separator if body already has content (reply/forward)
             if (!string.IsNullOrWhiteSpace(Body) && !Body.EndsWith('\n'))
                 Body += "\n";
             if (!string.IsNullOrWhiteSpace(Body))
                 Body += "\n-- \n";
-            Body += sig;
+            Body += plainSignature;
+
+            if (model.Mode == ComposeMode.Html)
+            {
+                var html = _seededHtmlBody ?? _markdown.PlainTextToHtml(bodyBeforeSignature);
+                var signatureFragment = SenderAccount.SignatureIsHtml
+                    ? sig
+                    : WebUtility.HtmlEncode(sig)
+                        .Replace("\r\n", "<br>", StringComparison.Ordinal)
+                        .Replace("\n", "<br>", StringComparison.Ordinal);
+                var separator = string.IsNullOrWhiteSpace(bodyBeforeSignature) ? string.Empty : "<br>-- <br>";
+                _seededHtmlBody = AppendBeforeClosingBody(html,
+                    $"<div class=\"quickmail-signature\">{separator}{signatureFragment}</div>");
+            }
             _isDirty = false; // signature insertion is not a user edit
         }
+    }
+
+    private static string AppendBeforeClosingBody(string html, string fragment)
+    {
+        var index = html.LastIndexOf("</body>", StringComparison.OrdinalIgnoreCase);
+        return index >= 0 ? html.Insert(index, fragment) : html + fragment;
     }
 
     [RelayCommand]

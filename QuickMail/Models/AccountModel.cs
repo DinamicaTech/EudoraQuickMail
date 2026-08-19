@@ -158,10 +158,13 @@ public partial class AccountModel : ObservableObject
     public string? CalendarIdentity { get; set; }
 
     /// <summary>
-    /// Plain-text signature appended to new messages and replies/forwards.
+    /// Signature appended to new messages and replies/forwards.
     /// Empty string means no signature. Stored in accounts.json.
     /// </summary>
     public string Signature { get; set; } = string.Empty;
+
+    /// <summary>Interpret <see cref="Signature"/> as an HTML fragment in HTML messages.</summary>
+    public bool SignatureIsHtml { get; set; }
 
     /// <summary>
     /// Full name of the folder the Archive action moves messages to for this account (issue #318).

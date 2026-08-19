@@ -206,6 +206,7 @@ public partial class AccountManagerViewModel : AccountEditorViewModel
         SmtpUseSsl = value.SmtpUseSsl;
         SmtpAcceptInvalidCert = value.SmtpAcceptInvalidCert;
         Signature = value.Signature;
+        SignatureIsHtml = value.SignatureIsHtml;
         SyncContacts = value.SyncContacts;
         SyncCalendar = value.SyncCalendar;
         OnPropertyChanged(nameof(CalendarConnectionText));
@@ -553,6 +554,7 @@ public partial class AccountManagerViewModel : AccountEditorViewModel
         // taking the settings over and with them the choice about fallback.
         account.RequireStartTls = RequireStartTls;
         account.Signature = Signature;
+        account.SignatureIsHtml = SignatureIsHtml;
         // Backfill the provider on an account created before the catalog existed, so later lookups
         // stop relying on the host fallback. The provider itself is read-only in this dialog.
         account.ProviderId ??= SelectedProvider?.Id;

@@ -436,6 +436,7 @@ public partial class AddAccountViewModel : AccountEditorViewModel, IDisposable
         // every time the account connects, not only on the day it was created.
         RequireStartTls = RequireStartTls,
         Signature = Signature,
+        SignatureIsHtml = SignatureIsHtml,
         SyncContacts = SyncContacts && ShowContactSyncOption,
         SyncCalendar = SyncCalendar && ShowCalendarSyncOption,
         };
@@ -459,7 +460,8 @@ public partial class AddAccountViewModel : AccountEditorViewModel, IDisposable
         IsActive = account.IsActive;
         SmtpHost = account.SmtpHost; SmtpPort = account.SmtpPort; SmtpUseSsl = account.SmtpUseSsl;
         SmtpAcceptInvalidCert = account.SmtpAcceptInvalidCert; RequireStartTls = account.RequireStartTls;
-        Signature = account.Signature; SyncContacts = account.SyncContacts; SyncCalendar = account.SyncCalendar;
+        Signature = account.Signature; SignatureIsHtml = account.SignatureIsHtml;
+        SyncContacts = account.SyncContacts; SyncCalendar = account.SyncCalendar;
         HostsUserEdited = false;
         IsAdvancedExpanded = true;
     }

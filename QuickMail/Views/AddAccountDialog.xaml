@@ -257,13 +257,16 @@
                         <Separator Margin="0,6"/>
 
                         <TextBlock Text="Email Signature" FontWeight="SemiBold" Margin="0,0,0,6"/>
-                        <Label x:Name="LblSignature" Content="Si_gnature (plain text, appended to new messages):" Target="{Binding ElementName=SignatureBox}" Padding="0" Margin="0,4,0,2"/>
+                        <Label x:Name="LblSignature" Content="Si_gnature:" Target="{Binding ElementName=SignatureBox}" Padding="0" Margin="0,4,0,2"/>
+                        <CheckBox Content="Signature contains _HTML"
+                                  IsChecked="{Binding SignatureIsHtml}"
+                                  Margin="0,0,0,4"/>
                         <TextBox x:Name="SignatureBox"
                                  Text="{Binding Signature, UpdateSourceTrigger=PropertyChanged}"
                                  AutomationProperties.LabeledBy="{Binding ElementName=LblSignature}"
                                  AcceptsReturn="True"
                                  TextWrapping="Wrap"
-                                 MinHeight="60"
+                                 MinHeight="90"
                                  VerticalScrollBarVisibility="Auto"
                                 />
                     </StackPanel>

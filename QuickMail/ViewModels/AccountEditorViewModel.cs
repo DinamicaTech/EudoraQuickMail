@@ -66,6 +66,7 @@ public abstract partial class AccountEditorViewModel : ObservableObject
     [ObservableProperty] private bool   _smtpUseSsl = false;
     [ObservableProperty] private bool   _smtpAcceptInvalidCert = false;
     [ObservableProperty] private string _signature = string.Empty;
+    [ObservableProperty] private bool _signatureIsHtml;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsPasswordAuth))]
@@ -780,6 +781,7 @@ public abstract partial class AccountEditorViewModel : ObservableObject
         // claim about a different connection than the one the password will be sent over.
         RequireStartTls = RequireStartTls,
         Signature = Signature,
+        SignatureIsHtml = SignatureIsHtml,
     };
 
     [RelayCommand]
