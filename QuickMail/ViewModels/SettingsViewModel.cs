@@ -136,6 +136,12 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty]
     private bool _googleSignIn;
 
+    [ObservableProperty]
+    private string _googleClientId = string.Empty;
+
+    [ObservableProperty]
+    private string _googleClientSecret = string.Empty;
+
     // ── Diagnostics (debug-only, #175) ─────────────────────────────────────────────
     // Deliberately NOT [ObservableProperty] over a field: the value lives on the
     // session service, never in ConfigModel/config.ini — non-persistence is the
@@ -473,6 +479,8 @@ public partial class SettingsViewModel : ObservableObject
         AutoUpdate                       = cfg.AutoUpdate;
         ShowUpdateInstalledAlerts        = cfg.ShowUpdateInstalledAlerts;
         GoogleSignIn                     = ReadFeature(cfg, FeatureFlag.GoogleAuth, false);
+        GoogleClientId                   = cfg.GoogleClientId;
+        GoogleClientSecret               = cfg.GoogleClientSecret;
         AutoSaveDrafts                   = cfg.AutoSaveDrafts;
         AutoSaveIntervalSeconds          = cfg.AutoSaveIntervalSeconds;
         IndexAttachmentContents          = cfg.IndexAttachmentContents;
@@ -562,6 +570,8 @@ public partial class SettingsViewModel : ObservableObject
         // Written both ways round, never removed when false: an explicit "false" in the file is how
         // a user who turns this back off stays off if the built-in default ever changes again.
         cfg.Features[FeatureFlag.GoogleAuth.ToString()] = GoogleSignIn ? "true" : "false";
+        cfg.GoogleClientId = GoogleClientId.Trim();
+        cfg.GoogleClientSecret = GoogleClientSecret.Trim();
         if (DesktopShortcut != Helpers.DesktopShortcut.Exists())
         {
             try

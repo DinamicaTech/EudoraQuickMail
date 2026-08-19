@@ -276,7 +276,7 @@ public partial class App : Application
             var providerCatalog   = new ProviderCatalog();
             _autoDiscoverService  = new AutoDiscoverService(providerCatalog, configService);
             var msOAuthService    = new OAuthService(profile);
-            var googleOAuth       = new GoogleOAuthService(credentialService);
+            var googleOAuth       = new GoogleOAuthService(credentialService, configService);
             var oauthService      = new OAuthRouter(msOAuthService, googleOAuth);
             _imapBackend          = new ImapMailService(oauthService, configService);
             var imapBackend       = _imapBackend;

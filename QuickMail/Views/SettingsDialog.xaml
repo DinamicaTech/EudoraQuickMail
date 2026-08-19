@@ -428,8 +428,19 @@
                                 <CheckBox Content="Sign in with _Google for Gmail accounts"
                                           IsChecked="{Binding GoogleSignIn, Mode=TwoWay}"
                                           AutomationProperties.Name="Sign in with Google for Gmail accounts"/>
-                                <TextBlock Text="Google no longer authorizes QuickMail for new accounts, so Gmail normally uses an app password. Turn this on only if your Google authorization predates that change — it adds a Gmail (sign in with Google) provider and a Google option under Authentication. Takes effect the next time QuickMail starts. Gmail accounts already using Google sign-in keep working whether this is on or off."
+                                <TextBlock Text="Use OAuth credentials for a Google Cloud Desktop application. They enable independent Google Calendar links and, when the option above is enabled, Gmail sign-in. Changes take effect after restarting QuickMail."
                                            Foreground="{DynamicResource Theme.TextSecondary}" FontSize="{DynamicResource Theme.FontSizeSmall}" Margin="0,3,0,0" TextWrapping="Wrap"/>
+                                <Label Content="Google Client _ID:" Target="{Binding ElementName=GoogleClientIdBox}"
+                                       Margin="0,10,0,0"/>
+                                <TextBox x:Name="GoogleClientIdBox" Text="{Binding GoogleClientId, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                         AutomationProperties.Name="Google OAuth Client ID"/>
+                                <Label Content="Google Client _Secret:" Target="{Binding ElementName=GoogleClientSecretBox}"
+                                       Margin="0,8,0,0"/>
+                                <TextBox x:Name="GoogleClientSecretBox" Text="{Binding GoogleClientSecret, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                         AutomationProperties.Name="Google OAuth Client Secret"/>
+                                <TextBlock Text="Create the credentials in Google Cloud Console as application type Desktop app, with the Google Calendar API enabled. The client secret identifies the installed application; user refresh tokens remain protected in Windows Credential Manager."
+                                           Foreground="{DynamicResource Theme.TextSecondary}" FontSize="{DynamicResource Theme.FontSizeSmall}"
+                                           Margin="0,6,0,0" TextWrapping="Wrap"/>
                             </StackPanel>
                         </GroupBox>
 

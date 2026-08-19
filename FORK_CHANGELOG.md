@@ -10,6 +10,7 @@ before a public release.
 
 ## Unreleased
 
+- Google OAuth Client ID/Secret can now be maintained in Settings and are validated before browser authorization, replacing invalid `client_id`-less requests with an actionable local error.
 - Any non-shared mail account can now link an independent Google Calendar identity without changing its POP3/SMTP authentication; calendar refresh tokens are isolated in Windows Credential Manager and the account manager supports connect, reconnect, and disconnect.
 - Folder-tree roots are now selectable recursive mail views, with paging, sorting, and search constrained to the accounts sharing that root; Settings can hide Combined views and Calendar independently.
 - Read/unread changes now update recursive folder badges immediately, and badge counts use the current regional thousands separator.

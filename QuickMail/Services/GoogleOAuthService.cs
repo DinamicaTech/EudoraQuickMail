@@ -55,26 +55,40 @@ public partial class GoogleOAuthService : IGoogleOAuthService
         => $"QuickMail:GoogleCalendarToken:{username.ToLowerInvariant()}";
 
     private readonly ICredentialService _credentialService;
+    private readonly string _clientId;
+    private readonly string _clientSecret;
 
     // In-memory cache: lowercase username → live UserCredential (holds access token + auto-refresh).
     // Concurrent because IDLE watcher threads and pooled IMAP/SMTP operations call
     // GetAccessTokenAsync simultaneously; a plain Dictionary races under read-during-write.
     private readonly ConcurrentDictionary<string, UserCredential> _cache = new();
 
-    public GoogleOAuthService(ICredentialService credentialService)
+    public GoogleOAuthService(ICredentialService credentialService, IConfigService? configService = null)
     {
         _credentialService = credentialService;
+        var cfg = configService?.Load();
+        _clientId = !string.IsNullOrWhiteSpace(cfg?.GoogleClientId) ? cfg.GoogleClientId.Trim() : ClientId;
+        _clientSecret = !string.IsNullOrWhiteSpace(cfg?.GoogleClientSecret) ? cfg.GoogleClientSecret.Trim() : ClientSecret;
     }
 
-    private static GoogleAuthorizationCodeFlow CreateFlow(string[]? scopes, IDataStore? dataStore = null,
-                                                           bool forceConsent = false)
+    private void EnsureConfigured()
     {
+        if (string.IsNullOrWhiteSpace(_clientId))
+            throw new InvalidOperationException(
+                "Google OAuth is not configured. Enter a Desktop app Client ID and Client Secret " +
+                "in Settings > Advanced > Google integration, save, and restart QuickMail.");
+    }
+
+    private GoogleAuthorizationCodeFlow CreateFlow(string[]? scopes, IDataStore? dataStore = null,
+                                                    bool forceConsent = false)
+    {
+        EnsureConfigured();
         return new GoogleAuthorizationCodeFlow(new GoogleAuthorizationCodeFlow.Initializer
         {
             ClientSecrets = new ClientSecrets
             {
-                ClientId     = ClientId,
-                ClientSecret = ClientSecret,
+                ClientId     = _clientId,
+                ClientSecret = _clientSecret,
             },
             Scopes    = scopes,
             DataStore = dataStore ?? new NoOpDataStore(),
