@@ -653,10 +653,16 @@ public partial class App : Application
         return profile;
     }
 
-    private static bool IsUnusedProfile(ProfileContext profile) =>
-        !System.IO.File.Exists(System.IO.Path.Combine(profile.ProfileDir, "accounts.json")) &&
-        !System.IO.File.Exists(System.IO.Path.Combine(profile.ProfileDir, "config.ini")) &&
-        !System.IO.File.Exists(System.IO.Path.Combine(profile.ProfileDir, "mail.db"));
+    private static bool IsUnusedProfile(ProfileContext profile)
+    {
+        // Config and an empty SQLite file can legitimately be created while the welcome
+        // flow is still pending (for example after a failed external import). Accounts
+        // are the durable indication that onboarding actually completed.
+        var accountsFile = System.IO.Path.Combine(profile.ProfileDir, "accounts.json");
+        if (!System.IO.File.Exists(accountsFile)) return true;
+        try { return new AccountService(profile).LoadAccounts().Count == 0; }
+        catch { return false; } // Let normal startup report a damaged account file.
+    }
 
     private static void ApplyFirstRunDefaults(ProfileContext profile)
     {
