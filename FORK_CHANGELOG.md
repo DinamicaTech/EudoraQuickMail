@@ -10,6 +10,9 @@ before a public release.
 
 ## Unreleased
 
+- Added a one-time post-Eudora-import reminder when none of the imported accounts has a stored
+  password, and turned the empty Today agenda into a Google Calendar setup link when no Google
+  calendar identity is connected.
 - Made the second Eudora migration phase explicit and continuously visible: the importer now shows
   profile-import stages, warns users not to close the window, and prints an elapsed-time heartbeat
   every ten seconds while copying messages and building the full-text index.

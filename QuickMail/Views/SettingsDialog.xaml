@@ -26,7 +26,7 @@
         </Grid.RowDefinitions>
 
         <!-- Tabs -->
-        <TabControl Grid.Row="0" Margin="0,0,0,10">
+        <TabControl x:Name="SettingsTabs" Grid.Row="0" Margin="0,0,0,10">
             <!-- General Settings Tab -->
             <TabItem Header="_General" AutomationProperties.Name="General settings">
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
@@ -407,7 +407,7 @@
             </TabItem>
 
             <!-- Advanced Tab -->
-            <TabItem Header="_Advanced" AutomationProperties.Name="Advanced settings">
+            <TabItem x:Name="AdvancedTab" Header="_Advanced" AutomationProperties.Name="Advanced settings">
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                     <StackPanel Margin="10">
                         <!-- Updates Group -->

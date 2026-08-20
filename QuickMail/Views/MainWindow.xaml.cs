@@ -1517,6 +1517,7 @@ public partial class MainWindow : Window
 
         // Show local cache immediately so the UI is never blank on startup.
         await _vm.InitialLoadAsync();
+        UpdateTodayAgendaEmptyState();
         if (navigationConfig.ShowTodayAgenda && _vm.CalendarVm != null)
             _vm.CalendarVm.LoadAsync().LogFaults("load Today agenda");
         FocusActiveMessagePanel();
@@ -1540,6 +1541,8 @@ public partial class MainWindow : Window
         // the background sync has been kicked off, so the dialog does not delay startup;
         // the offer handler restores focus to the message panel explicitly on close.
         _vm.MaybeOfferDesktopShortcut();
+
+        MaybeShowImportedAccountPasswordReminder();
 
         // "QuickMail Update Installed" notice, once per applied update. After the shortcut
         // offer so a first-run-after-migration launch never stacks two dialogs.
@@ -5736,6 +5739,7 @@ public partial class MainWindow : Window
         // immediately (persisted without a Save step), so the calendar tree must reflect them even
         // when the dialog is closed with Cancel.
         _vm.RefreshAccountList();
+        UpdateTodayAgendaEmptyState();
     }
 
     private void OpenAccountManagerForAccount(AccountModel account)
@@ -5746,6 +5750,7 @@ public partial class MainWindow : Window
         accountVm.SelectedAccount = accountVm.Accounts.FirstOrDefault(a => a.Id == account.Id);
         dialog.ShowDialog();
         _vm.RefreshAccountList();   // see note above — reflect immediate sync toggles
+        UpdateTodayAgendaEmptyState();
     }
 
     // ── Tab & Window Management handlers ────────────────────────────────────────
@@ -6049,6 +6054,7 @@ public partial class MainWindow : Window
         if (dialog.ShowDialog() == true)
             accountVm.CommitNewAccount(addVm.ToAccountModel(), addVm.Password);
         _vm.RefreshAccountList();
+        UpdateTodayAgendaEmptyState();
     }
 
     private void DetachReadingPane_Click(object sender, RoutedEventArgs e)
@@ -6652,7 +6658,9 @@ public partial class MainWindow : Window
     private async void MenuNewFolder_Click(object sender, RoutedEventArgs e)
         => await NewFolderFromSelectionAsync();
 
-    private void MenuSettings_Click(object sender, RoutedEventArgs e)
+    private void MenuSettings_Click(object sender, RoutedEventArgs e) => OpenSettingsDialog();
+
+    private void OpenSettingsDialog(bool selectAdvanced = false)
     {
         // Font enumeration is a View-layer concern; the VM receives plain strings.
         var fontNames = System.Windows.Media.Fonts.SystemFontFamilies
@@ -6662,6 +6670,7 @@ public partial class MainWindow : Window
         var vm = new SettingsViewModel(_configService, _registry, _themeService, fontNames,
             (Application.Current as App)?.ScreenshotCapture);
         var dialog = new SettingsDialog(vm) { Owner = this };
+        if (selectAdvanced) dialog.SelectAdvancedTab();
 
         // Picking a startup folder needs a window, which is the View's job — the VM asks and gets a
         // plain record back (#516). Wired here rather than in SettingsDialog because this is where
@@ -6688,6 +6697,7 @@ public partial class MainWindow : Window
             ApplyTodayAgendaVisibility(cfg.ShowTodayAgenda);
             if (cfg.ShowTodayAgenda && _vm.CalendarVm != null)
                 _vm.CalendarVm.LoadAsync().LogFaults("load Today agenda after settings");
+            UpdateTodayAgendaEmptyState();
             _registry.ApplyUserOverrides(cfg.CustomHotkeys);
             // The plain-text preference may have changed; re-render the open message so a
             // Settings change takes effect live (focus is preserved). Theme changes already
@@ -6936,6 +6946,57 @@ public partial class MainWindow : Window
             _vm.IsStatusHighlighted = true;
             _vm.StatusText = $"Search index rebuild failed: {ex.Message}";
         }
+    }
+
+    private bool HasLinkedGoogleCalendar() => _vm.Accounts.Any(account =>
+        (account.CalendarProvider?.Equals("google", StringComparison.OrdinalIgnoreCase) == true &&
+         !string.IsNullOrWhiteSpace(account.CalendarIdentity)) ||
+        (account.AuthType == AuthType.OAuth2Google && account.SyncCalendar));
+
+    private void UpdateTodayAgendaEmptyState()
+    {
+        var needsGoogleLink = !HasLinkedGoogleCalendar();
+        TodayAgendaEmptyText.Text = needsGoogleLink
+            ? "Click here to link Google Calendar"
+            : "No appointments today. Click + to schedule an appointment.";
+        TodayAgendaEmptyText.Cursor = needsGoogleLink ? Cursors.Hand : Cursors.Arrow;
+        TodayAgendaEmptyText.TextDecorations = needsGoogleLink ? TextDecorations.Underline : null;
+    }
+
+    private void TodayAgendaEmptyText_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        if (!HasLinkedGoogleCalendar()) OpenSettingsDialog(selectAdvanced: true);
+    }
+
+    private void MaybeShowImportedAccountPasswordReminder()
+    {
+        var importLog = Path.Combine(_profileContext.ProfileDir, "eudora-import.log");
+        var reminderMarker = Path.Combine(_profileContext.ProfileDir, ".eudora-password-reminder-shown");
+        if (!File.Exists(importLog) || File.Exists(reminderMarker) || _vm.Accounts.Count == 0)
+            return;
+
+        try
+        {
+            if (!File.ReadAllText(importLog).Contains("completed successfully", StringComparison.OrdinalIgnoreCase))
+                return;
+        }
+        catch { return; }
+
+        var hasAnyPassword = _vm.Accounts.Any(account =>
+        {
+            try { return !string.IsNullOrWhiteSpace(_credentials.GetPassword(account.Id)); }
+            catch { return false; }
+        });
+        if (hasAnyPassword) return;
+
+        try { File.WriteAllText(reminderMarker, DateTimeOffset.Now.ToString("O", CultureInfo.InvariantCulture)); }
+        catch { }
+
+        MessageBox.Show(this,
+            "Eudora account passwords cannot be imported. Enter each account password manually in File > Manage Accounts before checking or sending mail.",
+            "Account passwords required",
+            MessageBoxButton.OK,
+            MessageBoxImage.Information);
     }
 
     private async void MessageContextMenu_ViewSource_Click(object sender, RoutedEventArgs e)

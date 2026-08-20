@@ -22,6 +22,8 @@ public partial class SettingsDialog : Window
         Closed += (_, _) => vm.DiagnosticsAnnouncementRequested -= OnDiagnosticsAnnouncement;
     }
 
+    public void SelectAdvancedTab() => SettingsTabs.SelectedItem = AdvancedTab;
+
     // Meta-announcement about screenshot capture (#175): force bypasses the
     // user's announcement preferences, matching the custom-announcements toggle.
     private void OnDiagnosticsAnnouncement(string text) =>
