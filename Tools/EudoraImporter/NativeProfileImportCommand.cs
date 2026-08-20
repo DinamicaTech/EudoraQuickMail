@@ -22,6 +22,7 @@ internal static class NativeProfileImportCommand
 
             var rootName = ValueAfter(args, "--root-name") ?? "Eudora";
             var eudoraRoot = ValueAfter(args, "--eudora-root");
+            Console.WriteLine("[1/4] Importing Eudora account configuration…");
             var accountImporter = new AccountService(profile);
             var importedAccounts = string.IsNullOrWhiteSpace(eudoraRoot)
                 ? new EudoraAccountImporter.ImportResult(0, Guid.Empty)
@@ -32,8 +33,10 @@ internal static class NativeProfileImportCommand
             ApplyImportedDefaults(profile, targetAccountId);
 
             var stopwatch = Stopwatch.StartNew();
+            Console.WriteLine("[2/4] Preparing the local message database…");
             var store = new LocalStoreService(profile);
             store.Initialize();
+            Console.WriteLine("[3/4] Creating the Eudora folder tree…");
             var folders = await ReadFolderLayoutAsync(source, targetAccountId);
             var cached = await store.LoadFoldersAsync();
             var merged = cached.GetValueOrDefault(targetAccountId, [])
@@ -45,8 +48,13 @@ internal static class NativeProfileImportCommand
                 await store.DeleteAccountDataAsync(ImportAccountId);
                 RemoveLegacyImportAccount(profile);
             }
-            var count = await BulkCopyMessagesAsync(source, Path.Combine(profile.ProfileDir, "mail.db"), folders, targetAccountId);
+            Console.WriteLine("[4/4] Importing messages and building the full-text search index.");
+            Console.WriteLine("      This is the longest stage. Do not close this window.");
+            var count = await RunWithHeartbeatAsync(
+                () => BulkCopyMessagesAsync(source, Path.Combine(profile.ProfileDir, "mail.db"), folders, targetAccountId),
+                "Still importing messages and building the search index");
             stopwatch.Stop();
+            Console.WriteLine("[4/4] Message import and search indexing completed.");
             Console.WriteLine($"Perfil: {profile.ProfileDir}");
             Console.WriteLine($"Cuenta Dominant: {targetAccountId}");
             Console.WriteLine($"Carpetas: {folders.Count:N0}");
@@ -58,6 +66,36 @@ internal static class NativeProfileImportCommand
         {
             Console.Error.WriteLine($"Error: {ex.Message}");
             return 2;
+        }
+    }
+
+    private static async Task<T> RunWithHeartbeatAsync<T>(Func<Task<T>> operation, string activity)
+    {
+        using var stopped = new CancellationTokenSource();
+        var stopwatch = Stopwatch.StartNew();
+        var heartbeat = Task.Run(async () =>
+        {
+            try
+            {
+                while (true)
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(10), stopped.Token);
+                    Console.WriteLine($"      {activity}… elapsed {stopwatch.Elapsed:hh\\:mm\\:ss}");
+                }
+            }
+            catch (OperationCanceledException) when (stopped.IsCancellationRequested)
+            {
+            }
+        });
+
+        try
+        {
+            return await operation();
+        }
+        finally
+        {
+            stopped.Cancel();
+            await heartbeat;
         }
     }
 

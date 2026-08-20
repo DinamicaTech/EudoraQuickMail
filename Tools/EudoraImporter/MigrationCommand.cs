@@ -25,10 +25,17 @@ internal static class MigrationCommand
                 WriteResult(profile, $"Eudora mailbox import failed with exit code {imported}.\n\n{ImportCommand.LastError}");
                 return imported;
             }
+
+            Console.WriteLine();
+            Console.WriteLine("Mailbox analysis completed.");
+            Console.WriteLine("The migration is NOT finished yet. Eudora QuickMail must now import the messages");
+            Console.WriteLine("into its local store and build the search index. Do not close this window.");
+            Console.WriteLine();
             var relocation = attachmentMode == "keep"
                 ? AttachmentRelocator.Result.Empty
                 : await AttachmentRelocator.CopyReferencedAsync(intermediate, source,
                     Path.Combine(Path.GetFullPath(profile), "Attachments", "Eudora"));
+            Console.WriteLine("Starting the Eudora QuickMail profile import…");
             var result = await NativeProfileImportCommand.RunAsync([
                 "--database", intermediate, "--profile", profile,
                 "--eudora-root", source, "--root-name", rootName]);
@@ -47,6 +54,7 @@ internal static class MigrationCommand
         }
         finally
         {
+            Console.WriteLine("Cleaning up temporary import files…");
             if (File.Exists(intermediate)) File.Delete(intermediate);
             if (File.Exists(intermediate + "-wal")) File.Delete(intermediate + "-wal");
             if (File.Exists(intermediate + "-shm")) File.Delete(intermediate + "-shm");
@@ -59,6 +67,10 @@ internal static class MigrationCommand
                     UseShellExecute = true,
                     Arguments = $"--profileDir \"{Path.GetFullPath(profile)}\"",
                 });
+            }
+            else
+            {
+                Console.WriteLine("Migration process finished. You may now close this window.");
             }
         }
     }

@@ -10,6 +10,9 @@ before a public release.
 
 ## Unreleased
 
+- Made the second Eudora migration phase explicit and continuously visible: the importer now shows
+  profile-import stages, warns users not to close the window, and prints an elapsed-time heartbeat
+  every ten seconds while copying messages and building the full-text index.
 - Adopted the definitive public product name **Eudora QuickMail** across window titles, onboarding,
   installer, shortcuts, package metadata and documentation. Internal executable, profile and
   credential identifiers remain compatible with existing QuickMail data.
