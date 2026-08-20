@@ -19,8 +19,10 @@ build.bat installer-production
 
 This publishes QuickMail plus EudoraImporter and the offline web assets, adds the standalone
 marker that disables GitHub update checks, then compiles the installer to
-`installer\Output\quickmail-v<version>-setup.exe`. The default installation is
-`C:\Docs\QuickMail`; shortcuts always launch with `--profileDir "C:\Docs\QuickMail\Data"`.
+`installer\Output\quickmail-v<version>-setup.exe`. The wizard asks separately for
+the program directory (default: `Program Files\QuickMail`) and the data directory
+(default: the current user's `Documents\QuickMail`). Shortcuts retain the selected
+data directory through the `--profileDir` argument.
 
 To recompile the installer without re-publishing (when `publish\QuickMail.exe` already
 exists), run the compiler directly:

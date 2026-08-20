@@ -100,7 +100,7 @@ internal static class EudoraImportService
                 to.Value = message.To.ToString();
                 cc.Value = message.Cc.ToString();
                 subject.Value = message.Subject ?? string.Empty;
-                var extracted = MessageTextExtractor.ExtractAll(message, sourceDirectory);
+                var extracted = MessageTextExtractor.ExtractAll(message, sourceDirectory, mailbox.RelativePath);
                 var rawMessage = await ReadRawMessageAsync(rawStream, positionBefore, parser.Position, cancellationToken);
                 headers.Value = ExtractRawHeaders(rawMessage);
                 if (string.IsNullOrWhiteSpace(extracted.PlainText) && string.IsNullOrWhiteSpace(extracted.Html))
@@ -112,7 +112,8 @@ internal static class EudoraImportService
                             rawBody, [])
                         : new MessageTextExtractor.ExtractedMessage(rawBody, string.Empty, []);
                 }
-                var rawAttachments = MessageTextExtractor.ExtractAttachmentPaths(rawMessage, sourceDirectory);
+                var rawAttachments = MessageTextExtractor.ExtractAttachmentPaths(rawMessage, sourceDirectory,
+                    mailbox.RelativePath);
                 var attachmentPaths = extracted.AttachmentPaths.Concat(rawAttachments)
                     .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
                 body.Value = extracted.PlainText;

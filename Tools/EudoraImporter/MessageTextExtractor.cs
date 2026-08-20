@@ -8,7 +8,7 @@ internal static partial class MessageTextExtractor
 {
     internal sealed record ExtractedMessage(string PlainText, string Html, IReadOnlyList<string> AttachmentPaths);
 
-    public static ExtractedMessage ExtractAll(MimeMessage message, string sourceDirectory)
+    public static ExtractedMessage ExtractAll(MimeMessage message, string sourceDirectory, string? mailboxPath = null)
     {
         var plain = message.TextBody ?? ExtractEntity(message.Body);
         var html = message.HtmlBody ?? string.Empty;
@@ -20,19 +20,23 @@ internal static partial class MessageTextExtractor
             html = plain;
             plain = HtmlToText(html);
         }
-        var attachmentPaths = ExtractAttachmentPaths(plain + "\n" + HtmlToText(html), sourceDirectory);
+        var attachmentPaths = ExtractAttachmentPaths(plain + "\n" + HtmlToText(html), sourceDirectory, mailboxPath);
 
         if (string.IsNullOrWhiteSpace(plain) && !string.IsNullOrWhiteSpace(html))
             plain = HtmlToText(html);
         plain = EudoraAttachmentLine().Replace(plain, string.Empty);
+        plain = EudoraEmbeddedLine().Replace(plain, string.Empty);
         plain = EudoraEmbeddedTag().Replace(plain, string.Empty);
         plain = ExcessBlankLines().Replace(plain, "\n\n").Trim();
         return new ExtractedMessage(plain, html, attachmentPaths);
     }
 
-    public static IReadOnlyList<string> ExtractAttachmentPaths(string rawMessage, string sourceDirectory) =>
+    public static IReadOnlyList<string> ExtractAttachmentPaths(string rawMessage, string sourceDirectory,
+        string? mailboxPath = null) =>
         AttachmentPath().Matches(rawMessage)
             .Select(match => ResolveAttachmentPath(match.Groups["path"].Value.Trim().Trim('"'), sourceDirectory))
+            .Concat(EmbeddedPath().Matches(rawMessage)
+                .Select(match => ResolveEmbeddedPath(match.Groups["name"].Value.Trim(), sourceDirectory, mailboxPath)))
             .Where(path => path is not null)
             .Cast<string>()
             .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -48,6 +52,7 @@ internal static partial class MessageTextExtractor
         var text = ExtractEntity(message.Body);
         if (string.IsNullOrWhiteSpace(text)) return string.Empty;
         text = EudoraAttachmentLine().Replace(text, string.Empty);
+        text = EudoraEmbeddedLine().Replace(text, string.Empty);
         text = EudoraEmbeddedTag().Replace(text, string.Empty);
         return ExcessBlankLines().Replace(text, "\n\n").Trim();
     }
@@ -65,6 +70,30 @@ internal static partial class MessageTextExtractor
             if (File.Exists(candidate)) return Path.GetFullPath(candidate);
         // Retain the most likely link even when the disk is temporarily unavailable.
         return Path.GetFullPath(Path.Combine(sourceDirectory, "Attach", value));
+    }
+
+    private static string? ResolveEmbeddedPath(string fileName, string sourceDirectory, string? mailboxPath)
+    {
+        if (string.IsNullOrWhiteSpace(fileName)) return null;
+        fileName = Path.GetFileName(fileName);
+
+        // Rotated Eudora mailboxes conventionally use matching EmbeddedYYYY folders.
+        // Prefer that exact year, then the current Embedded folder. Only fall back to
+        // another yearly folder when the filename is unique, avoiding a wrong image
+        // when Eudora reused names such as image001.png in several years.
+        var year = mailboxPath is null ? null : MailboxYear().Match(Path.GetFileNameWithoutExtension(mailboxPath)).Value;
+        var preferred = new List<string>();
+        if (!string.IsNullOrEmpty(year)) preferred.Add(Path.Combine(sourceDirectory, "Embedded" + year, fileName));
+        preferred.Add(Path.Combine(sourceDirectory, "Embedded", fileName));
+        var direct = preferred.FirstOrDefault(File.Exists);
+        if (direct is not null) return Path.GetFullPath(direct);
+
+        var matches = Directory.Exists(sourceDirectory)
+            ? Directory.EnumerateDirectories(sourceDirectory, "Embedded*")
+                .Select(directory => Path.Combine(directory, fileName))
+                .Where(File.Exists).Take(2).ToList()
+            : [];
+        return matches.Count == 1 ? Path.GetFullPath(matches[0]) : null;
     }
 
     private static string ExtractEntity(MimeEntity? entity)
@@ -102,8 +131,14 @@ internal static partial class MessageTextExtractor
 
     [GeneratedRegex(@"(?im)^\s*Attachment Converted:\s*.*(?:\r?\n|$)")]
     private static partial Regex EudoraAttachmentLine();
+    [GeneratedRegex(@"(?im)^\s*Embedded Content:\s*.*(?:\r?\n|$)")]
+    private static partial Regex EudoraEmbeddedLine();
     [GeneratedRegex("(?im)^\\s*Attachment Converted:\\s*(?:\\\"(?<path>[^\\\"]+)\\\"|(?<path>.+?))\\s*$")]
     private static partial Regex AttachmentPath();
+    [GeneratedRegex(@"(?im)^\s*Embedded Content:\s*(?<name>.+?):\s*[0-9a-f]{8}(?:,[0-9a-f]{8}){3}\s*$")]
+    private static partial Regex EmbeddedPath();
+    [GeneratedRegex(@"(?:19|20)\d{2}")]
+    private static partial Regex MailboxYear();
     [GeneratedRegex(@"(?is)</?x-(?:embedded|eudora-option)[^>]*>")]
     private static partial Regex EudoraEmbeddedTag();
     [GeneratedRegex(@"(?is)<(script|style)\b[^>]*>.*?</\1\s*>")]

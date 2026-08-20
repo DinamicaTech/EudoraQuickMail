@@ -13,7 +13,6 @@
 #define MyAppSupportURL MyAppURL + "/issues"
 #define MyAppExeName MyAppName + ".exe"
 #define MyAppDescription "Keyboard-first, accessible desktop email client for Windows"
-#define ProductionProfileDir "{app}\Data"
 
 ; Source path (relative to this script). Matches the output of `build.bat publish`
 ; and the GitHub Actions release step (`dotnet publish ... -o publish/`).
@@ -35,7 +34,7 @@ AppUpdatesURL={#MyAppURL}/releases
 AppCopyright=Copyright (c) 2026 {#MyAppPublisher}.
 
 ; Installation directory
-DefaultDirName={sd}\Docs\QuickMail
+DefaultDirName={autopf}\QuickMail
 DefaultGroupName={#MyAppName}
 AllowNoIcons=yes
 
@@ -56,9 +55,9 @@ MinVersion=10.0.17763
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 
-; Privileges: install per-user without elevation by default, but let the user
-; choose an all-users install (which elevates) via the standard dialog.
-PrivilegesRequired=lowest
+; Program files are installed machine-wide by default. The data directory is
+; selected separately and remains writable by the current user.
+PrivilegesRequired=admin
 PrivilegesRequiredOverridesAllowed=dialog
 
 ; If QuickMail is running during an upgrade, use the Restart Manager to detect the
@@ -86,16 +85,43 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 Source: "{#SourcePath}\*"; DestDir: "{app}"; Excludes: "*.pdb,*.xml"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Parameters: "--profileDir ""{#ProductionProfileDir}"""; Comment: "{cm:AppDescription}"
+Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Parameters: "--profileDir ""{code:GetDataDir}"""; Comment: "{cm:AppDescription}"
 Name: "{group}\{cm:UninstallProgram,{#MyAppName}}"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Parameters: "--profileDir ""{#ProductionProfileDir}"""; Comment: "{cm:AppDescription}"; Tasks: desktopicon
+Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Parameters: "--profileDir ""{code:GetDataDir}"""; Comment: "{cm:AppDescription}"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\{#MyAppExeName}"; Parameters: "--profileDir ""{#ProductionProfileDir}"""; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#MyAppExeName}"; Parameters: "--profileDir ""{code:GetDataDir}"""; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
 
 #include "CodeDependencies.iss"
 
 [Code]
+var
+  DataDirPage: TInputDirWizardPage;
+
+procedure InitializeWizard;
+begin
+  DataDirPage := CreateInputDirPage(wpSelectDir,
+    'QuickMail data folder',
+    'Where should QuickMail store your data?',
+    'Choose a folder for email, indexes, settings, and copied or moved attachments, including embedded images. This folder is kept when QuickMail is upgraded.',
+    False, '');
+  DataDirPage.Add('');
+  DataDirPage.Values[0] := GetPreviousData('DataDir', ExpandConstant('{userdocs}\QuickMail'));
+end;
+
+function GetDataDir(Param: String): String;
+begin
+  if DataDirPage <> nil then
+    Result := DataDirPage.Values[0]
+  else
+    Result := ExpandConstant('{userdocs}\QuickMail');
+end;
+
+procedure RegisterPreviousData(PreviousDataKey: Integer);
+begin
+  SetPreviousData(PreviousDataKey, 'DataDir', GetDataDir(''));
+end;
+
 function InitializeSetup(): Boolean;
 begin
   // App is x64 only; keep dependency installers 64-bit too.
@@ -108,18 +134,29 @@ begin
   Result := True;
 end;
 
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssPostInstall then
+  begin
+    ForceDirectories(GetDataDir(''));
+    SaveStringToFile(ExpandConstant('{app}\QuickMailDataPath.txt'), GetDataDir(''), False);
+  end;
+end;
+
 // Offer to remove the production profile. Credentials remain in Windows Credential Manager.
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
   UserDataPath: String;
+  StoredDataPath: AnsiString;
 begin
-  if CurUninstallStep = usPostUninstall then
+  if CurUninstallStep = usUninstall then
   begin
-    UserDataPath := ExpandConstant('{#ProductionProfileDir}');
-    if DirExists(UserDataPath) then
+    if LoadStringFromFile(ExpandConstant('{app}\QuickMailDataPath.txt'), StoredDataPath) then
     begin
-      if MsgBox(CustomMessage('RemoveUserData'),
-                mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES then
+      UserDataPath := Trim(String(StoredDataPath));
+      if (UserDataPath <> '') and DirExists(UserDataPath) and
+         (MsgBox(CustomMessage('RemoveUserData'),
+                 mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES) then
       begin
         DelTree(UserDataPath, True, True, True);
       end;
