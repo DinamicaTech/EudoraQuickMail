@@ -117,6 +117,24 @@ begin
     Result := ExpandConstant('{userdocs}\QuickMail');
 end;
 
+function NextButtonClick(CurPageID: Integer): Boolean;
+var
+  ProgramPath: String;
+  DataPath: String;
+begin
+  Result := True;
+  if CurPageID <> DataDirPage.ID then Exit;
+  ProgramPath := AddBackslash(ExpandFileName(WizardDirValue));
+  DataPath := AddBackslash(ExpandFileName(GetDataDir('')));
+  if (CompareText(ProgramPath, DataPath) = 0) or
+     (Pos(Lowercase(ProgramPath), Lowercase(DataPath)) = 1) then
+  begin
+    MsgBox('The data folder must be separate from the program folder. Choose a folder such as Documents\QuickMail.',
+      mbError, MB_OK);
+    Result := False;
+  end;
+end;
+
 procedure RegisterPreviousData(PreviousDataKey: Integer);
 begin
   SetPreviousData(PreviousDataKey, 'DataDir', GetDataDir(''));
@@ -148,12 +166,21 @@ procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
   UserDataPath: String;
   StoredDataPath: AnsiString;
+  ProgramPath: String;
 begin
   if CurUninstallStep = usUninstall then
   begin
     if LoadStringFromFile(ExpandConstant('{app}\QuickMailDataPath.txt'), StoredDataPath) then
     begin
       UserDataPath := Trim(String(StoredDataPath));
+      ProgramPath := AddBackslash(ExpandConstant('{app}'));
+      if (CompareText(AddBackslash(UserDataPath), ProgramPath) = 0) or
+         (Pos(Lowercase(ProgramPath), Lowercase(AddBackslash(UserDataPath))) = 1) then
+      begin
+        // Older test installers allowed the profile to equal the installation
+        // directory. Never recursively delete application files as user data.
+        Exit;
+      end;
       if (UserDataPath <> '') and DirExists(UserDataPath) and
          (MsgBox(CustomMessage('RemoveUserData'),
                  mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES) then
