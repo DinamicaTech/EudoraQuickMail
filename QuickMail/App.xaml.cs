@@ -744,7 +744,8 @@ public partial class App : Application
     private static bool StartFirstRunEudoraImport(Views.FirstRunWelcomeWindow welcome)
     {
         var options = new Services.EudoraImportOptions(
-            welcome.EudoraRoot, welcome.DataFolder, welcome.RootDisplayName, welcome.AttachmentMode);
+            welcome.EudoraRoot, welcome.DataFolder, welcome.RootDisplayName, welcome.AttachmentMode,
+            welcome.ImportFilters);
         if (!Services.EudoraImportLauncher.TryStart(options, out var error))
         {
             MessageBox.Show(error, "Import Eudora", MessageBoxButton.OK, MessageBoxImage.Error);

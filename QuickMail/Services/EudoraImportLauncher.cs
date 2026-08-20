@@ -7,7 +7,8 @@ public sealed record EudoraImportOptions(
     string EudoraRoot,
     string DataFolder,
     string RootDisplayName,
-    string AttachmentMode);
+    string AttachmentMode,
+    bool ImportFilters);
 
 /// <summary>Starts the external Eudora migration with one argument-safe code path.</summary>
 public static class EudoraImportLauncher
@@ -36,6 +37,7 @@ public static class EudoraImportLauncher
                 "migrate", "--source", options.EudoraRoot, "--profile", target.ProfileDir,
                 "--quickmail", Environment.ProcessPath ?? string.Empty,
                 "--root-name", options.RootDisplayName, "--attachments", options.AttachmentMode,
+                "--filters", options.ImportFilters ? "true" : "false",
             }) start.ArgumentList.Add(argument);
             Process.Start(start);
             error = null;

@@ -14,6 +14,7 @@ public partial class FirstRunWelcomeWindow : Window
     public string RootDisplayName => RootNameBox.Text.Trim();
     public string AttachmentMode => MoveAttachments.IsChecked == true ? "move"
         : CopyAttachments.IsChecked == true ? "copy" : "keep";
+    public bool ImportFilters => ImportFiltersCheckBox.IsChecked == true;
 
     public FirstRunWelcomeWindow(string defaultDataFolder, bool importOnly = false)
     {
@@ -24,7 +25,7 @@ public partial class FirstRunWelcomeWindow : Window
         {
             Title = "Import from Eudora";
             HeadingText.Text = "Import from Eudora";
-            IntroductionText.Text = "Import Eudora accounts, folders, messages and referenced attachments. Eudora should be closed during the import.";
+            IntroductionText.Text = "Import Eudora accounts, folders, messages, filters and referenced attachments. Eudora should be closed during the import.";
             WithoutEudoraButton.Content = "Cancel";
         }
     }
@@ -89,6 +90,7 @@ public partial class FirstRunWelcomeWindow : Window
         var confirmation = MessageBox.Show(this,
             $"All Eudora messages from the following folder will be imported:\n\n{EudoraRoot}\n\n" +
             $"Eudora QuickMail data folder:\n{DataFolder}\n\n" +
+            $"Import filters: {(ImportFilters ? "Yes" : "No")}\n\n" +
             "Any previous Eudora import in that data folder will be replaced. Other accounts and messages are preserved. " +
             "Eudora QuickMail will close during the import and reopen automatically when it finishes. Continue?",
             "Import from Eudora", MessageBoxButton.YesNo, MessageBoxImage.Information);

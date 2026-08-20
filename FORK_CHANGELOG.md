@@ -10,6 +10,10 @@ before a public release.
 
 ## Unreleased
 
+- The Eudora migration wizard can now optionally import `filters.pce` (enabled by default),
+  converting supported contains-and-move filters into global QuickMail rules while preserving
+  automatic/manual behavior, resolving Eudora folder paths, retaining existing rules, avoiding
+  duplicates on repeated imports, and reporting unsupported rules in the migration summary.
 - Installed copies now honor their adjacent `QuickMailDataPath.txt` even when the executable is
   launched directly without shortcut arguments; About displays the active data folder explicitly.
 - Added actionable error dialogs for manual receive/send failures, identifying the account,

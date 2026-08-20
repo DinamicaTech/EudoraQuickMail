@@ -7056,7 +7056,8 @@ public partial class MainWindow : Window
         if (wizard.ShowDialog() != true ||
             wizard.Choice != FirstRunWelcomeWindow.WelcomeChoice.ImportEudora) return;
         var options = new EudoraImportOptions(
-            wizard.EudoraRoot, wizard.DataFolder, wizard.RootDisplayName, wizard.AttachmentMode);
+            wizard.EudoraRoot, wizard.DataFolder, wizard.RootDisplayName, wizard.AttachmentMode,
+            wizard.ImportFilters);
         if (!EudoraImportLauncher.TryStart(options, out var error))
         {
             MessageBox.Show(this, error, "Import from Eudora", MessageBoxButton.OK, MessageBoxImage.Error);

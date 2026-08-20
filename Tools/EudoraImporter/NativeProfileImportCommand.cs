@@ -22,7 +22,8 @@ internal static class NativeProfileImportCommand
 
             var rootName = ValueAfter(args, "--root-name") ?? "Eudora";
             var eudoraRoot = ValueAfter(args, "--eudora-root");
-            Console.WriteLine("[1/4] Importing Eudora account configuration…");
+            var filtersPath = ValueAfter(args, "--filters");
+            Console.WriteLine("[1/5] Importing Eudora account configuration…");
             var accountImporter = new AccountService(profile);
             var importedAccounts = string.IsNullOrWhiteSpace(eudoraRoot)
                 ? new EudoraAccountImporter.ImportResult(0, Guid.Empty)
@@ -33,10 +34,10 @@ internal static class NativeProfileImportCommand
             ApplyImportedDefaults(profile, targetAccountId);
 
             var stopwatch = Stopwatch.StartNew();
-            Console.WriteLine("[2/4] Preparing the local message database…");
+            Console.WriteLine("[2/5] Preparing the local message database…");
             var store = new LocalStoreService(profile);
             store.Initialize();
-            Console.WriteLine("[3/4] Creating the Eudora folder tree…");
+            Console.WriteLine("[3/5] Creating the Eudora folder tree…");
             var folders = await ReadFolderLayoutAsync(source, targetAccountId);
             var cached = await store.LoadFoldersAsync();
             var merged = cached.GetValueOrDefault(targetAccountId, [])
@@ -48,17 +49,27 @@ internal static class NativeProfileImportCommand
                 await store.DeleteAccountDataAsync(ImportAccountId);
                 RemoveLegacyImportAccount(profile);
             }
-            Console.WriteLine("[4/4] Importing messages and building the full-text search index.");
+            Console.WriteLine("[4/5] Importing messages and building the full-text search index.");
             Console.WriteLine("      This is the longest stage. Do not close this window.");
             var count = await RunWithHeartbeatAsync(
                 () => BulkCopyMessagesAsync(source, Path.Combine(profile.ProfileDir, "mail.db"), folders, targetAccountId),
                 "Still importing messages and building the search index");
             stopwatch.Stop();
-            Console.WriteLine("[4/4] Message import and search indexing completed.");
+            Console.WriteLine("[4/5] Message import and search indexing completed.");
+            Console.WriteLine("[5/5] Importing Eudora filters…");
+            EudoraFilterImporter.Result? filterResult = null;
+            if (!string.IsNullOrWhiteSpace(filtersPath))
+                filterResult = EudoraFilterImporter.Import(filtersPath, profile.ProfileDir, folders);
+            else
+                Console.WriteLine("      Filter import was disabled.");
             Console.WriteLine($"Perfil: {profile.ProfileDir}");
             Console.WriteLine($"Cuenta Dominant: {targetAccountId}");
             Console.WriteLine($"Carpetas: {folders.Count:N0}");
             Console.WriteLine($"Mensajes: {count:N0}");
+            if (filterResult is not null)
+                Console.WriteLine($"Filtros: {filterResult.Imported:N0} imported, " +
+                    $"{filterResult.Existing:N0} already present, {filterResult.Unsupported:N0} unsupported " +
+                    $"(of {filterResult.Total:N0})");
             Console.WriteLine($"Tiempo: {stopwatch.Elapsed:c}");
             return 0;
         }
