@@ -530,6 +530,13 @@ public partial class ComposeWindow : Window
 
     private void AddressBox_PreviewKeyDown(object sender, KeyEventArgs e)
     {
+        if (ReferenceEquals(sender, ToBox) && e.Key == Key.Tab && Keyboard.Modifiers == ModifierKeys.None)
+        {
+            ToBox.CommitPendingInput();
+            e.Handled = true;
+            SubjectBox.Focus();
+            return;
+        }
         if (!AutoCompletePopup.IsOpen) return;
         if (e.Key == Key.Down)
         {
@@ -1479,7 +1486,7 @@ public partial class ComposeWindow : Window
         _registry.Register(new CommandDefinition(
             id: "compose.addAttachments", category: "Compose", title: "Add Attachments…",
             execute: () => _vm.AddAttachmentsCommand.Execute(null),
-            defaultKey: Key.A, defaultModifiers: ModifierKeys.Control | ModifierKeys.Shift));
+            defaultKey: Key.H, defaultModifiers: ModifierKeys.Control));
 
         _registry.Register(new CommandDefinition(
             id: "compose.focusAttachments", category: "Compose", title: "Focus Attachment List",
@@ -1503,6 +1510,8 @@ public partial class ComposeWindow : Window
             id: "compose.focusBody", category: "Compose", title: "Focus Message Body",
             execute: FocusActiveEditor,
             defaultKey: Key.Y, defaultModifiers: ModifierKeys.Alt));
+
+        _registry.ApplyUserOverrides(_configService.Load().CustomHotkeys);
 
         _registry.Register(new CommandDefinition(
             id: "compose.checkAddresses", category: "Compose", title: "Check Addresses",

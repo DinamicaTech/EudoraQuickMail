@@ -559,6 +559,8 @@ public partial class MainWindow : Window
             else if (e.PropertyName == nameof(MainViewModel.SelectedFolder) ||
                      e.PropertyName == nameof(MainViewModel.FolderTree))
             {
+                if (e.PropertyName == nameof(MainViewModel.SelectedFolder))
+                    _vm.UpdateMessageListTabTitle(_vm.SelectedFolder?.DisplayName);
                 Dispatcher.InvokeAsync(() => SyncFolderTreeSelection(false), DispatcherPriority.Input);
             }
             else if (e.PropertyName == nameof(MainViewModel.IsMessageOpen))
@@ -1054,6 +1056,12 @@ public partial class MainWindow : Window
             id: "contacts.openAddressBook", category: "Contacts", title: "Address Book",
             execute: OpenAddressBook,
             defaultKey: Key.B, defaultModifiers: ModifierKeys.Control | ModifierKeys.Shift));
+
+        _registry.Register(new CommandDefinition(
+            id: "compose.addAttachments", category: "Compose", title: "Add Attachments…",
+            execute: () => _vm.ActiveComposeTab?.AddAttachments(),
+            defaultKey: Key.H, defaultModifiers: ModifierKeys.Control,
+            isAvailable: () => _vm.ActiveComposeTab is not null));
 
         _registry.Register(new CommandDefinition(
             id: "contacts.syncNow", category: "Contacts", title: "Sync Contacts Now",
@@ -2107,6 +2115,8 @@ public partial class MainWindow : Window
         if (Mouse.LeftButton != MouseButtonState.Pressed
             || e.NewValue is not FolderTreeNode { Folder: { } folder }) return;
         await _vm.SelectFolderCommand.ExecuteAsync(folder);
+        _vm.UpdateMessageListTabTitle(folder.DisplayName);
+        _vm.ActivateMessageListTab();
     }
 
     private void PaneSplitter_DragCompleted(object sender, DragCompletedEventArgs e)
@@ -5601,16 +5611,17 @@ public partial class MainWindow : Window
         {
             var content = window.DetachForDockedHost(this);
             ComposeTabViewModel? tab = null;
-            tab = new ComposeTabViewModel(composeVm.WindowTitle, content, async () =>
+            tab = new ComposeTabViewModel(composeVm.TabTitle, content, async () =>
             {
                 var mayClose = await window.TryCloseDockedAsync();
                 if (mayClose) closed?.Invoke();
                 return mayClose;
-            }, window.ForceDisposeDockedHost);
+            }, window.ForceDisposeDockedHost,
+                () => composeVm.AddAttachmentsCommand.Execute(null));
             composeVm.PropertyChanged += (_, e) =>
             {
-                if (e.PropertyName == nameof(ComposeViewModel.WindowTitle) && tab is not null)
-                    tab.Title = composeVm.WindowTitle;
+                if (e.PropertyName == nameof(ComposeViewModel.TabTitle) && tab is not null)
+                    tab.Title = composeVm.TabTitle;
             };
             composeVm.CloseRequested += () => _vm.CloseTab(tab);
             _vm.OpenComposeTab(tab);

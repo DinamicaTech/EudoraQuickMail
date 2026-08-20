@@ -822,7 +822,9 @@
                 </DockPanel>
 
                 <Grid x:Name="TodayAgendaPanel" Grid.Row="4">
-                    <TextBlock Text="No events today" HorizontalAlignment="Center" VerticalAlignment="Center"
+                    <TextBlock Text="No appointments today. Click + to schedule an appointment."
+                               TextWrapping="Wrap" TextAlignment="Center" Margin="8"
+                               HorizontalAlignment="Center" VerticalAlignment="Center"
                                Foreground="{DynamicResource Theme.TextSecondary}"
                                Visibility="{Binding CalendarVm.HasTodayEvents, Converter={StaticResource InverseBoolToVisibilityConverter}}"/>
                     <ListBox x:Name="TodayAgendaList"

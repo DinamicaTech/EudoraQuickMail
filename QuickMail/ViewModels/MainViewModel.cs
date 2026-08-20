@@ -1545,6 +1545,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     public bool IsComposeTabActive => ActiveTab is ComposeTabViewModel;
     public bool IsPrimaryContentAreaVisible => IsComposeTabActive || IsMessageListAreaVisible;
     public object? ActiveComposeContent => (ActiveTab as ComposeTabViewModel)?.Content;
+    public ComposeTabViewModel? ActiveComposeTab => ActiveTab as ComposeTabViewModel;
 
     /// <summary>
     /// True when a message is open in a standalone MessageWindow (Window mode).
@@ -1619,6 +1620,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     public void OpenComposeTab(ComposeTabViewModel tab)
     {
         EnsureMessageListTab(force: true);
+        UpdateMessageListTabTitle(SelectedFolder?.DisplayName);
         OpenTabs.Add(tab);
         ActiveTab = tab;
         OnPropertyChanged(nameof(ShowTabStrip));
@@ -6852,6 +6854,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         // Saved/combined views can represent arbitrary predicates; use the materialized result set.
         return Messages.ToList();
+    }
+
+    public void UpdateMessageListTabTitle(string? folderName)
+    {
+        var tab = OpenTabs.OfType<MessageListTabViewModel>().FirstOrDefault();
+        if (tab is not null)
+            tab.Title = string.IsNullOrWhiteSpace(folderName) ? "Messages" : folderName;
     }
 
     /// <summary>

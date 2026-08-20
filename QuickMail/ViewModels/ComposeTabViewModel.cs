@@ -7,12 +7,15 @@ public sealed class ComposeTabViewModel : TabSessionViewModel
     public object Content { get; }
     public Func<Task<bool>> TryCloseAsync { get; }
     public Action ForceDispose { get; }
+    public Action AddAttachments { get; }
 
-    public ComposeTabViewModel(string title, object content, Func<Task<bool>> tryCloseAsync, Action forceDispose)
+    public ComposeTabViewModel(string title, object content, Func<Task<bool>> tryCloseAsync,
+        Action forceDispose, Action addAttachments)
         : base(new TabSessionModel { Kind = TabKind.Compose, Title = title, CanClose = true })
     {
         Content = content;
         TryCloseAsync = tryCloseAsync;
         ForceDispose = forceDispose;
+        AddAttachments = addAttachments;
     }
 }

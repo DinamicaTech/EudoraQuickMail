@@ -31,6 +31,7 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
     [ObservableProperty] private string _bcc = string.Empty;
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(WindowTitle))]
+    [NotifyPropertyChangedFor(nameof(TabTitle))]
     private string _subject = string.Empty;
 
     /// <summary>What kind of composition this is; drives the window title prefix.</summary>
@@ -208,6 +209,19 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
         ReplaceSignature(value);
     }
 
+    public string TabTitle => string.IsNullOrWhiteSpace(Subject)
+        ? ComposeKind switch
+        {
+            ComposeKind.Reply => "Reply",
+            ComposeKind.ReplyAll => "Reply All",
+            ComposeKind.Forward => "Forward",
+            ComposeKind.EditDraft or ComposeKind.NewDraft => "Draft",
+            ComposeKind.EditScheduled => "Scheduled Message",
+            ComposeKind.EditTemplate => "Edit Template",
+            _ => "New Message",
+        }
+        : Subject.Trim();
+
     public void Seed(ComposeModel model)
     {
         _inReplyToMessageId = model.InReplyToMessageId;
@@ -218,6 +232,7 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
         _scheduledAt = model.ScheduledAt;
         ComposeKind         = model.Kind;
         OnPropertyChanged(nameof(WindowTitle));
+        OnPropertyChanged(nameof(TabTitle));
 
         To      = model.To;
         Cc      = model.Cc;
@@ -263,7 +278,7 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
             // seeded mode so an image-only signature is not flattened to an empty string.
             var html = _seededHtmlBody ?? _markdown.PlainTextToHtml(bodyBeforeSignature);
             _seededHtmlBody = AppendBeforeClosingBody(html,
-                BuildHtmlSignatureBlock(SenderAccount, bodyBeforeSignature));
+                "<p><br></p>" + BuildHtmlSignatureBlock(SenderAccount, bodyBeforeSignature));
             _isDirty = false; // signature insertion is not a user edit
         }
 

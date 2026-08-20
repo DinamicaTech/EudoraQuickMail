@@ -207,6 +207,8 @@
             editor.getBody().lang = quickMailLanguage;
             editor.getBody().spellcheck = !!quickMailLanguage;
             editor.focus();
+            if (editor.getBody().firstChild)
+              editor.selection.setCursorLocation(editor.getBody().firstChild, 0);
             emitContent();
             editor.getBody().addEventListener('contextmenu', openQuickMailMenu);
             editor.getBody().addEventListener('pointerdown', event => {

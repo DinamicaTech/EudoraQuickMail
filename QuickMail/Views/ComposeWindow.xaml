@@ -21,7 +21,6 @@
     <Window.InputBindings>
         <KeyBinding Key="S" Modifiers="Alt"  Command="{Binding SendCommand}"/>
         <KeyBinding Key="S" Modifiers="Ctrl" Command="{Binding SaveDraftCommand}"/>
-        <KeyBinding Key="A" Modifiers="Ctrl+Shift" Command="{Binding AddAttachmentsCommand}"/>
         <KeyBinding Key="G" Modifiers="Ctrl+Shift" Command="NavigationCommands.Search"/>
     </Window.InputBindings>
 
@@ -45,7 +44,7 @@
                 <MenuItem Header="_Insert Template…" Command="{Binding InsertTemplateCommand}"/>
                 <MenuItem Header="Save as _Template" Command="{Binding SaveAsTemplateCommand}"/>
                 <Separator/>
-                <MenuItem Header="_Add Attachments…" Command="{Binding AddAttachmentsCommand}" InputGestureText="Ctrl+Shift+A"/>
+                <MenuItem Header="_Add Attachments…" Command="{Binding AddAttachmentsCommand}" InputGestureText="Ctrl+H"/>
                 <Separator/>
                 <MenuItem Header="_Close" Command="{Binding CancelCommand}" InputGestureText="Esc"/>
             </MenuItem>
@@ -256,7 +255,7 @@
           </DockPanel>
           <StatusBar Margin="0,6,0,0" MinHeight="26"
                      Background="{DynamicResource Theme.ChromeBackground}"
-                     BorderBrush="{DynamicResource Theme.Border}" BorderThickness="1,1,1,0">
+                     BorderBrush="{DynamicResource Theme.Border}" BorderThickness="1">
             <StatusBarItem>
               <TextBlock Text="{Binding AutoSaveText}" Foreground="{DynamicResource Theme.TextSecondary}"
                          Margin="0,0,12,0"/>
@@ -416,7 +415,7 @@
                     Content="Add Files…"
                     Command="{Binding AddAttachmentsCommand}"
                     AutomationProperties.Name="Add file attachments"
-                    AutomationProperties.AcceleratorKey="Ctrl+Shift+A"
+                    AutomationProperties.AcceleratorKey="Ctrl+H"
                     HorizontalAlignment="Left"
                     Margin="0,2" TabIndex="7"/>
             <ListBox Grid.Row="8" Grid.Column="0" Grid.ColumnSpan="2"
