@@ -1616,6 +1616,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     public void OpenComposeTab(ComposeTabViewModel tab)
     {
+        EnsureMessageListTab(force: true);
         OpenTabs.Add(tab);
         ActiveTab = tab;
         OnPropertyChanged(nameof(ShowTabStrip));
@@ -1745,9 +1746,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// Ensures the permanent message-list tab is first in OpenTabs when Tab mode is active.
     /// No-op in ReadingPane or Window mode, and no-op if the tab already exists.
     /// </summary>
-    public void EnsureMessageListTab()
+    public void EnsureMessageListTab(bool force = false)
     {
-        if (MessageOpenMode != MessageOpenMode.Tab) return;
+        if (!force && MessageOpenMode != MessageOpenMode.Tab) return;
         if (OpenTabs.OfType<MessageListTabViewModel>().Any()) return;
 
         var tab = new MessageListTabViewModel();

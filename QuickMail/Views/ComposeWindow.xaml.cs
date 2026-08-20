@@ -1997,6 +1997,10 @@ public partial class ComposeWindow : Window
         _dockedOwner = owner;
         var root = (FrameworkElement)Content;
         Content = null;
+        // Once detached from this Window the root would otherwise inherit MainWindow's
+        // MainViewModel through the ContentControl. That makes compose bindings resolve against
+        // the mail list (empty From picker, main status in the editor, no HTML initialization).
+        root.DataContext = _vm;
         while (InputBindings.Count > 0)
         {
             var binding = InputBindings[0];
