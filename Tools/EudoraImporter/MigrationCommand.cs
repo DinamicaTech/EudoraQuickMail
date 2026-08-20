@@ -22,7 +22,7 @@ internal static class MigrationCommand
             var imported = await ImportCommand.RunAsync(["--source", source, "--output", intermediate, "--replace"]);
             if (imported != 0)
             {
-                WriteResult(profile, $"Eudora mailbox import failed with exit code {imported}.");
+                WriteResult(profile, $"Eudora mailbox import failed with exit code {imported}.\n\n{ImportCommand.LastError}");
                 return imported;
             }
             var relocation = attachmentMode == "keep"

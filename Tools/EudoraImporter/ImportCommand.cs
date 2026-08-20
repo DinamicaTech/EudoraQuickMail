@@ -5,8 +5,11 @@ namespace EudoraImporter;
 
 internal static class ImportCommand
 {
+    internal static string? LastError { get; private set; }
+
     public static async Task<int> RunAsync(string[] args)
     {
+        LastError = null;
         if (args.Any(a => a is "-h" or "--help")) { PrintUsage(); return 0; }
         try
         {
@@ -53,12 +56,18 @@ internal static class ImportCommand
         }
         catch (CommandLineException ex)
         {
+            LastError = ex.ToString();
             Console.Error.WriteLine(ex.Message);
             Console.Error.WriteLine();
             PrintUsage();
             return 2;
         }
-        catch (Exception ex) { Console.Error.WriteLine($"Error: {ex.Message}"); return 1; }
+        catch (Exception ex)
+        {
+            LastError = ex.ToString();
+            Console.Error.WriteLine($"Error: {ex.Message}");
+            return 1;
+        }
     }
 
     internal static string? DiscoverEudoraDataDirectory()
