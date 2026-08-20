@@ -1157,7 +1157,7 @@
                              PreviewKeyDown="Toolbar_PreviewKeyDown">
                         <Button Style="{DynamicResource ToolbarButton}" Content="Check Mail"
                                 Click="CheckMailButton_Click" AutomationProperties.Name="Check mail"
-                                ToolTip="Download incoming POP3 mail and send queued messages"/>
+                                ToolTip="Check IMAP mail, download incoming POP3 mail, and send queued messages"/>
                         <Separator/>
                         <Button x:Name="ToolbarFirstButton" Style="{DynamicResource ToolbarButton}"
                                 Command="{Binding NewMessageCommand}" Content="New"

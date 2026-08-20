@@ -10,6 +10,10 @@ before a public release.
 
 ## Unreleased
 
+- Rehabilitated the original Standard IMAP/SMTP account path as an optional backend alongside
+  local POP3/SMTP accounts. Manual Check Mail now reconnects eligible remote accounts, synchronizes
+  each IMAP/Graph Inbox, reports per-account progress, then continues with POP3 and queued sending
+  even when one remote account is unavailable.
 - Google OAuth Client ID/Secret can now be maintained in Settings and are validated before browser authorization, replacing invalid `client_id`-less requests with an actionable local error.
 - Any non-shared mail account can now link an independent Google Calendar identity without changing its POP3/SMTP authentication; calendar refresh tokens are isolated in Windows Credential Manager and the account manager supports connect, reconnect, and disconnect.
 - Folder-tree roots are now selectable recursive mail views, with paging, sorting, and search constrained to the accounts sharing that root; Settings can hide Combined views and Calendar independently.

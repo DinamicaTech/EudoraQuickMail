@@ -5934,6 +5934,11 @@ public partial class MainWindow : Window
         _vm.IsStatusHighlighted = true;
         try
         {
+            await _vm.CheckRemoteMailNowAsync(message =>
+            {
+                _vm.IsStatusHighlighted = true;
+                _vm.StatusText = message;
+            });
             await app.CheckMailNowAsync(message =>
             {
                 _vm.IsStatusHighlighted = true;

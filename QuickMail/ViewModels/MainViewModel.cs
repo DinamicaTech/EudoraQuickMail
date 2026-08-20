@@ -6823,6 +6823,56 @@ public partial class MainViewModel : ObservableObject, IDisposable
         return Messages.ToList();
     }
 
+    /// <summary>
+    /// Forces an Inbox synchronization for every active server-backed account. POP3 is deliberately
+    /// not handled here: App.CheckMailNowAsync owns its download-and-delete pipeline. This restores
+    /// the original QuickMail meaning of Check Mail without coupling IMAP to the local-first receiver.
+    /// </summary>
+    public async Task CheckRemoteMailNowAsync(Action<string>? progress = null)
+    {
+        var remoteAccounts = Accounts
+            .Where(a => a.BackendKind is BackendKind.ImapSmtp or BackendKind.MicrosoftGraph)
+            .ToList();
+        if (remoteAccounts.Count == 0) return;
+
+        var completed = 0;
+        foreach (var account in remoteAccounts)
+        {
+            progress?.Invoke($"Checking mail for {account.AccountLabel} {completed + 1}/{remoteAccounts.Count}…");
+            try
+            {
+                if (!_connectedAccountIds.Contains(account.Id))
+                {
+                    var (_, folders) = await ConnectOneAccountAsync(account);
+                    ApplyAccountStatus(account, folders, "manual-check");
+                    if (folders == null) continue;
+                    SetCachedFolders(account.Id, folders);
+                }
+
+                if (_cachedFolders.TryGetValue(account.Id, out var cached))
+                {
+                    var inbox = cached.FirstOrDefault(f => f.Kind == SpecialFolderKind.Inbox)
+                        ?? cached.FirstOrDefault(f => string.Equals(f.FullName, "INBOX", StringComparison.OrdinalIgnoreCase));
+                    if (inbox != null)
+                        await _syncService.SyncFolderFullAsync(account, inbox, CancellationToken.None);
+                }
+
+                ScheduleFolderCountRefresh(account.Id);
+            }
+            catch (Exception ex)
+            {
+                // One unavailable account must not prevent the remaining IMAP accounts, POP3
+                // downloads, or the scheduled-send queue from being checked.
+                LogService.Log($"Manual Check Mail/{account.AccountLabel}", ex);
+                progress?.Invoke($"Could not check {account.AccountLabel}: {ex.Message}");
+            }
+            finally { completed++; }
+        }
+
+        RebuildFolderListFromCache();
+        WireUpWatchers();
+    }
+
     private async Task FetchVirtualFolderAsync(string fullName)
     {
         var displayName = FolderScopedAggregateDisplayName(fullName);
