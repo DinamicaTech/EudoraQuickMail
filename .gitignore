@@ -61,6 +61,10 @@ QuickMail.Tests/TestResults/
 /eudora-messages.db
 /eudora-messages.db-*
 /local-mvp-profile/
+/TestData/
+
+# Original local artwork drop; the tracked application icon lives under QuickMail/Assets/App.
+/QuickMail.ico
 
 # SQLite transient files created by importer and recovery tests
 *.db-shm
