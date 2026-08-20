@@ -697,7 +697,7 @@ public partial class App : Application
             {
                 rawDir = System.IO.File.ReadAllText(installedPathFile).Trim();
                 if (string.IsNullOrWhiteSpace(rawDir))
-                    throw new InvalidDataException("The installed data-path file is empty.");
+                    throw new System.IO.InvalidDataException("The installed data-path file is empty.");
             }
             catch (Exception ex)
             {

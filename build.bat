@@ -46,6 +46,7 @@ goto end
 echo Publishing Eudora QuickMail — single-file self-contained win-x64...
 if exist publish\ rmdir /s /q publish\
 dotnet publish QuickMail\QuickMail.csproj -c Release -o publish\
+if errorlevel 1 exit /b 1
 dotnet publish Tools\EudoraImporter\EudoraImporter.csproj -c Release -o publish-importer\ -p:PublishSingleFile=true -p:PublishReadyToRun=false --self-contained true
 if errorlevel 1 exit /b 1
 copy /y publish-importer\EudoraImporter.exe publish\EudoraImporter.exe >nul
