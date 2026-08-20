@@ -677,29 +677,13 @@ public partial class App : Application
 
     private static bool StartFirstRunEudoraImport(Views.FirstRunWelcomeWindow welcome)
     {
-        var importer = System.IO.Path.Combine(AppContext.BaseDirectory, "EudoraImporter.exe");
-        if (!System.IO.File.Exists(importer))
+        var options = new Services.EudoraImportOptions(
+            welcome.EudoraRoot, welcome.DataFolder, welcome.RootDisplayName, welcome.AttachmentMode);
+        if (!Services.EudoraImportLauncher.TryStart(options, out var error))
         {
-            MessageBox.Show("EudoraImporter.exe was not found beside QuickMail.exe.",
-                "Import Eudora", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show(error, "Import Eudora", MessageBoxButton.OK, MessageBoxImage.Error);
             return false;
         }
-        var target = ProfileContext.TryCreate(welcome.DataFolder, out var error);
-        if (target is null)
-        {
-            ShowProfileError(welcome.DataFolder, error!);
-            return false;
-        }
-        ApplyFirstRunDefaults(target);
-
-        var start = new System.Diagnostics.ProcessStartInfo(importer) { UseShellExecute = true };
-        foreach (var argument in new[]
-        {
-            "migrate", "--source", welcome.EudoraRoot, "--profile", target.ProfileDir,
-            "--quickmail", Environment.ProcessPath ?? string.Empty, "--root-name", welcome.RootDisplayName,
-            "--attachments", welcome.AttachmentMode,
-        }) start.ArgumentList.Add(argument);
-        System.Diagnostics.Process.Start(start);
         Current.Shutdown();
         return true;
     }

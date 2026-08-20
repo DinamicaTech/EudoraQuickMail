@@ -6965,41 +6965,16 @@ public partial class MainWindow : Window
 
     private void MenuImportEudora_Click(object sender, RoutedEventArgs e)
     {
-        var dialog = new Microsoft.Win32.OpenFileDialog
+        var wizard = new FirstRunWelcomeWindow(_profileContext.ProfileDir, importOnly: true) { Owner = this };
+        if (wizard.ShowDialog() != true ||
+            wizard.Choice != FirstRunWelcomeWindow.WelcomeChoice.ImportEudora) return;
+        var options = new EudoraImportOptions(
+            wizard.EudoraRoot, wizard.DataFolder, wizard.RootDisplayName, wizard.AttachmentMode);
+        if (!EudoraImportLauncher.TryStart(options, out var error))
         {
-            Title = "Select Eudora.exe",
-            Filter = "Eudora executable (Eudora.exe)|Eudora.exe|Executable files (*.exe)|*.exe",
-            CheckFileExists = true,
-            Multiselect = false,
-        };
-        if (dialog.ShowDialog(this) != true) return;
-        if (!Path.GetFileName(dialog.FileName).Equals("Eudora.exe", StringComparison.OrdinalIgnoreCase))
-        {
-            MessageBox.Show(this, "Please select Eudora.exe from the Eudora mail folder.",
-                "Import from Eudora", MessageBoxButton.OK, MessageBoxImage.Warning);
+            MessageBox.Show(this, error, "Import from Eudora", MessageBoxButton.OK, MessageBoxImage.Error);
             return;
         }
-        var eudoraFolder = Path.GetDirectoryName(dialog.FileName)!;
-
-        var importer = Path.Combine(AppContext.BaseDirectory, "EudoraImporter.exe");
-        if (!File.Exists(importer))
-        {
-            MessageBox.Show(this, "EudoraImporter.exe was not found beside QuickMail.exe.",
-                "Import from Eudora", MessageBoxButton.OK, MessageBoxImage.Error);
-            return;
-        }
-        var confirmation = MessageBox.Show(this,
-            $"All Eudora messages from the following folder will be imported:\n\n{eudoraFolder}\n\n" +
-            "Any previous Eudora message import will be replaced. Other accounts and their messages will not be changed.\n\n" +
-            "Account configurations found in Eudora.ini will also be imported without passwords.\n\n" +
-            "QuickMail will close during the import and reopen automatically when it finishes. Continue?",
-            "Import from Eudora", MessageBoxButton.YesNo, MessageBoxImage.Information);
-        if (confirmation != MessageBoxResult.Yes) return;
-        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(importer)
-        {
-            UseShellExecute = true,
-            Arguments = $"migrate --source \"{eudoraFolder}\" --profile \"{_profileContext.ProfileDir}\" --quickmail \"{Environment.ProcessPath}\" --root-name \"Eudora\"",
-        });
         Application.Current.Shutdown();
     }
 

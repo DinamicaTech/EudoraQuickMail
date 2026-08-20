@@ -5,6 +5,7 @@ namespace QuickMail.Views;
 
 public partial class FirstRunWelcomeWindow : Window
 {
+    private readonly bool _importOnly;
     public enum WelcomeChoice { None, CreateAccount, ImportEudora }
 
     public WelcomeChoice Choice { get; private set; }
@@ -14,10 +15,18 @@ public partial class FirstRunWelcomeWindow : Window
     public string AttachmentMode => MoveAttachments.IsChecked == true ? "move"
         : CopyAttachments.IsChecked == true ? "copy" : "keep";
 
-    public FirstRunWelcomeWindow(string defaultDataFolder)
+    public FirstRunWelcomeWindow(string defaultDataFolder, bool importOnly = false)
     {
         InitializeComponent();
+        _importOnly = importOnly;
         DataFolderBox.Text = defaultDataFolder;
+        if (importOnly)
+        {
+            Title = "Import from Eudora";
+            HeadingText.Text = "Import from Eudora";
+            IntroductionText.Text = "Import Eudora accounts, folders, messages and referenced attachments. Eudora should be closed during the import.";
+            WithoutEudoraButton.Content = "Cancel";
+        }
     }
 
     private void BrowseEudora_Click(object sender, RoutedEventArgs e)
@@ -42,6 +51,11 @@ public partial class FirstRunWelcomeWindow : Window
 
     private void WithoutEudora_Click(object sender, RoutedEventArgs e)
     {
+        if (_importOnly)
+        {
+            DialogResult = false;
+            return;
+        }
         Choice = WelcomeChoice.CreateAccount;
         DialogResult = true;
     }
@@ -72,6 +86,13 @@ public partial class FirstRunWelcomeWindow : Window
                 "Confirm Attachment Move", MessageBoxButton.YesNo, MessageBoxImage.Warning);
             if (second != MessageBoxResult.Yes) return;
         }
+        var confirmation = MessageBox.Show(this,
+            $"All Eudora messages from the following folder will be imported:\n\n{EudoraRoot}\n\n" +
+            $"QuickMail data folder:\n{DataFolder}\n\n" +
+            "Any previous Eudora import in that data folder will be replaced. Other accounts and messages are preserved. " +
+            "QuickMail will close during the import and reopen automatically when it finishes. Continue?",
+            "Import from Eudora", MessageBoxButton.YesNo, MessageBoxImage.Information);
+        if (confirmation != MessageBoxResult.Yes) return;
         Choice = WelcomeChoice.ImportEudora;
         DialogResult = true;
     }

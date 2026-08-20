@@ -20,7 +20,11 @@ internal static class MigrationCommand
         try
         {
             var imported = await ImportCommand.RunAsync(["--source", source, "--output", intermediate, "--replace"]);
-            if (imported != 0) return imported;
+            if (imported != 0)
+            {
+                WriteResult(profile, $"Eudora mailbox import failed with exit code {imported}.");
+                return imported;
+            }
             var relocation = attachmentMode == "keep"
                 ? AttachmentRelocator.Result.Empty
                 : await AttachmentRelocator.CopyReferencedAsync(intermediate, source,
@@ -30,7 +34,16 @@ internal static class MigrationCommand
                 "--eudora-root", source, "--root-name", rootName]);
             if (result == 0 && attachmentMode == "move")
                 AttachmentRelocator.DeleteVerifiedSources(relocation, source);
+            WriteResult(profile, result == 0
+                ? $"Eudora import completed successfully at {DateTimeOffset.Now:O}."
+                : $"Eudora profile import failed with exit code {result}.");
             return result;
+        }
+        catch (Exception ex)
+        {
+            WriteResult(profile, $"Eudora import failed at {DateTimeOffset.Now:O}.\n{ex}");
+            Console.Error.WriteLine($"Import failed: {ex.Message}");
+            return 2;
         }
         finally
         {
@@ -48,6 +61,16 @@ internal static class MigrationCommand
                 });
             }
         }
+    }
+
+    private static void WriteResult(string profile, string message)
+    {
+        try
+        {
+            Directory.CreateDirectory(profile);
+            File.WriteAllText(Path.Combine(profile, "eudora-import.log"), message);
+        }
+        catch { }
     }
 
     private static string? Value(string[] args, string name)
