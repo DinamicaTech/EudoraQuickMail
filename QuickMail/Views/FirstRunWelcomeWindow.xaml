@@ -1,0 +1,64 @@
+<Window x:Class="QuickMail.Views.FirstRunWelcomeWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Welcome to QuickMail" Height="650" Width="760"
+        MinHeight="620" MinWidth="700" WindowStartupLocation="CenterScreen"
+        ResizeMode="CanResizeWithGrip" ShowInTaskbar="True">
+    <Grid Margin="28">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <StackPanel Grid.Row="0" Margin="0,0,0,20">
+            <TextBlock Text="Welcome to QuickMail" FontSize="25" FontWeight="SemiBold"/>
+            <TextBlock Margin="0,8,0,0" TextWrapping="Wrap"
+                       Text="QuickMail can migrate your Eudora accounts, folders, messages and referenced attachments now. Eudora should be closed during the import."/>
+        </StackPanel>
+
+        <GroupBox Grid.Row="1" Header="Eudora installation" Margin="0,0,0,12">
+            <Grid Margin="12">
+                <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                <TextBox x:Name="EudoraExeBox" MinHeight="30" VerticalContentAlignment="Center"/>
+                <Button Grid.Column="1" Margin="8,0,0,0" Padding="16,5" Content="Browse…" Click="BrowseEudora_Click"/>
+            </Grid>
+        </GroupBox>
+
+        <GroupBox Grid.Row="2" Header="QuickMail data folder" Margin="0,0,0,12">
+            <Grid Margin="12">
+                <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                <TextBox x:Name="DataFolderBox" MinHeight="30" VerticalContentAlignment="Center"/>
+                <Button Grid.Column="1" Margin="8,0,0,0" Padding="16,5" Content="Browse…" Click="BrowseData_Click"/>
+            </Grid>
+        </GroupBox>
+
+        <GroupBox Grid.Row="3" Header="Folder tree" Margin="0,0,0,12">
+            <Grid Margin="12">
+                <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition/></Grid.ColumnDefinitions>
+                <TextBlock VerticalAlignment="Center" Margin="0,0,12,0" Text="Root display name"/>
+                <TextBox x:Name="RootNameBox" Grid.Column="1" Text="Eudora" MinHeight="30" VerticalContentAlignment="Center"/>
+            </Grid>
+        </GroupBox>
+
+        <GroupBox Grid.Row="4" Header="Referenced attachments" Margin="0,0,0,18">
+            <StackPanel Margin="12">
+                <RadioButton x:Name="KeepAttachments" IsChecked="True" Margin="0,3" Content="Keep them in their current Eudora folders"/>
+                <TextBlock Margin="24,0,0,7" Opacity="0.75" TextWrapping="Wrap" Text="Uses no additional disk space. QuickMail keeps links to the existing files."/>
+                <RadioButton x:Name="CopyAttachments" Margin="0,3" Content="Copy referenced attachments to the QuickMail data folder"/>
+                <TextBlock Margin="24,0,0,7" Opacity="0.75" TextWrapping="Wrap" Text="Only files linked by an imported message are copied; orphan files are ignored. Additional disk space is required."/>
+                <RadioButton x:Name="MoveAttachments" Margin="0,3" Content="Move referenced attachments to the QuickMail data folder"/>
+                <TextBlock Margin="24,0,0,0" Foreground="#B3261E" TextWrapping="Wrap" Text="Advanced option: Eudora will lose access to those attachments. Files are removed from Eudora only after a verified copy and a successful message import."/>
+            </StackPanel>
+        </GroupBox>
+
+        <Grid Grid.Row="5">
+            <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+            <Button Grid.Column="1" Margin="0,0,8,0" Padding="18,7" Content="Set up without Eudora" Click="WithoutEudora_Click"/>
+            <Button Grid.Column="2" Padding="18,7" Content="Import Eudora" IsDefault="True" Click="Import_Click"/>
+        </Grid>
+    </Grid>
+</Window>

@@ -226,6 +226,27 @@ public partial class App : Application
             LogService.Log($"ui-probe mode: surfaces=[{string.Join(";", UiProbe.Surfaces)}] theme={UiProbe.ThemeId ?? "(configured)"} scale={UiProbe.TextScale?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "(configured)"}");
         }
 
+        var openAccountCreationAfterStartup = false;
+        if (UiProbe is null && IsUnusedProfile(profile))
+        {
+            var welcome = new Views.FirstRunWelcomeWindow(profile.ProfileDir);
+            if (welcome.ShowDialog() != true)
+            {
+                Shutdown();
+                return;
+            }
+
+            if (welcome.Choice == Views.FirstRunWelcomeWindow.WelcomeChoice.ImportEudora)
+            {
+                if (!StartFirstRunEudoraImport(welcome))
+                    Shutdown();
+                return;
+            }
+
+            ApplyFirstRunDefaults(profile);
+            openAccountCreationAfterStartup = true;
+        }
+
         var onlineMode = e.Args.Contains("--online", StringComparer.OrdinalIgnoreCase);
         if (onlineMode && UiProbe != null)
         {
@@ -527,6 +548,9 @@ public partial class App : Application
 
             mainWindow.Show();
 
+            if (openAccountCreationAfterStartup)
+                mainWindow.Dispatcher.BeginInvoke(mainWindow.ShowFirstRunAccountCreation);
+
             // A second launch of the same profile signals this handle instead of starting
             // another process; restore the window (and drop the tray icon) exactly as the
             // tray icon's Open action would. The signal arrives on a thread-pool thread.
@@ -627,6 +651,57 @@ public partial class App : Application
             ShowProfileError(rawDir, error!);
 
         return profile;
+    }
+
+    private static bool IsUnusedProfile(ProfileContext profile) =>
+        !System.IO.File.Exists(System.IO.Path.Combine(profile.ProfileDir, "accounts.json")) &&
+        !System.IO.File.Exists(System.IO.Path.Combine(profile.ProfileDir, "config.ini")) &&
+        !System.IO.File.Exists(System.IO.Path.Combine(profile.ProfileDir, "mail.db"));
+
+    private static void ApplyFirstRunDefaults(ProfileContext profile)
+    {
+        var configService = new ConfigService(profile);
+        var config = configService.Load();
+        config.ShowAccountsPanel = false;
+        config.ShowCombinedViews = false;
+        config.ShowTodayAgenda = true;
+        config.ShowCalendar = true;
+        config.NotifyOnNewMail = true;
+        config.AutoSaveDrafts = true;
+        config.AutoSaveIntervalSeconds = 30;
+        config.DefaultComposeMode = Models.ComposeMode.Html;
+        config.StartupFolder = "In";
+        config.StartupFolderLabel = "In";
+        configService.Save(config);
+    }
+
+    private static bool StartFirstRunEudoraImport(Views.FirstRunWelcomeWindow welcome)
+    {
+        var importer = System.IO.Path.Combine(AppContext.BaseDirectory, "EudoraImporter.exe");
+        if (!System.IO.File.Exists(importer))
+        {
+            MessageBox.Show("EudoraImporter.exe was not found beside QuickMail.exe.",
+                "Import Eudora", MessageBoxButton.OK, MessageBoxImage.Error);
+            return false;
+        }
+        var target = ProfileContext.TryCreate(welcome.DataFolder, out var error);
+        if (target is null)
+        {
+            ShowProfileError(welcome.DataFolder, error!);
+            return false;
+        }
+        ApplyFirstRunDefaults(target);
+
+        var start = new System.Diagnostics.ProcessStartInfo(importer) { UseShellExecute = true };
+        foreach (var argument in new[]
+        {
+            "migrate", "--source", welcome.EudoraRoot, "--profile", target.ProfileDir,
+            "--quickmail", Environment.ProcessPath ?? string.Empty, "--root-name", welcome.RootDisplayName,
+            "--attachments", welcome.AttachmentMode,
+        }) start.ArgumentList.Add(argument);
+        System.Diagnostics.Process.Start(start);
+        Current.Shutdown();
+        return true;
     }
 
     private static void ShowProfileError(string dir, string reason)

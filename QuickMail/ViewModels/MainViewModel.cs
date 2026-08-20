@@ -4773,17 +4773,19 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 var exists = groupAccounts.Any(a => _cachedFolders.TryGetValue(a.Id, out var folders)
                     && folders.Any(f => f.Kind == kind));
                 if (!exists) continue;
+                var physicalFolders = groupAccounts
+                    .Where(a => _cachedFolders.ContainsKey(a.Id))
+                    .SelectMany(a => _cachedFolders[a.Id])
+                    .Where(f => f.Kind == kind).ToList();
                 var label = kind switch
                 {
+                    SpecialFolderKind.Inbox when physicalFolders.Any(f =>
+                        f.DisplayName.Equals("In", StringComparison.OrdinalIgnoreCase)) => "In",
                     SpecialFolderKind.Inbox => "Inbox", SpecialFolderKind.Drafts => "Draft",
                     SpecialFolderKind.Scheduled => "Scheduled", SpecialFolderKind.Sent => "Sent",
                     SpecialFolderKind.Trash => "Trash", SpecialFolderKind.Junk => "Junk",
                     _ => kind.ToString(),
                 };
-                var physicalFolders = groupAccounts
-                    .Where(a => _cachedFolders.ContainsKey(a.Id))
-                    .SelectMany(a => _cachedFolders[a.Id])
-                    .Where(f => f.Kind == kind).ToList();
                 var aggregateFolder = CreateRootAggregateFolder(rootGroup.Key, kind, label);
                 aggregateFolder.UnreadCount = physicalFolders.Sum(f => f.UnreadCount);
                 aggregateFolder.MessageCount = physicalFolders.Sum(f => f.MessageCount);

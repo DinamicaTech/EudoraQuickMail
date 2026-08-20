@@ -20,16 +20,35 @@ internal static class NativeProfileImportCommand
             var profile = new ProfileContext(Path.GetFullPath(profilePath));
             if (!File.Exists(source)) throw new ArgumentException($"No existe la base importada: {source}");
 
+            var rootName = ValueAfter(args, "--root-name") ?? "Eudora";
+            var eudoraRoot = ValueAfter(args, "--eudora-root");
+            var accountImporter = new AccountService(profile);
+            var importedAccounts = string.IsNullOrWhiteSpace(eudoraRoot)
+                ? new EudoraAccountImporter.ImportResult(0, Guid.Empty)
+                : EudoraAccountImporter.ImportAccounts(Path.Combine(eudoraRoot, "Eudora.ini"), accountImporter, rootName);
+            var targetAccountId = importedAccounts.DominantAccountId;
+            if (targetAccountId == Guid.Empty)
+                throw new ArgumentException("No se pudo localizar la cuenta Dominant en [Settings] de Eudora.ini.");
+            ApplyImportedDefaults(profile, targetAccountId);
+
             var stopwatch = Stopwatch.StartNew();
             var store = new LocalStoreService(profile);
             store.Initialize();
-            var folders = await ReadFolderLayoutAsync(source);
-            await store.SaveFoldersAsync(ImportAccountId, folders);
-            SaveImportAccount(profile);
-            var count = await BulkCopyMessagesAsync(source, Path.Combine(profile.ProfileDir, "mail.db"), folders);
+            var folders = await ReadFolderLayoutAsync(source, targetAccountId);
+            var cached = await store.LoadFoldersAsync();
+            var merged = cached.GetValueOrDefault(targetAccountId, [])
+                .Where(existing => !folders.Any(imported => imported.FullName.Equals(existing.FullName, StringComparison.OrdinalIgnoreCase)))
+                .Concat(folders).ToList();
+            await store.SaveFoldersAsync(targetAccountId, merged);
+            if (targetAccountId != ImportAccountId)
+            {
+                await store.DeleteAccountDataAsync(ImportAccountId);
+                RemoveLegacyImportAccount(profile);
+            }
+            var count = await BulkCopyMessagesAsync(source, Path.Combine(profile.ProfileDir, "mail.db"), folders, targetAccountId);
             stopwatch.Stop();
             Console.WriteLine($"Perfil: {profile.ProfileDir}");
-            Console.WriteLine($"Cuenta: Eudora importado ({ImportAccountId})");
+            Console.WriteLine($"Cuenta Dominant: {targetAccountId}");
             Console.WriteLine($"Carpetas: {folders.Count:N0}");
             Console.WriteLine($"Mensajes: {count:N0}");
             Console.WriteLine($"Tiempo: {stopwatch.Elapsed:c}");
@@ -42,33 +61,33 @@ internal static class NativeProfileImportCommand
         }
     }
 
-    private static void SaveImportAccount(ProfileContext profile)
+    private static void RemoveLegacyImportAccount(ProfileContext profile)
     {
         var accounts = new AccountService(profile);
         var all = accounts.LoadAccounts();
-        var existing = all.FirstOrDefault(a => a.Id == ImportAccountId);
-        if (existing is null)
-        {
-            all.Add(new AccountModel
-            {
-                Id = ImportAccountId,
-                AccountName = "Eudora importado",
-                DisplayName = "Eudora importado",
-                BackendKind = BackendKind.LocalArchive,
-                CheckIncomingMail = false,
-            });
-        }
-        else
-        {
-            existing.AccountName = "Eudora importado";
-            existing.DisplayName = "Eudora importado";
-            existing.BackendKind = BackendKind.LocalArchive;
-            existing.CheckIncomingMail = false;
-        }
+        all.RemoveAll(a => a.Id == ImportAccountId);
         accounts.SaveAccounts(all);
     }
 
-    private static async Task<List<MailFolderModel>> ReadFolderLayoutAsync(string source)
+    private static void ApplyImportedDefaults(ProfileContext profile, Guid dominantAccountId)
+    {
+        var service = new ConfigService(profile);
+        var config = service.Load();
+        config.ShowAccountsPanel = false;
+        config.ShowCombinedViews = false;
+        config.ShowTodayAgenda = true;
+        config.ShowCalendar = true;
+        config.NotifyOnNewMail = true;
+        config.AutoSaveDrafts = true;
+        config.AutoSaveIntervalSeconds = 30;
+        config.DefaultComposeMode = ComposeMode.Html;
+        config.StartupFolder = "In";
+        config.StartupFolderAccount = dominantAccountId.ToString();
+        config.StartupFolderLabel = "In";
+        service.Save(config);
+    }
+
+    private static async Task<List<MailFolderModel>> ReadFolderLayoutAsync(string source, Guid accountId)
     {
         await using var connection = new SqliteConnection($"Data Source={source};Mode=ReadOnly;Pooling=False;");
         await connection.OpenAsync();
@@ -96,7 +115,7 @@ internal static class NativeProfileImportCommand
         foreach (var mailbox in mailboxes.Where(parents.Contains)) allPaths.Add(mailbox + "/Messages");
         return allPaths.OrderBy(p => p, StringComparer.OrdinalIgnoreCase).Select(path => new MailFolderModel
         {
-            AccountId = ImportAccountId,
+            AccountId = accountId,
             FullName = path,
             DisplayName = path.Split('/')[^1],
             ParentId = path.Contains('/') ? path[..path.LastIndexOf('/')] : null,
@@ -115,7 +134,8 @@ internal static class NativeProfileImportCommand
         _ => SpecialFolderKind.None,
     };
 
-    private static async Task<long> BulkCopyMessagesAsync(string source, string target, IReadOnlyList<MailFolderModel> folders)
+    private static async Task<long> BulkCopyMessagesAsync(string source, string target,
+        IReadOnlyList<MailFolderModel> folders, Guid accountId)
     {
         await using var connection = new SqliteConnection($"Data Source={target};Mode=ReadWrite;Pooling=False;");
         await connection.OpenAsync();
@@ -155,10 +175,10 @@ internal static class NativeProfileImportCommand
         await using var copy = connection.CreateCommand();
         copy.Transaction = (SqliteTransaction)tx;
         copy.CommandText = """
-            DELETE FROM LocalMessageFts WHERE account_id=$aid;
-            DELETE FROM LocalMessageFtsKey WHERE account_id=$aid;
-            DELETE FROM MessageDetail WHERE account_id=$aid;
-            DELETE FROM MessageSummary WHERE account_id=$aid;
+            DELETE FROM LocalMessageFts WHERE account_id=$aid AND unique_id LIKE 'eudora-%';
+            DELETE FROM LocalMessageFtsKey WHERE account_id=$aid AND unique_id LIKE 'eudora-%';
+            DELETE FROM MessageDetail WHERE account_id=$aid AND unique_id LIKE 'eudora-%';
+            DELETE FROM MessageSummary WHERE account_id=$aid AND unique_id LIKE 'eudora-%';
 
             INSERT INTO MessageSummary
                 (unique_id,account_id,folder_name,from_disp,to_addr,subject,date_ticks,is_read,
@@ -181,13 +201,13 @@ internal static class NativeProfileImportCommand
             INSERT INTO LocalMessageFtsKey(account_id,unique_id,folder_name,fts_rowid)
             SELECT account_id,unique_id,folder_name,rowid FROM LocalMessageFts WHERE account_id=$aid;
             """;
-        copy.Parameters.AddWithValue("$aid", ImportAccountId.ToString());
+        copy.Parameters.AddWithValue("$aid", accountId.ToString());
         await copy.ExecuteNonQueryAsync();
         await tx.CommitAsync();
 
         await using var count = connection.CreateCommand();
         count.CommandText = "SELECT count(*) FROM MessageSummary WHERE account_id=$aid;";
-        count.Parameters.AddWithValue("$aid", ImportAccountId.ToString());
+        count.Parameters.AddWithValue("$aid", accountId.ToString());
         return Convert.ToInt64(await count.ExecuteScalarAsync() ?? 0);
     }
 

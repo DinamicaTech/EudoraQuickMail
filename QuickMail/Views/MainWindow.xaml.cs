@@ -5918,6 +5918,18 @@ public partial class MainWindow : Window
         win.Show();
     }
 
+    public void ShowFirstRunAccountCreation()
+    {
+        var accountVm = new AccountManagerViewModel(_accountService, _credentials, _imap, _oauth,
+            _localStore, _configService, _featureGate, _providerCatalog, _autoDiscover, _smtp,
+            _contactSyncService, _graphCalendarSyncService);
+        var addVm = accountVm.CreateAddAccountViewModel();
+        var dialog = new AddAccountDialog(addVm) { Owner = this };
+        if (dialog.ShowDialog() == true)
+            accountVm.CommitNewAccount(addVm.ToAccountModel(), addVm.Password);
+        _vm.RefreshAccountList();
+    }
+
     private void DetachReadingPane_Click(object sender, RoutedEventArgs e)
     {
         if (_vm.SelectedMessage is not { } selected) return;
@@ -6867,12 +6879,10 @@ public partial class MainWindow : Window
             "QuickMail will close during the import and reopen automatically when it finishes. Continue?",
             "Import from Eudora", MessageBoxButton.YesNo, MessageBoxImage.Information);
         if (confirmation != MessageBoxResult.Yes) return;
-        EudoraAccountImporter.Import(Path.Combine(eudoraFolder, "Eudora.ini"), _accountService);
-
         System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(importer)
         {
             UseShellExecute = true,
-            Arguments = $"migrate --source \"{eudoraFolder}\" --profile \"{_profileContext.ProfileDir}\" --quickmail \"{Environment.ProcessPath}\"",
+            Arguments = $"migrate --source \"{eudoraFolder}\" --profile \"{_profileContext.ProfileDir}\" --quickmail \"{Environment.ProcessPath}\" --root-name \"Eudora\"",
         });
         Application.Current.Shutdown();
     }
