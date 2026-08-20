@@ -10,6 +10,8 @@ before a public release.
 
 ## Unreleased
 
+- Installed copies now honor their adjacent `QuickMailDataPath.txt` even when the executable is
+  launched directly without shortcut arguments; About displays the active data folder explicitly.
 - Added actionable error dialogs for manual receive/send failures, identifying the account,
   operation and server and suggesting credential, connectivity, port, encryption or certificate
   corrections; multi-account Check Mail failures are consolidated into one report.

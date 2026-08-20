@@ -12,6 +12,7 @@ public partial class AboutDialog : Window
     {
         InitializeComponent();
         VersionText.Text = $"Version {Helpers.AppVersion.Display}";
+        DataFolderText.Text = (Application.Current as App)?.Profile?.ProfileDir ?? "(unknown)";
         Loaded += (_, _) => LicenseLink.Focus();
     }
 

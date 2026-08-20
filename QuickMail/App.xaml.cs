@@ -689,7 +689,22 @@ public partial class App : Application
     {
         var rawDir = ProfileContext.ParseProfileDir(args);
         if (rawDir is null)
-            return ProfileContext.Default();
+        {
+            var installedPathFile = System.IO.Path.Combine(AppContext.BaseDirectory, "QuickMailDataPath.txt");
+            if (!System.IO.File.Exists(installedPathFile))
+                return ProfileContext.Default();
+            try
+            {
+                rawDir = System.IO.File.ReadAllText(installedPathFile).Trim();
+                if (string.IsNullOrWhiteSpace(rawDir))
+                    throw new InvalidDataException("The installed data-path file is empty.");
+            }
+            catch (Exception ex)
+            {
+                ShowProfileError(installedPathFile, ex.Message);
+                return null;
+            }
+        }
 
         var profile = ProfileContext.TryCreate(rawDir, out var error);
         if (profile is null)
