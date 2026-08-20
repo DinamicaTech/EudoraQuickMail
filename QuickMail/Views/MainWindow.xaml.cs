@@ -1521,6 +1521,7 @@ public partial class MainWindow : Window
         await _vm.InitialLoadAsync();
         UpdateTodayAgendaEmptyState();
         StartupReady?.Invoke();
+        _ = StartInitialAttachmentIndexIfNeededAsync();
         if (navigationConfig.ShowTodayAgenda && _vm.CalendarVm != null)
             _vm.CalendarVm.LoadAsync().LogFaults("load Today agenda");
         FocusActiveMessagePanel();
@@ -7050,6 +7051,43 @@ public partial class MainWindow : Window
             _vm.StatusText = $"Indexing attachment {current:N0}/{total:N0}: {name}");
         try { await indexer.IndexAllAsync(); _vm.StatusText = "Attachment content indexing complete."; }
         catch (Exception ex) { LogService.Log("Manual attachment indexing", ex); _vm.StatusText = $"Attachment indexing failed: {ex.Message}"; }
+    }
+
+    private async Task StartInitialAttachmentIndexIfNeededAsync()
+    {
+        if (_localStore is not LocalStoreService localStore) return;
+        if (!_configService.Load().IndexAttachmentContents) return;
+
+        try
+        {
+            if (!await localStore.NeedsInitialAttachmentIndexAsync()) return;
+
+            _vm.IsStatusHighlighted = true;
+            _vm.StatusText = "Preparing the attachment content search index…";
+            MessageBox.Show(this,
+                "Messages with attachments were found, but the attachment content search index has not been built yet. " +
+                "Eudora QuickMail will build it in the background. AC: searches may be incomplete until indexing finishes; progress is shown in the status bar.",
+                "Building attachment search index",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+
+            var indexer = new AttachmentIndexingService(localStore, _configService);
+            indexer.Progress += (current, total, name) => Dispatcher.BeginInvoke(() =>
+            {
+                if (current != 1 && current % 25 != 0 && current != total) return;
+                _vm.IsStatusHighlighted = true;
+                _vm.StatusText = $"Indexing attachment {current:N0}/{total:N0}: {name}";
+            });
+            await Task.Run(() => indexer.IndexAllAsync());
+            _vm.IsStatusHighlighted = true;
+            _vm.StatusText = "Attachment content search index complete.";
+        }
+        catch (Exception ex)
+        {
+            LogService.Log("Initial attachment indexing", ex);
+            _vm.IsStatusHighlighted = true;
+            _vm.StatusText = $"Attachment indexing failed: {ex.Message}";
+        }
     }
 
     // Context-menu Archive — acts on the whole selection, mirroring the Delete context-menu handler

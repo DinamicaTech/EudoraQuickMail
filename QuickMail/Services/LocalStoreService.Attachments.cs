@@ -10,6 +10,17 @@ public sealed record ExtractedAttachmentText(string EntryPath, string Status, st
 
 public partial class LocalStoreService
 {
+    public async Task<bool> NeedsInitialAttachmentIndexAsync(CancellationToken ct = default)
+    {
+        await using var conn = await OpenAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT EXISTS(SELECT 1 FROM MessageSummary WHERE has_attachments=1 LIMIT 1)
+               AND NOT EXISTS(SELECT 1 FROM AttachmentContent LIMIT 1);
+            """;
+        return Convert.ToInt32(await cmd.ExecuteScalarAsync(ct) ?? 0) != 0;
+    }
+
     public async Task<int> RebuildMessageSearchIndexAsync(CancellationToken ct = default)
     {
         await using var conn = await OpenAsync();

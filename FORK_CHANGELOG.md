@@ -10,6 +10,8 @@ before a public release.
 
 ## Unreleased
 
+- Automatically starts the attachment-content index after first import when messages have
+  attachments but the index is empty, with an explicit notice and highlighted background progress.
 - Added an immediate startup splash with live phase text until the startup folder is ready, and
   routed non-wildcard `AC:` attachment-content searches through SQLite FTS instead of scanning all
   extracted attachment text with `LIKE`.
