@@ -6935,7 +6935,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         try
         {
-            if (TryParseRootAggregate(fullName, out _, out _)
+            if (TryParseRootAggregate(fullName, out _, out var localAggregateKind)
                 && _localStore is ILocalMailboxStore)
             {
                 foreach (var source in FolderScopedAggregateSources(fullName))
@@ -6943,10 +6943,25 @@ public partial class MainViewModel : ObservableObject, IDisposable
                         source.Account.Id, source.Folder.FullName));
                 if (!IsCurrentFolderLoad(loadVersion, expectedFolder)) return;
                 await ResolveFlagNamesAsync(all);
-                var local = MessageDeduplicator.CollapseForAggregate(all, ResolveFolderKind)
+                // System folders contain independent, actionable records. Collapsing them by
+                // InternetMessageId hides physical drafts from the grid; deleting every visible
+                // row then leaves the hidden copies behind, which look as if they came back on the
+                // next refresh. Deduplication remains useful for mail aggregates, but never here.
+                var local = (localAggregateKind is SpecialFolderKind.Drafts
+                                or SpecialFolderKind.Scheduled
+                                or SpecialFolderKind.Trash
+                    ? all
+                    : MessageDeduplicator.CollapseForAggregate(all, ResolveFolderKind))
                     .OrderByDescending(m => m.Date).ToList();
                 LocalTotalMessages = local.Count;
                 SetMessages(local.Take(LocalMailConstants.MaxRenderedMessages).ToList());
+                if (expectedFolder != null)
+                {
+                    expectedFolder.MessageCount = local.Count;
+                    foreach (var node in FlattenAllNodes(FolderTree))
+                        if (ReferenceEquals(node.Folder, expectedFolder))
+                            node.NotifyUnreadChanged();
+                }
                 StatusText = local.Count > LocalMailConstants.MaxRenderedMessages
                     ? $"Showing {LocalMailConstants.MaxRenderedMessages:N0} of {local.Count:N0} messages in {displayName}."
                     : $"{local.Count:N0} messages in {displayName}.";
@@ -7264,6 +7279,22 @@ public partial class MainViewModel : ObservableObject, IDisposable
             if (toDelete.Any(m => !m.IsRead))
                 foreach (var acctId in toDelete.Select(m => m.AccountId).Distinct())
                     ScheduleFolderCountRefresh(acctId);
+
+            // Draft/Trash/Scheduled badges represent total rows, not unread rows. Reload their
+            // authoritative folder metadata and current aggregate immediately after a mutation;
+            // this also invalidates any older in-flight folder load that could restore a stale list.
+            if (toDelete.Any(m => ResolveFolderKind(m) is SpecialFolderKind.Drafts
+                                               or SpecialFolderKind.Scheduled
+                                               or SpecialFolderKind.Trash))
+            {
+                foreach (var acctId in toDelete.Select(m => m.AccountId).Distinct())
+                    await RefreshFolderListAsync(acctId);
+
+                if (SelectedFolder != null && IsVirtualFolder(SelectedFolder))
+                    await FetchVirtualAsync(SelectedFolder);
+                else if (SelectedFolder != null)
+                    await FetchFolderAsync();
+            }
 
             var count = toDelete.Count;
             SetStatus(Messages.Count > 0
