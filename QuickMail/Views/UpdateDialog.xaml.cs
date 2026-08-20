@@ -25,8 +25,8 @@ public partial class UpdateDialog : Window
         _restartToUpdate = restartToUpdate;
         InitializeComponent();
         MessageText.Text =
-            $"Version {version} of QuickMail is available and will be installed automatically " +
-            "the next time QuickMail starts.";
+            $"Version {version} of Eudora QuickMail is available and will be installed automatically " +
+            "the next time Eudora QuickMail starts.";
         WhatsNewLink.NavigateUri = new Uri(whatsNewUrl);
         Loaded += (_, _) => RestartButton.Focus();
         Closed += (_, _) => { _restartCts.Cancel(); _restartCts.Dispose(); };

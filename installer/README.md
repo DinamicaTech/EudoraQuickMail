@@ -1,7 +1,7 @@
-# QuickMail Installer
+# Eudora QuickMail Installer
 
 An [Inno Setup 6](https://jrsoftware.org/isdl.php) script that packages QuickMail into a
-Windows installer (`quickmail-v<version>-setup.exe`).
+Windows installer (`eudora-quickmail-v<version>-setup.exe`).
 
 ## Prerequisites
 
@@ -19,9 +19,9 @@ build.bat installer-production
 
 This publishes QuickMail plus EudoraImporter and the offline web assets, adds the standalone
 marker that disables GitHub update checks, then compiles the installer to
-`installer\Output\quickmail-v<version>-setup.exe`. The wizard asks separately for
-the program directory (default: `Program Files\QuickMail`) and the data directory
-(default: the current user's `Documents\QuickMail`). Shortcuts retain the selected
+`installer\Output\eudora-quickmail-v<version>-setup.exe`. The wizard asks separately for
+the program directory (default: `Program Files\Eudora QuickMail`) and the data directory
+(default: the current user's `Documents\Eudora QuickMail`). Shortcuts retain the selected
 data directory through the `--profileDir` argument.
 
 To recompile the installer without re-publishing (when `publish\QuickMail.exe` already

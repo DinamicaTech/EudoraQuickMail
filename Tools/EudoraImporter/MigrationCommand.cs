@@ -12,8 +12,8 @@ internal static class MigrationCommand
         if (attachmentMode is not ("keep" or "copy" or "move"))
             throw new ArgumentException("--attachments must be keep, copy, or move.");
         var intermediate = Path.Combine(Path.GetFullPath(profile), "eudora-import.db");
-        Console.Title = "QuickMail — Import from Eudora";
-        Console.WriteLine("QuickMail Eudora migration");
+        Console.Title = "Eudora QuickMail — Import from Eudora";
+        Console.WriteLine("Eudora QuickMail migration");
         Console.WriteLine("Progress is shown mailbox by mailbox below.");
         Console.WriteLine("The previous Eudora import will be replaced; other accounts are preserved.");
         Console.WriteLine();
@@ -53,7 +53,7 @@ internal static class MigrationCommand
             if (!string.IsNullOrWhiteSpace(quickMail) && File.Exists(quickMail))
             {
                 Console.WriteLine();
-                Console.WriteLine("Reopening QuickMail…");
+                Console.WriteLine("Reopening Eudora QuickMail…");
                 System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(quickMail)
                 {
                     UseShellExecute = true,

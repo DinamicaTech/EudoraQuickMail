@@ -182,7 +182,7 @@ public partial class App : Application
                 "                        For testing update delivery.\n\n" +
                 "  --help                Show this message and exit.\n\n" +
                 "  /debug                Write verbose debug output to quickmail.log.",
-                "QuickMail",
+                "Eudora QuickMail",
                 MessageBoxButton.OK,
                 MessageBoxImage.Information);
             Shutdown();
@@ -698,7 +698,7 @@ public partial class App : Application
     {
         MessageBox.Show(
             $"Cannot use profile directory:\n  {dir}\n\n{reason}\n\nCheck the --profileDir argument and try again.",
-            "QuickMail — Invalid Profile Directory",
+            "Eudora QuickMail — Invalid Profile Directory",
             MessageBoxButton.OK,
             MessageBoxImage.Error);
     }
@@ -726,7 +726,7 @@ public partial class App : Application
         {
             MessageBox.Show(
                 $"An unexpected error occurred and was logged.\n\n{e.Exception.GetType().Name}: {e.Exception.Message}",
-                "QuickMail",
+                "Eudora QuickMail",
                 MessageBoxButton.OK,
                 MessageBoxImage.Error);
         }

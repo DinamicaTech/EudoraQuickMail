@@ -1,4 +1,4 @@
-# QuickMail
+# Eudora QuickMail
 
 A keyboard-first WPF desktop email client for Windows. Multi-account IMAP/SMTP with a unified inbox, conversation threading, and an HTML reading pane.
 
@@ -32,7 +32,7 @@ build.bat clean
 ```
 
 Building the installer additionally requires [Inno Setup 6](https://jrsoftware.org/isdl.php).
-It produces `installer/Output/quickmail-v<version>-setup.exe`. See [`installer/README.md`](installer/README.md)
+It produces `installer/Output/eudora-quickmail-v<version>-setup.exe`. See [`installer/README.md`](installer/README.md)
 for details.
 
 Or with the CLI:

@@ -10,6 +10,9 @@ before a public release.
 
 ## Unreleased
 
+- Adopted the definitive public product name **Eudora QuickMail** across window titles, onboarding,
+  installer, shortcuts, package metadata and documentation. Internal executable, profile and
+  credential identifiers remain compatible with existing QuickMail data.
 - Rehabilitated the original Standard IMAP/SMTP account path as an optional backend alongside
   local POP3/SMTP accounts. Manual Check Mail now reconnects eligible remote accounts, synchronizes
   each IMAP/Graph Inbox, reports per-account progress, then continues with POP3 and queued sending

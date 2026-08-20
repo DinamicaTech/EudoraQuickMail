@@ -1,4 +1,4 @@
-Welcome to QuickMail Setup.
+Welcome to Eudora QuickMail Setup.
 
 QuickMail is a keyboard-first, accessible desktop email client for Windows. This wizard installs QuickMail for the current user; no administrator permission is needed.
 

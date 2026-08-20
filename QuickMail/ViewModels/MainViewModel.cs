@@ -1488,7 +1488,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private string ComputeWindowTitle()
     {
             if (IsMessageOpen && !string.IsNullOrWhiteSpace(MessageDetail?.Subject))
-                return $"{MessageDetail.Subject} - QuickMail";
+                return $"{MessageDetail.Subject} - Eudora QuickMail";
             if (ActiveView != null)
             {
                 var suffix = IsSearchActive && !string.IsNullOrWhiteSpace(SearchText)
@@ -1496,7 +1496,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                     : IsFilterActive
                     ? $" — {FilterLabel}"
                     : string.Empty;
-                return $"{ActiveView.Name}{suffix} - QuickMail";
+                return $"{ActiveView.Name}{suffix} - Eudora QuickMail";
             }
             if (SelectedFolder != null && !SelectedFolder.IsHeader)
             {
@@ -1511,9 +1511,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
                     : IsFilterActive
                     ? $" — {FilterLabel}"
                     : string.Empty;
-                return $"{folderPart}{suffix} - QuickMail";
+                return $"{folderPart}{suffix} - Eudora QuickMail";
             }
-            return "QuickMail";
+            return "Eudora QuickMail";
     }
 
     // ── Tab & Window Management (Phase 6) ────────────────────────────────────────
@@ -2735,7 +2735,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             execute: () => TutorialRequested?.Invoke(this, EventArgs.Empty)));
 
         registry.Register(new CommandDefinition(
-            id: "help.about", category: "Help", title: "About QuickMail",
+            id: "help.about", category: "Help", title: "About Eudora QuickMail",
             execute: () => AboutRequested?.Invoke(this, EventArgs.Empty)));
 
         registry.Register(new CommandDefinition(

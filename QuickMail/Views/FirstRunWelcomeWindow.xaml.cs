@@ -43,7 +43,7 @@ public partial class FirstRunWelcomeWindow : Window
     {
         var dialog = new Microsoft.Win32.OpenFolderDialog
         {
-            Title = "Select the QuickMail data folder", Multiselect = false,
+            Title = "Select the Eudora QuickMail data folder", Multiselect = false,
             InitialDirectory = Directory.Exists(DataFolder) ? DataFolder : null,
         };
         if (dialog.ShowDialog(this) == true) DataFolderBox.Text = dialog.FolderName;
@@ -71,7 +71,7 @@ public partial class FirstRunWelcomeWindow : Window
         }
         if (string.IsNullOrWhiteSpace(DataFolder) || string.IsNullOrWhiteSpace(RootDisplayName))
         {
-            MessageBox.Show(this, "Enter a QuickMail data folder and a folder-tree display name.",
+            MessageBox.Show(this, "Enter an Eudora QuickMail data folder and a folder-tree display name.",
                 "Import Eudora", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
@@ -88,9 +88,9 @@ public partial class FirstRunWelcomeWindow : Window
         }
         var confirmation = MessageBox.Show(this,
             $"All Eudora messages from the following folder will be imported:\n\n{EudoraRoot}\n\n" +
-            $"QuickMail data folder:\n{DataFolder}\n\n" +
+            $"Eudora QuickMail data folder:\n{DataFolder}\n\n" +
             "Any previous Eudora import in that data folder will be replaced. Other accounts and messages are preserved. " +
-            "QuickMail will close during the import and reopen automatically when it finishes. Continue?",
+            "Eudora QuickMail will close during the import and reopen automatically when it finishes. Continue?",
             "Import from Eudora", MessageBoxButton.YesNo, MessageBoxImage.Information);
         if (confirmation != MessageBoxResult.Yes) return;
         Choice = WelcomeChoice.ImportEudora;

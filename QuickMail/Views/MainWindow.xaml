@@ -711,8 +711,8 @@
                           Visibility="{Binding IsConnectionDiagnosticsEnabled, Converter={StaticResource BoolToVisibilityConverter}}"
                           Click="MenuConnectionDiagnostics_Click"/>
                 <Separator/>
-                <MenuItem Header="_About QuickMail"
-                          AutomationProperties.Name="About QuickMail"
+                <MenuItem Header="_About Eudora QuickMail"
+                          AutomationProperties.Name="About Eudora QuickMail"
                           Click="MenuAbout_Click"/>
             </MenuItem>
 

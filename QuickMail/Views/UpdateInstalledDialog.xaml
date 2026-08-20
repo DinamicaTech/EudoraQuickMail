@@ -1,7 +1,7 @@
 <Window x:Class="QuickMail.Views.UpdateInstalledDialog"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="QuickMail Update Installed"
+        Title="Eudora QuickMail Update Installed"
         Height="180" Width="420"
         MinHeight="160" MinWidth="340"
         ResizeMode="NoResize"

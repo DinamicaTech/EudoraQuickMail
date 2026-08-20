@@ -18,7 +18,7 @@ internal sealed class TrayIconManager : IDisposable
     {
         _icon = new System.Windows.Forms.NotifyIcon
         {
-            Text    = "QuickMail",
+            Text    = "Eudora QuickMail",
             Icon    = LoadAppIcon(),
             Visible = false,
         };
@@ -34,9 +34,9 @@ internal sealed class TrayIconManager : IDisposable
         _icon.DoubleClick += (_, _) => onOpen();
 
         var menu     = new System.Windows.Forms.ContextMenuStrip();
-        var openItem = new System.Windows.Forms.ToolStripMenuItem("&Open QuickMail");
+        var openItem = new System.Windows.Forms.ToolStripMenuItem("&Open Eudora QuickMail");
         openItem.Click += (_, _) => onOpen();
-        var exitItem = new System.Windows.Forms.ToolStripMenuItem("E&xit QuickMail");
+        var exitItem = new System.Windows.Forms.ToolStripMenuItem("E&xit Eudora QuickMail");
         exitItem.Click += (_, _) => onExit();
         menu.Items.Add(openItem);
         menu.Items.Add(exitItem);

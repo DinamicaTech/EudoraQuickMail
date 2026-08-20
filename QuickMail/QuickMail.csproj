@@ -10,6 +10,9 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
     <ApplicationIcon>Assets\App\QuickMail.ico</ApplicationIcon>
+    <Product>Eudora QuickMail</Product>
+    <AssemblyTitle>Eudora QuickMail</AssemblyTitle>
+    <Description>A local-first desktop email client for Eudora users and beyond.</Description>
     <!-- WinForms is enabled ONLY for the system-tray NotifyIcon (Views/TrayIconManager). WPF has no
          native tray icon. WinForms types are always fully qualified; the implicit global usings for
          System.Windows.Forms / System.Drawing are removed below so they never collide with the WPF

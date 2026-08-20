@@ -6,12 +6,12 @@
 ; The only external prerequisite is the Microsoft Edge WebView2 Runtime, which the
 ; installer detects and installs on demand (see [Code] below).
 
-#define MyAppName "QuickMail"
-#define MyAppNameLower Lowercase(MyAppName)
+#define MyAppName "Eudora QuickMail"
+#define MyAppNameLower "eudora-quickmail"
 #define MyAppPublisher "Kelly Ford"
 #define MyAppURL "https://github.com/kellylford/QuickMail"
 #define MyAppSupportURL MyAppURL + "/issues"
-#define MyAppExeName MyAppName + ".exe"
+#define MyAppExeName "QuickMail.exe"
 #define MyAppDescription "Keyboard-first, accessible desktop email client for Windows"
 
 ; Source path (relative to this script). Matches the output of `build.bat publish`
@@ -23,7 +23,7 @@
 
 [Setup]
 ; Application information
-AppId={{2E0571C2-B240-443A-A1DB-9A3320639C69}
+AppId={{D3B8E95A-6354-48E4-A91F-615BCFF20C9F}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppVerName={#MyAppName} {#MyAppVersion}
@@ -34,7 +34,7 @@ AppUpdatesURL={#MyAppURL}/releases
 AppCopyright=Copyright (c) 2026 {#MyAppPublisher}.
 
 ; Installation directory
-DefaultDirName={autopf}\QuickMail
+DefaultDirName={autopf}\Eudora QuickMail
 DefaultGroupName={#MyAppName}
 AllowNoIcons=yes
 
@@ -101,12 +101,12 @@ var
 procedure InitializeWizard;
 begin
   DataDirPage := CreateInputDirPage(wpSelectDir,
-    'QuickMail data folder',
-    'Where should QuickMail store your data?',
-    'Choose a folder for email, indexes, settings, and copied or moved attachments, including embedded images. This folder is kept when QuickMail is upgraded.',
+    'Eudora QuickMail data folder',
+    'Where should Eudora QuickMail store your data?',
+    'Choose a folder for email, indexes, settings, and copied or moved attachments, including embedded images. This folder is kept when Eudora QuickMail is upgraded.',
     False, '');
   DataDirPage.Add('');
-  DataDirPage.Values[0] := GetPreviousData('DataDir', ExpandConstant('{userdocs}\QuickMail'));
+  DataDirPage.Values[0] := GetPreviousData('DataDir', ExpandConstant('{userdocs}\Eudora QuickMail'));
 end;
 
 function GetDataDir(Param: String): String;
@@ -114,7 +114,7 @@ begin
   if DataDirPage <> nil then
     Result := DataDirPage.Values[0]
   else
-    Result := ExpandConstant('{userdocs}\QuickMail');
+    Result := ExpandConstant('{userdocs}\Eudora QuickMail');
 end;
 
 function IsInsideOrEqual(PathValue: String; RootValue: String): Boolean;
@@ -137,7 +137,7 @@ begin
   if IsInsideOrEqual(DataPath, ExpandConstant('{commonpf}')) or
      IsInsideOrEqual(DataPath, ExpandConstant('{commonpf32}')) then
   begin
-    MsgBox('The data folder cannot be stored inside Program Files because QuickMail needs normal write access. Choose Documents\QuickMail or another folder outside Program Files.',
+    MsgBox('The data folder cannot be stored inside Program Files because Eudora QuickMail needs normal write access. Choose Documents\Eudora QuickMail or another folder outside Program Files.',
       mbError, MB_OK);
     Result := False;
   end;

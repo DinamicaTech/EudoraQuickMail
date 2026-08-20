@@ -32,8 +32,8 @@ public partial class MarkdownPreviewWindow : Window
     public MarkdownPreviewWindow(string? subject, string htmlFragment, string? themeCss = null)
     {
         Title = string.IsNullOrWhiteSpace(subject)
-            ? "Compose — Preview — QuickMail"
-            : $"{subject.Trim()} — Preview — QuickMail";
+            ? "Compose — Preview — Eudora QuickMail"
+            : $"{subject.Trim()} — Preview — Eudora QuickMail";
 
         _html = BuildHtml(subject, htmlFragment, themeCss);
         InitializeComponent();

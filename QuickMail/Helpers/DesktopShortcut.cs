@@ -5,13 +5,16 @@ using System.Runtime.InteropServices;
 namespace QuickMail.Helpers;
 
 /// <summary>
-/// Creates and removes the QuickMail desktop shortcut. The shortcut targets the running
+/// Creates and removes the Eudora QuickMail desktop shortcut. The shortcut targets the running
 /// executable; under a Velopack install that path (%LocalAppData%\QuickMail\current\QuickMail.exe)
 /// is stable across updates, so the link stays valid after the app updates itself.
 /// </summary>
 public static class DesktopShortcut
 {
     private static string ShortcutPath =>
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop), "Eudora QuickMail.lnk");
+
+    private static string LegacyShortcutPath =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop), "QuickMail.lnk");
 
     public static bool Exists() => File.Exists(ShortcutPath);
@@ -32,7 +35,7 @@ public static class DesktopShortcut
             dynamic link = shell.CreateShortcut(ShortcutPath);
             link.TargetPath = target;
             link.WorkingDirectory = Path.GetDirectoryName(target);
-            link.Description = "QuickMail";
+            link.Description = "Eudora QuickMail";
             var profileDir = Services.ProfileContext.ParseProfileDir(Environment.GetCommandLineArgs());
             if (!string.IsNullOrWhiteSpace(profileDir))
                 link.Arguments = $"--profileDir \"{profileDir.Replace("\"", "\\\"")}\"";
@@ -48,6 +51,9 @@ public static class DesktopShortcut
     public static void Delete()
     {
         try { File.Delete(ShortcutPath); }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
+        try { File.Delete(LegacyShortcutPath); }
         catch (IOException) { }
         catch (UnauthorizedAccessException) { }
     }
