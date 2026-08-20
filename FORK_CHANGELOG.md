@@ -10,6 +10,9 @@ before a public release.
 
 ## Unreleased
 
+- Added an immediate startup splash with live phase text until the startup folder is ready, and
+  routed non-wildcard `AC:` attachment-content searches through SQLite FTS instead of scanning all
+  extracted attachment text with `LIKE`.
 - Added a one-time post-Eudora-import reminder when none of the imported accounts has a stored
   password, and turned the empty Today agenda into a Google Calendar setup link when no Google
   calendar identity is connected.

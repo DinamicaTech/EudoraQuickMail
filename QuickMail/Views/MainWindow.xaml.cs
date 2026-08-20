@@ -110,6 +110,7 @@ public class StringToBrushConverter : IValueConverter
 
 public partial class MainWindow : Window
 {
+    public event Action? StartupReady;
     private readonly MainViewModel _vm;
     private readonly ISendMailService _smtp;
     private readonly IAccountService _accountService;
@@ -1511,6 +1512,7 @@ public partial class MainWindow : Window
             // the Account Manager is already up) so an update applied before the first
             // account exists still gets its one installed notice later.
             _vm.MaybeShowUpdateInstalledNotice(dialogAllowed: false);
+            StartupReady?.Invoke();
             OpenAccountManager();
             return;
         }
@@ -1518,6 +1520,7 @@ public partial class MainWindow : Window
         // Show local cache immediately so the UI is never blank on startup.
         await _vm.InitialLoadAsync();
         UpdateTodayAgendaEmptyState();
+        StartupReady?.Invoke();
         if (navigationConfig.ShowTodayAgenda && _vm.CalendarVm != null)
             _vm.CalendarVm.LoadAsync().LogFaults("load Today agenda");
         FocusActiveMessagePanel();

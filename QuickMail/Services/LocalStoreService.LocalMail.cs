@@ -318,10 +318,14 @@ public partial class LocalStoreService
                     QuickSearchField.Body => FieldPredicate("f.body_text", "body_text"),
                     QuickSearchField.AttachmentName =>
                         $"(EXISTS(SELECT 1 FROM json_each(d.attachments_json) j WHERE json_extract(j.value,'$.FileName') LIKE {p}l ESCAPE '\\' COLLATE NOCASE) OR EXISTS(SELECT 1 FROM AttachmentContent ac WHERE ac.account_id=s.account_id AND ac.unique_id=s.unique_id AND ac.folder_name=s.folder_name AND ac.entry_path LIKE {p}l ESCAPE '\\' COLLATE NOCASE))",
-                    QuickSearchField.AttachmentContent =>
-                        $"(s.has_attachments=1 AND (s.account_id,s.unique_id,s.folder_name) IN " +
-                        $"(SELECT ac.account_id,ac.unique_id,ac.folder_name FROM AttachmentContent ac " +
-                        $"WHERE ac.status='indexed' AND ac.content_text LIKE {p}l ESCAPE '\\' COLLATE NOCASE))",
+                    QuickSearchField.AttachmentContent => wildcard
+                        ? $"(s.has_attachments=1 AND (s.account_id,s.unique_id,s.folder_name) IN " +
+                          $"(SELECT ac.account_id,ac.unique_id,ac.folder_name FROM AttachmentContent ac " +
+                          $"WHERE ac.status='indexed' AND ac.content_text LIKE {p}l ESCAPE '\\' COLLATE NOCASE))"
+                        : $"(s.has_attachments=1 AND (s.account_id,s.unique_id,s.folder_name) IN " +
+                          $"(SELECT ac.account_id,ac.unique_id,ac.folder_name FROM AttachmentContent ac " +
+                          $"WHERE ac.status='indexed' AND ac.fts_rowid IN " +
+                          $"(SELECT rowid FROM AttachmentContentFts WHERE AttachmentContentFts MATCH 'content_text:' || {p})))",
                     _ => wildcard
                         ? $"(f.from_addr LIKE {p} ESCAPE '\\' COLLATE NOCASE OR f.to_addr LIKE {p} ESCAPE '\\' COLLATE NOCASE OR f.cc_addr LIKE {p} ESCAPE '\\' COLLATE NOCASE OR f.subject LIKE {p} ESCAPE '\\' COLLATE NOCASE OR f.body_text LIKE {p} ESCAPE '\\' COLLATE NOCASE)"
                         : $"f.rowid IN (SELECT rowid FROM LocalMessageFts WHERE LocalMessageFts MATCH {p})",

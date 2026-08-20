@@ -256,6 +256,14 @@ public partial class App : Application
         if (onlineMode)
             LogService.Log("Online mode enabled — SQLite cache bypassed.");
 
+        Views.SplashWindow? splash = null;
+        if (UiProbe is null)
+        {
+            splash = new Views.SplashWindow();
+            splash.Show();
+            splash.SetStatus("Opening the local mail database…");
+        }
+
         // Left/Right/Home/End through a wrapped tab strip (#528). A class handler so a window
         // with tabs added later cannot be left out.
         TabStripNavigation.Install();
@@ -292,6 +300,7 @@ public partial class App : Application
             var localStore        = new LocalStoreService(profile);
             if (!onlineMode)
                 localStore.Initialize();
+            splash?.SetStatus("Loading accounts and application settings…");
             // Provider presets + settings discovery for the Add Account dialog. The catalog is a
             // pure lookup table; the discovery service owns an HttpClient, so it is disposed in OnExit.
             var providerCatalog   = new ProviderCatalog();
@@ -343,6 +352,7 @@ public partial class App : Application
             // Router registration runs via mainVm.RegisterAccountBackend (set below), which also
             // covers accounts added at runtime through RefreshAccountList.
             var accounts = accountService.LoadAccounts();
+            splash?.SetStatus("Preparing folders, messages and search services…");
             if (!probeMode) ScheduledSender = new ScheduledSendService(profile, effectiveSmtp, accountService, credentialService, localStore);
 
             // One-time immutable-id cache rebuild (#366): clear cached mail for Graph accounts so the
@@ -541,6 +551,16 @@ public partial class App : Application
 
             var mainWindow = new MainWindow(mainVm, effectiveSmtp, accountService, credentialService, effectiveMail, effectiveOAuth, commandRegistry, contactService, configService, localStore, viewService, ruleService, templateService, featureGate, flagService, customDictionary, themeService, _bugReportService, _notificationService, contactSyncService, graphCalendarSync, serverRuleService, providerCatalog, _autoDiscoverService, _truthProbe, rowLayoutService, watchService, profile);
 
+            if (splash is not null)
+            {
+                splash.SetStatus("Loading the folder tree and startup mailbox…");
+                mainWindow.StartupReady += () =>
+                {
+                    splash.Close();
+                    mainWindow.Activate();
+                };
+            }
+
             // Clicking a new-mail toast brings QuickMail to the foreground and opens the referenced
             // message. OnActivated may fire on a background thread, so marshal to the UI thread first.
             _notificationService.Activated += act =>
@@ -559,6 +579,7 @@ public partial class App : Application
         }
         catch (Exception ex)
         {
+            splash?.Close();
             // Log the exception chain before WER kills the process so the cause
             // survives in %APPDATA%\QuickMail\quickmail.log.
             for (var cur = ex; cur != null; cur = cur.InnerException)
