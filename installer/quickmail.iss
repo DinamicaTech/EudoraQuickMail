@@ -117,19 +117,27 @@ begin
     Result := ExpandConstant('{userdocs}\QuickMail');
 end;
 
+function IsInsideOrEqual(PathValue: String; RootValue: String): Boolean;
+var
+  NormalizedPath: String;
+  NormalizedRoot: String;
+begin
+  NormalizedPath := Lowercase(AddBackslash(ExpandFileName(PathValue)));
+  NormalizedRoot := Lowercase(AddBackslash(ExpandFileName(RootValue)));
+  Result := Pos(NormalizedRoot, NormalizedPath) = 1;
+end;
+
 function NextButtonClick(CurPageID: Integer): Boolean;
 var
-  ProgramPath: String;
   DataPath: String;
 begin
   Result := True;
   if CurPageID <> DataDirPage.ID then Exit;
-  ProgramPath := AddBackslash(ExpandFileName(WizardDirValue));
-  DataPath := AddBackslash(ExpandFileName(GetDataDir('')));
-  if (CompareText(ProgramPath, DataPath) = 0) or
-     (Pos(Lowercase(ProgramPath), Lowercase(DataPath)) = 1) then
+  DataPath := GetDataDir('');
+  if IsInsideOrEqual(DataPath, ExpandConstant('{commonpf}')) or
+     IsInsideOrEqual(DataPath, ExpandConstant('{commonpf32}')) then
   begin
-    MsgBox('The data folder must be separate from the program folder. Choose a folder such as Documents\QuickMail.',
+    MsgBox('The data folder cannot be stored inside Program Files because QuickMail needs normal write access. Choose Documents\QuickMail or another folder outside Program Files.',
       mbError, MB_OK);
     Result := False;
   end;
@@ -174,11 +182,11 @@ begin
     begin
       UserDataPath := Trim(String(StoredDataPath));
       ProgramPath := AddBackslash(ExpandConstant('{app}'));
-      if (CompareText(AddBackslash(UserDataPath), ProgramPath) = 0) or
-         (Pos(Lowercase(ProgramPath), Lowercase(AddBackslash(UserDataPath))) = 1) then
+      if CompareText(AddBackslash(ExpandFileName(UserDataPath)), ProgramPath) = 0 then
       begin
-        // Older test installers allowed the profile to equal the installation
-        // directory. Never recursively delete application files as user data.
+        // When program and data share the exact directory, Inno Setup removes only
+        // its registered application files and leaves all other profile files intact.
+        // Never recursively delete the shared directory as user data.
         Exit;
       end;
       if (UserDataPath <> '') and DirExists(UserDataPath) and
