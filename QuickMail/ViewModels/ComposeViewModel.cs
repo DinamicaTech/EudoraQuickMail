@@ -178,6 +178,7 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
     /// Mirrors the pattern on MainViewModel — see CLAUDE.md MVVM Rules.
     /// </summary>
     public Func<string, string, bool>? ConfirmationRequested { get; set; }
+    public event Action<string, string>? ErrorDialogRequested;
 
     /// <summary>
     /// The IAccountService this compose window was built with. Exposed so the address book
@@ -533,6 +534,9 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
             && account.BackendKind != BackendKind.Pop3Smtp)
         {
             SetStatusOutcome("No password stored for this account.");
+            ErrorDialogRequested?.Invoke("Message could not be sent",
+                MailOperationError.Describe("Send email (SMTP)", account,
+                    new InvalidOperationException("No password is stored for this account.")));
             return;
         }
 
@@ -584,6 +588,8 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
         catch (Exception ex)
         {
             SetStatusOutcome($"Send failed: {ex.Message}");
+            ErrorDialogRequested?.Invoke("Message could not be sent",
+                MailOperationError.Describe("Send email (SMTP)", account, ex));
         }
         finally
         {

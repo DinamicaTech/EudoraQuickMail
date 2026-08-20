@@ -52,15 +52,23 @@ public partial class App : Application
     private PeriodicPop3Receiver? _pop3Receiver;
     public ScheduledSendService? ScheduledSender { get; private set; }
 
-    public async Task CheckMailNowAsync(Action<string>? progress = null)
+    public async Task<IReadOnlyList<MailOperationFailure>> CheckMailNowAsync(Action<string>? progress = null)
     {
+        var failures = new List<MailOperationFailure>();
         progress?.Invoke("Checking incoming mail…");
         if (_pop3Receiver != null)
-            await _pop3Receiver.SweepAsync(includeAccountsWithAutomaticCheckDisabled: true);
+        {
+            void OnFailed(AccountModel account, Exception error, bool manual) =>
+                failures.Add(new MailOperationFailure(account, "Receive email (POP3)", error));
+            _pop3Receiver.Failed += OnFailed;
+            try { await _pop3Receiver.SweepAsync(includeAccountsWithAutomaticCheckDisabled: true); }
+            finally { _pop3Receiver.Failed -= OnFailed; }
+        }
         progress?.Invoke("Sending queued messages…");
         if (ScheduledSender != null)
-            await ScheduledSender.DispatchDueAsync();
+            failures.AddRange(await ScheduledSender.DispatchDueAsync(manual: true));
         progress?.Invoke("Mail check complete.");
+        return failures;
     }
 
     // Owned by Main (acquired before WPF starts, disposed after Run returns); OnStartup
@@ -550,6 +558,22 @@ public partial class App : Application
             }
 
             var mainWindow = new MainWindow(mainVm, effectiveSmtp, accountService, credentialService, effectiveMail, effectiveOAuth, commandRegistry, contactService, configService, localStore, viewService, ruleService, templateService, featureGate, flagService, customDictionary, themeService, _bugReportService, _notificationService, contactSyncService, graphCalendarSync, serverRuleService, providerCatalog, _autoDiscoverService, _truthProbe, rowLayoutService, watchService, profile);
+
+            if (_pop3Receiver is not null)
+                _pop3Receiver.Failed += (account, error, manual) =>
+                {
+                    if (!manual)
+                        mainWindow.Dispatcher.BeginInvoke(() =>
+                            mainWindow.ShowBackgroundMailFailure(account, "Receive email (POP3)", error));
+                };
+            if (ScheduledSender is not null)
+                ScheduledSender.Failed += (failure, manual) =>
+                {
+                    if (!manual)
+                        mainWindow.Dispatcher.BeginInvoke(() =>
+                            mainWindow.ShowBackgroundMailFailure(
+                                failure.Account, failure.Operation, failure.Error));
+                };
 
             if (splash is not null)
             {

@@ -10,6 +10,7 @@ public sealed record ScheduledMail(Guid Id, DateTimeOffset SendAtUtc, ComposeMod
 /// <summary>Durable local outbox with a short periodic dispatcher.</summary>
 public sealed class ScheduledSendService : IDisposable
 {
+    public event Action<MailOperationFailure, bool>? Failed;
     private readonly string _path;
     private readonly ISendMailService _sender;
     private readonly IAccountService _accounts;
@@ -113,8 +114,9 @@ public sealed class ScheduledSendService : IDisposable
         finally { _gate.Release(); }
     }
 
-    public async Task DispatchDueAsync()
+    public async Task<IReadOnlyList<MailOperationFailure>> DispatchDueAsync(bool manual = false)
     {
+        var failures = new List<MailOperationFailure>();
         await _gate.WaitAsync(_stop.Token);
         try
         {
@@ -135,6 +137,9 @@ public sealed class ScheduledSendService : IDisposable
                 }
                 catch (Exception ex)
                 {
+                    var failure = new MailOperationFailure(account, "Send scheduled email (SMTP)", ex);
+                    failures.Add(failure);
+                    Failed?.Invoke(failure, manual);
                     var index = queue.IndexOf(item);
                     queue[index] = item with { Attempts = item.Attempts + 1, LastError = ex.Message };
                     changed = true;
@@ -145,6 +150,7 @@ public sealed class ScheduledSendService : IDisposable
         }
         catch (OperationCanceledException) when (_stop.IsCancellationRequested) { }
         finally { _gate.Release(); }
+        return failures;
     }
 
     private async Task<List<ScheduledMail>> LoadAsync()

@@ -24,6 +24,7 @@ public sealed class PeriodicPop3Receiver : IDisposable
 
     public event Action<AccountModel, Pop3ReceiveResult>? Completed;
     public event Action<AccountModel, int, int>? Started;
+    public event Action<AccountModel, Exception, bool>? Failed;
 
     public async Task SweepAsync(bool includeAccountsWithAutomaticCheckDisabled = false)
     {
@@ -47,7 +48,11 @@ public sealed class PeriodicPop3Receiver : IDisposable
                     Completed?.Invoke(account, result);
                 }
                 catch (OperationCanceledException) when (_stop.IsCancellationRequested) { return; }
-                catch (Exception ex) { LogService.Log($"POP3 receive failed for {account.AccountLabel}", ex); }
+                catch (Exception ex)
+                {
+                    LogService.Log($"POP3 receive failed for {account.AccountLabel}", ex);
+                    Failed?.Invoke(account, ex, includeAccountsWithAutomaticCheckDisabled);
+                }
             }
         }
         finally { Volatile.Write(ref _running, 0); }

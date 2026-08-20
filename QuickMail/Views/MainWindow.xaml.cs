@@ -203,6 +203,7 @@ public partial class MainWindow : Window
     // compose windows: they are unowned, so WPF does not close them when the main window closes,
     // and a surviving one keeps the process (and single-instance mutex) alive — see OnClosed (#252).
     private readonly List<MessageWindow> _openMessageWindows = new();
+    private readonly HashSet<string> _backgroundMailErrorsShown = new(StringComparer.Ordinal);
     private MessageWindow? _followSelectionWindow;
 
     // ── Grouped-message tree controllers ──────────────────────────────────────
@@ -2106,6 +2107,17 @@ public partial class MainWindow : Window
             await _vm.SelectFolderCommand.ExecuteAsync(node.Folder);
             FocusActiveMessagePanel();
         }
+    }
+
+    public void ShowBackgroundMailFailure(AccountModel account, string operation, Exception error)
+    {
+        var message = MailOperationError.Describe(operation, account, error);
+        var key = $"{account.Id:N}|{operation}|{error.GetType().FullName}|{error.Message}";
+        if (!_backgroundMailErrorsShown.Add(key)) return;
+        _vm.IsStatusHighlighted = true;
+        _vm.StatusText = $"{operation} failed for {account.AccountLabel}.";
+        MessageBox.Show(this, message, "Automatic mail operation failed",
+            MessageBoxButton.OK, MessageBoxImage.Error);
     }
 
     private async Task OpenShortcutFolderAsync(MailFolderModel folder)
@@ -6077,19 +6089,29 @@ public partial class MainWindow : Window
         _vm.IsStatusHighlighted = true;
         try
         {
-            await _vm.CheckRemoteMailNowAsync(message =>
+            var failures = new List<MailOperationFailure>();
+            failures.AddRange(await _vm.CheckRemoteMailNowAsync(message =>
             {
                 _vm.IsStatusHighlighted = true;
                 _vm.StatusText = message;
-            });
-            await app.CheckMailNowAsync(message =>
+            }));
+            failures.AddRange(await app.CheckMailNowAsync(message =>
             {
                 _vm.IsStatusHighlighted = true;
                 _vm.StatusText = message;
-            });
+            }));
             await _vm.RefreshCommand.ExecuteAsync(null);
             _vm.IsStatusHighlighted = true;
-            _vm.StatusText = "Mail check complete.";
+            _vm.StatusText = failures.Count == 0
+                ? "Mail check complete."
+                : $"Mail check completed with {failures.Count:N0} error(s).";
+            if (failures.Count > 0)
+            {
+                var details = string.Join("\n\n────────────────────────\n\n",
+                    failures.Select(f => MailOperationError.Describe(f.Operation, f.Account, f.Error)));
+                MessageBox.Show(this, details, "Mail check completed with errors",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
         }
         catch (Exception ex)
         {

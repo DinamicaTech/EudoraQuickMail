@@ -6874,12 +6874,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// not handled here: App.CheckMailNowAsync owns its download-and-delete pipeline. This restores
     /// the original QuickMail meaning of Check Mail without coupling IMAP to the local-first receiver.
     /// </summary>
-    public async Task CheckRemoteMailNowAsync(Action<string>? progress = null)
+    public async Task<IReadOnlyList<MailOperationFailure>> CheckRemoteMailNowAsync(Action<string>? progress = null)
     {
+        var failures = new List<MailOperationFailure>();
         var remoteAccounts = Accounts
             .Where(a => a.BackendKind is BackendKind.ImapSmtp or BackendKind.MicrosoftGraph)
             .ToList();
-        if (remoteAccounts.Count == 0) return;
+        if (remoteAccounts.Count == 0) return failures;
 
         var completed = 0;
         foreach (var account in remoteAccounts)
@@ -6911,12 +6912,15 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 // downloads, or the scheduled-send queue from being checked.
                 LogService.Log($"Manual Check Mail/{account.AccountLabel}", ex);
                 progress?.Invoke($"Could not check {account.AccountLabel}: {ex.Message}");
+                failures.Add(new MailOperationFailure(account,
+                    account.BackendKind == BackendKind.ImapSmtp ? "Receive email (IMAP)" : "Receive email", ex));
             }
             finally { completed++; }
         }
 
         RebuildFolderListFromCache();
         WireUpWatchers();
+        return failures;
     }
 
     private async Task FetchVirtualFolderAsync(string fullName)

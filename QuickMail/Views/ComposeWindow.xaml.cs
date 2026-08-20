@@ -334,6 +334,8 @@ public partial class ComposeWindow : Window
         vm.ConfirmationRequested = (message, title) =>
             MessageBox.Show(DialogOwner, message, title, MessageBoxButton.YesNo, MessageBoxImage.Warning)
             == MessageBoxResult.Yes;
+        vm.ErrorDialogRequested += (title, message) =>
+            MessageBox.Show(DialogOwner, message, title, MessageBoxButton.OK, MessageBoxImage.Error);
 
         // Win32 file dialogs are View-layer (CLAUDE.md MVVM rules); the VM requests
         // paths and the View owns the dialog.
