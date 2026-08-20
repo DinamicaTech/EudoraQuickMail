@@ -271,6 +271,7 @@ public partial class MainWindow : Window
 
         _truthProbe       = truthProbe;
         InitializeComponent();
+        _vm.MessagesDeleting += OnMessagesDeleting;
         var initialConfig = _configService.Load();
         ApplyAccountsPanelVisibility(initialConfig.ShowAccountsPanel);
         ApplyTodayAgendaVisibility(initialConfig.ShowTodayAgenda);
@@ -2114,6 +2115,27 @@ public partial class MainWindow : Window
     {
         if (Mouse.LeftButton != MouseButtonState.Pressed
             || e.NewValue is not FolderTreeNode { Folder: { } folder }) return;
+        _folderSelectionChangedDuringClick = true;
+        await _vm.SelectFolderCommand.ExecuteAsync(folder);
+        _vm.UpdateMessageListTabTitle(folder.DisplayName);
+        _vm.ActivateMessageListTab();
+    }
+
+    private bool _folderSelectionChangedDuringClick;
+
+    private void FolderList_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e) =>
+        _folderSelectionChangedDuringClick = false;
+
+    private async void FolderList_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        if (_folderSelectionChangedDuringClick) return;
+        var current = e.OriginalSource as DependencyObject;
+        while (current is not null && current is not TreeViewItem)
+            current = System.Windows.Media.VisualTreeHelper.GetParent(current);
+        var item = current as TreeViewItem;
+        if (item?.DataContext is not FolderTreeNode { Folder: { } folder }
+            || !ReferenceEquals(FolderList.SelectedItem, item.DataContext)) return;
+
         await _vm.SelectFolderCommand.ExecuteAsync(folder);
         _vm.UpdateMessageListTabTitle(folder.DisplayName);
         _vm.ActivateMessageListTab();
@@ -5598,7 +5620,12 @@ public partial class MainWindow : Window
             var composeVm = new ComposeViewModel(_smtp, _accountService, _credentials, _imap, _templateService);
             composeVm.Seed(composeModel);
             composeVm.LocalFolderChanged += accountId =>
-                _ = _vm.RefreshFolderListAsync(accountId);
+                Dispatcher.InvokeAsync(async () =>
+                {
+                    await _vm.RefreshFolderListAsync(accountId);
+                    if (_vm.SelectedFolder?.Kind is SpecialFolderKind.Drafts or SpecialFolderKind.Scheduled)
+                        await _vm.SelectFolderCommand.ExecuteAsync(_vm.SelectedFolder);
+                });
             OpenComposeSurface(composeVm);
         }, DispatcherPriority.Input);
     }
@@ -5617,7 +5644,8 @@ public partial class MainWindow : Window
                 if (mayClose) closed?.Invoke();
                 return mayClose;
             }, window.ForceDisposeDockedHost,
-                () => composeVm.AddAttachmentsCommand.Execute(null));
+                () => composeVm.AddAttachmentsCommand.Execute(null),
+                window.IsEditingDraft, window.DiscardDeletedDraft);
             composeVm.PropertyChanged += (_, e) =>
             {
                 if (e.PropertyName == nameof(ComposeViewModel.TabTitle) && tab is not null)
@@ -5638,6 +5666,21 @@ public partial class MainWindow : Window
             window.Show();
         }
         return window;
+    }
+
+    private void OnMessagesDeleting(IReadOnlyList<MailMessageSummary> messages)
+    {
+        foreach (var message in messages)
+        {
+            var tab = _vm.OpenTabs.OfType<ComposeTabViewModel>().FirstOrDefault(t =>
+                t.IsEditingDraft(message.AccountId, message.FolderName, message.MessageId));
+            if (tab != null)
+                _vm.DiscardDeletedDraftTab(tab);
+
+            var window = _openComposeWindows.FirstOrDefault(w =>
+                w.IsEditingDraft(message.AccountId, message.FolderName, message.MessageId));
+            window?.DiscardDeletedDraft();
+        }
     }
 
     private Task<IReadOnlyList<AttachmentModel>?> ShowForwardAttachmentDialogAsync(IReadOnlyList<AttachmentModel> attachments)

@@ -1631,6 +1631,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (await tab.TryCloseAsync()) RemoveTab(tab);
     }
 
+    public void DiscardDeletedDraftTab(ComposeTabViewModel tab)
+    {
+        tab.DiscardDeletedDraft();
+        RemoveTab(tab);
+    }
+
     private void RemoveTab(TabSessionViewModel tab)
     {
 
@@ -7155,6 +7161,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         if (toDelete.Count == 0) return;
 
+        // Stop an open composer before its next auto-save can recreate a draft the user
+        // has explicitly deleted from the message list.
+        MessagesDeleting?.Invoke(toDelete);
+
         var minIdx = toDelete.Min(m => Messages.IndexOf(m));
         var label  = toDelete.Count == 1 ? "message" : $"{toDelete.Count} messages";
         // Delete/archive progress + outcome go through the MessageAction category (issue #317) so users
@@ -7301,6 +7311,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
             IsBusy = false;
         }
     }
+
+    public event Action<IReadOnlyList<MailMessageSummary>>? MessagesDeleting;
 
     // ── Archive (issue #318) ──────────────────────────────────────────────────────
 

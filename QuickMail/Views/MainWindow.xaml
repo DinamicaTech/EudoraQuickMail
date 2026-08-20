@@ -825,6 +825,7 @@
                     <TextBlock Text="No appointments today. Click + to schedule an appointment."
                                TextWrapping="Wrap" TextAlignment="Center" Margin="8"
                                HorizontalAlignment="Center" VerticalAlignment="Center"
+                               Panel.ZIndex="1" IsHitTestVisible="False"
                                Foreground="{DynamicResource Theme.TextSecondary}"
                                Visibility="{Binding CalendarVm.HasTodayEvents, Converter={StaticResource InverseBoolToVisibilityConverter}}"/>
                     <ListBox x:Name="TodayAgendaList"
@@ -876,6 +877,8 @@
                           Drop="FolderList_Drop"
                           PreviewTextInput="FolderList_PreviewTextInput"
                           PreviewKeyDown="FolderList_PreviewKeyDown"
+                          PreviewMouseLeftButtonDown="FolderList_PreviewMouseLeftButtonDown"
+                          PreviewMouseLeftButtonUp="FolderList_PreviewMouseLeftButtonUp"
                           SelectedItemChanged="FolderList_SelectedItemChanged">
                     <TreeView.Resources>
                         <HierarchicalDataTemplate DataType="{x:Type models:FolderTreeNode}"

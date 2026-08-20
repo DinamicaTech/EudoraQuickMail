@@ -104,6 +104,7 @@ public partial class ComposeWindow : Window
     private string? _detectedLanguagePendingReload;
     private Window? _dockedOwner;
     private bool _dockedDisposed;
+    private bool _isDocked;
 
     private Window DialogOwner => _dockedOwner ?? this;
 
@@ -2003,6 +2004,7 @@ public partial class ComposeWindow : Window
 
     public FrameworkElement DetachForDockedHost(Window owner)
     {
+        _isDocked = true;
         _dockedOwner = owner;
         var root = (FrameworkElement)Content;
         Content = null;
@@ -2055,6 +2057,22 @@ public partial class ComposeWindow : Window
     }
 
     public void ForceDisposeDockedHost() => DisposeDockedHost();
+
+    public bool IsEditingDraft(Guid accountId, string folderName, string messageId) =>
+        _vm.IsEditingDraft(accountId, folderName, messageId);
+
+    public void DiscardDeletedDraft()
+    {
+        _vm.CancelAutoSave();
+        if (_isDocked)
+        {
+            DisposeDockedHost();
+            return;
+        }
+
+        Closing -= OnWindowClosing;
+        Close();
+    }
 
     private static string EffectiveWebViewLanguage(string? language) => language switch
     {

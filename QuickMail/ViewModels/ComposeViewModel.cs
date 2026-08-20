@@ -161,6 +161,12 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
     public bool IsDirty => _isDirty;
     public bool IsSent  => _isSent;
 
+    public bool IsEditingDraft(Guid accountId, string folderName, string messageId) =>
+        SenderAccount?.Id == accountId
+        && !string.IsNullOrEmpty(_draftMessageId)
+        && string.Equals(_draftMessageId, messageId, StringComparison.OrdinalIgnoreCase)
+        && string.Equals(_draftFolderName, folderName, StringComparison.OrdinalIgnoreCase);
+
     /// <summary>The compose mode stored in the draft when it was last saved; PlainText for new composes.</summary>
     public ComposeMode SeededMode => _seededMode;
 
