@@ -14,10 +14,17 @@ public enum MessageOpenMode
 /// Configuration for tab and window behaviour.
 /// Persisted under the [windowing] section of config.ini.
 /// </summary>
+public enum ComposeOpenMode
+{
+    FloatingWindow = 0,
+    DockedTab = 1,
+}
+
 public class WindowingPreferences
 {
     /// <summary>Where Enter / click on a message opens it.</summary>
     public MessageOpenMode MessageOpenMode { get; set; } = MessageOpenMode.ReadingPane;
+    public ComposeOpenMode ComposeOpenMode { get; set; } = ComposeOpenMode.FloatingWindow;
 
     /// <summary>Confirm before closing a tab whose content is a draft or unsent reply.</summary>
     public bool ConfirmCloseTabWithUnsaved { get; set; } = true;

@@ -340,6 +340,10 @@ public class ConfigService : IConfigService
                             _        => Models.MessageOpenMode.ReadingPane,
                         };
                         break;
+                    case "composeopenmode":
+                        config.Windowing.ComposeOpenMode = value.Equals("dockedTab", StringComparison.OrdinalIgnoreCase)
+                            ? Models.ComposeOpenMode.DockedTab : Models.ComposeOpenMode.FloatingWindow;
+                        break;
                     case "confirmclosetabwithunsaved":
                         config.Windowing.ConfirmCloseTabWithUnsaved = ParseBool(value);
                         break;
@@ -806,6 +810,11 @@ public class ConfigService : IConfigService
         sb.AppendLine($"MessageOpenMode = {modeStr}");
         sb.AppendLine("# Where Enter / click on a message opens it.");
         sb.AppendLine("# Values: readingPane (default), tab, window.");
+        sb.AppendLine();
+
+        sb.AppendLine($"ComposeOpenMode = {(config.Windowing.ComposeOpenMode == Models.ComposeOpenMode.DockedTab ? "dockedTab" : "floatingWindow")}");
+        sb.AppendLine("# Where New, Reply, Forward, Draft and Scheduled messages are edited.");
+        sb.AppendLine("# Values: floatingWindow (default), dockedTab.");
         sb.AppendLine();
 
         sb.AppendLine($"ConfirmCloseTabWithUnsaved = {(config.Windowing.ConfirmCloseTabWithUnsaved ? "on" : "off")}");

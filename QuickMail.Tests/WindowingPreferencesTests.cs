@@ -47,6 +47,7 @@ public class WindowingPreferencesTests
         var config = new ConfigModel();
 
         Assert.Equal(MessageOpenMode.ReadingPane, config.Windowing.MessageOpenMode);
+        Assert.Equal(ComposeOpenMode.FloatingWindow, config.Windowing.ComposeOpenMode);
         Assert.True(config.Windowing.ConfirmCloseTabWithUnsaved);
     }
 
@@ -95,6 +96,26 @@ public class WindowingPreferencesTests
         var config = LoadFromIni("[windowing]\n");
 
         Assert.Equal(MessageOpenMode.ReadingPane, config.Windowing.MessageOpenMode);
+    }
+
+    [Theory]
+    [InlineData(ComposeOpenMode.FloatingWindow)]
+    [InlineData(ComposeOpenMode.DockedTab)]
+    public void ComposeOpenMode_RoundTrips(ComposeOpenMode mode)
+    {
+        var reloaded = SaveThenReload(c => c.Windowing.ComposeOpenMode = mode);
+        Assert.Equal(mode, reloaded.Windowing.ComposeOpenMode);
+    }
+
+    [Theory]
+    [InlineData("dockedTab", ComposeOpenMode.DockedTab)]
+    [InlineData("DOCKEDTAB", ComposeOpenMode.DockedTab)]
+    [InlineData("floatingWindow", ComposeOpenMode.FloatingWindow)]
+    [InlineData("unknown", ComposeOpenMode.FloatingWindow)]
+    public void ComposeOpenMode_ParsesSafely(string raw, ComposeOpenMode expected)
+    {
+        var config = LoadFromIni($"[windowing]\nComposeOpenMode = {raw}\n");
+        Assert.Equal(expected, config.Windowing.ComposeOpenMode);
     }
 
     // ── ConfirmCloseTabWithUnsaved round trip ────────────────────────────────────

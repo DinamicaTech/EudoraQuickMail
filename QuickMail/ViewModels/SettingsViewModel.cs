@@ -219,6 +219,23 @@ public partial class SettingsViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(IsWindowMode))]
     private string _messageOpenMode = "readingPane";
 
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsComposeFloatingWindow))]
+    [NotifyPropertyChangedFor(nameof(IsComposeDockedTab))]
+    private string _composeOpenMode = "floatingWindow";
+
+    public bool IsComposeFloatingWindow
+    {
+        get => ComposeOpenMode == "floatingWindow";
+        set { if (value) ComposeOpenMode = "floatingWindow"; }
+    }
+
+    public bool IsComposeDockedTab
+    {
+        get => ComposeOpenMode == "dockedTab";
+        set { if (value) ComposeOpenMode = "dockedTab"; }
+    }
+
     public bool IsReadingPaneMode
     {
         get => MessageOpenMode == "readingPane";
@@ -515,6 +532,8 @@ public partial class SettingsViewModel : ObservableObject
             _                             => "readingPane",
         };
         ConfirmCloseTabWithUnsaved = cfg.Windowing.ConfirmCloseTabWithUnsaved;
+        ComposeOpenMode = cfg.Windowing.ComposeOpenMode == Models.ComposeOpenMode.DockedTab
+            ? "dockedTab" : "floatingWindow";
 
         foreach (var cmd in registry.GetAll())
         {
@@ -630,6 +649,8 @@ public partial class SettingsViewModel : ObservableObject
             _        => Models.MessageOpenMode.ReadingPane,
         };
         cfg.Windowing.ConfirmCloseTabWithUnsaved = ConfirmCloseTabWithUnsaved;
+        cfg.Windowing.ComposeOpenMode = ComposeOpenMode == "dockedTab"
+            ? Models.ComposeOpenMode.DockedTab : Models.ComposeOpenMode.FloatingWindow;
 
         cfg.CustomHotkeys = HotkeyRows
             .Where(r => r.HasCustomBinding)

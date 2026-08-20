@@ -1524,6 +1524,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ReadingPaneVisible))]
     [NotifyPropertyChangedFor(nameof(IsMessageListAreaVisible))]
+    [NotifyPropertyChangedFor(nameof(IsComposeTabActive))]
+    [NotifyPropertyChangedFor(nameof(ActiveComposeContent))]
     private TabSessionViewModel? _activeTab;
 
     /// <summary>
@@ -1536,7 +1538,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// so a failed/slow open never blanks the whole pane.
     /// </summary>
     public bool IsMessageListAreaVisible =>
+        ActiveTab is not ComposeTabViewModel &&
         !(MessageOpenMode == MessageOpenMode.Tab && ActiveTab is MessageTabViewModel && IsMessageOpen);
+
+    public bool IsComposeTabActive => ActiveTab is ComposeTabViewModel;
+    public object? ActiveComposeContent => (ActiveTab as ComposeTabViewModel)?.Content;
 
     /// <summary>
     /// True when a message is open in a standalone MessageWindow (Window mode).
@@ -1599,13 +1605,37 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         if (tab is MessageListTabViewModel) return; // permanent tab, never closed by user
 
+        if (tab is ComposeTabViewModel compose)
+        {
+            _ = CloseComposeTabAsync(compose);
+            return;
+        }
+
+        RemoveTab(tab);
+    }
+
+    public void OpenComposeTab(ComposeTabViewModel tab)
+    {
+        OpenTabs.Add(tab);
+        ActiveTab = tab;
+        OnPropertyChanged(nameof(ShowTabStrip));
+    }
+
+    private async Task CloseComposeTabAsync(ComposeTabViewModel tab)
+    {
+        if (await tab.TryCloseAsync()) RemoveTab(tab);
+    }
+
+    private void RemoveTab(TabSessionViewModel tab)
+    {
+
         var idx = OpenTabs.IndexOf(tab);
         if (idx < 0) return;
 
         OpenTabs.Remove(tab);
         OnPropertyChanged(nameof(ShowTabStrip));
 
-        var remaining = OpenTabs.OfType<MessageTabViewModel>().Count();
+        var remaining = OpenTabs.Count(t => t is MessageTabViewModel or ComposeTabViewModel);
         Announce($"Closed tab: {tab.Title}. {remaining} tab{(remaining == 1 ? "" : "s")} remaining.");
 
         if (ActiveTab == tab)
@@ -1641,23 +1671,21 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     public void ActivateNextTab()
     {
-        var messageTabs = OpenTabs.OfType<MessageTabViewModel>().ToList();
-        if (messageTabs.Count == 0) return;
-        var cur = ActiveTab as MessageTabViewModel;
-        var idx = cur == null ? 0 : (messageTabs.IndexOf(cur) + 1) % messageTabs.Count;
-        ActiveTab = messageTabs[idx];
-        Announce($"Tab {idx + 1} of {messageTabs.Count}: {ActiveTab.Title}.");
+        var tabs = OpenTabs.Where(t => t is not MessageListTabViewModel).ToList();
+        if (tabs.Count == 0) return;
+        var idx = ActiveTab == null ? 0 : (tabs.IndexOf(ActiveTab) + 1) % tabs.Count;
+        ActiveTab = tabs[idx];
+        Announce($"Tab {idx + 1} of {tabs.Count}: {ActiveTab.Title}.");
     }
 
     public void ActivatePrevTab()
     {
-        var messageTabs = OpenTabs.OfType<MessageTabViewModel>().ToList();
-        if (messageTabs.Count == 0) return;
-        var cur = ActiveTab as MessageTabViewModel;
-        var idx = cur == null ? messageTabs.Count - 1
-                              : (messageTabs.IndexOf(cur) - 1 + messageTabs.Count) % messageTabs.Count;
-        ActiveTab = messageTabs[idx];
-        Announce($"Tab {idx + 1} of {messageTabs.Count}: {ActiveTab.Title}.");
+        var tabs = OpenTabs.Where(t => t is not MessageListTabViewModel).ToList();
+        if (tabs.Count == 0) return;
+        var current = ActiveTab is null ? -1 : tabs.IndexOf(ActiveTab);
+        var idx = current < 0 ? tabs.Count - 1 : (current - 1 + tabs.Count) % tabs.Count;
+        ActiveTab = tabs[idx];
+        Announce($"Tab {idx + 1} of {tabs.Count}: {ActiveTab.Title}.");
     }
 
     public void ActivateTabByIndex(int oneBasedIndex)
@@ -1674,7 +1702,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     public void MoveTabLeft()
     {
-        if (ActiveTab is not MessageTabViewModel) return;
+        if (ActiveTab is not (MessageTabViewModel or ComposeTabViewModel)) return;
         var idx = OpenTabs.IndexOf(ActiveTab);
         // Don't move before the message list tab (always index 0 in Tab mode).
         var minIdx = OpenTabs.OfType<MessageListTabViewModel>().Any() ? 1 : 0;
@@ -1685,7 +1713,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     public void MoveTabRight()
     {
-        if (ActiveTab is not MessageTabViewModel) return;
+        if (ActiveTab is not (MessageTabViewModel or ComposeTabViewModel)) return;
         var idx = OpenTabs.IndexOf(ActiveTab);
         if (idx < 0 || idx >= OpenTabs.Count - 1) return;
         OpenTabs.Move(idx, idx + 1);
@@ -1697,9 +1725,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (ActiveTab == null || OpenTabs.Count <= 1) return;
         var toClose = OpenTabs.Where(t => t != ActiveTab && t is not MessageListTabViewModel).ToList();
         if (toClose.Count == 0) return;
-        using (OpenTabs.BeginBatchScope())
-            foreach (var t in toClose) OpenTabs.Remove(t);
-        OnPropertyChanged(nameof(ShowTabStrip));
+        foreach (var tab in toClose) CloseTab(tab);
     }
 
     /// <summary>

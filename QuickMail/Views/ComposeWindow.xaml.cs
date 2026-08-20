@@ -102,6 +102,10 @@ public partial class ComposeWindow : Window
     private bool _applyingDetectedLanguage;
     private DispatcherTimer? _detectedLanguageReloadTimer;
     private string? _detectedLanguagePendingReload;
+    private Window? _dockedOwner;
+    private bool _dockedDisposed;
+
+    private Window DialogOwner => _dockedOwner ?? this;
 
     private ProfileContext TranslationProfile =>
         ((App)Application.Current).Profile ?? ProfileContext.Default();
@@ -122,12 +126,12 @@ public partial class ComposeWindow : Window
 
         if (string.IsNullOrWhiteSpace(selected))
         {
-            MessageBox.Show(this, "Select the text you want to translate first.", "Translate Selection",
+            MessageBox.Show(DialogOwner, "Select the text you want to translate first.", "Translate Selection",
                 MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
 
-        var dialog = new TranslateSelectionWindow(TranslationProfile, selected) { Owner = this };
+        var dialog = new TranslateSelectionWindow(TranslationProfile, selected) { Owner = DialogOwner };
         if (dialog.ShowDialog() != true) return;
         if (_vm.CurrentMode == ComposeMode.Html)
             await HtmlBodyEditor.CoreWebView2.ExecuteScriptAsync(
@@ -136,7 +140,7 @@ public partial class ComposeWindow : Window
     }
 
     private void MenuTranslationProviders_Click(object sender, RoutedEventArgs e) =>
-        new TranslationProvidersWindow(TranslationProfile) { Owner = this }.ShowDialog();
+        new TranslationProvidersWindow(TranslationProfile) { Owner = DialogOwner }.ShowDialog();
 
     private async Task TranslateHtmlContextSelectionAsync(string selected, string target)
     {
@@ -150,7 +154,7 @@ public partial class ComposeWindow : Window
         };
         if (string.IsNullOrEmpty(source))
         {
-            MessageBox.Show(this, "Select a correction language before translating.", "Translate Selection",
+            MessageBox.Show(DialogOwner, "Select a correction language before translating.", "Translate Selection",
                 MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
@@ -173,7 +177,7 @@ public partial class ComposeWindow : Window
         {
             LogService.Log("Compose context translation failed", ex);
             _vm.StatusText = "Translation failed.";
-            MessageBox.Show(this, ex.Message, "Translate Selection", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show(DialogOwner, ex.Message, "Translate Selection", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 
@@ -189,14 +193,14 @@ public partial class ComposeWindow : Window
         };
         if (string.IsNullOrEmpty(language))
         {
-            MessageBox.Show(this, "Select a correction language before checking grammar.", "Grammar Check",
+            MessageBox.Show(DialogOwner, "Select a correction language before checking grammar.", "Grammar Check",
                 MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
 
         if (!_languageTool.IsInstalled)
         {
-            var answer = MessageBox.Show(this,
+            var answer = MessageBox.Show(DialogOwner,
                 "Grammar checking needs the local LanguageTool component (approximately 252 MB to download). " +
                 "It is installed once in this QuickMail profile and no message text is sent to the Internet. Install it now?",
                 "Install LanguageTool", MessageBoxButton.YesNo, MessageBoxImage.Question);
@@ -209,7 +213,7 @@ public partial class ComposeWindow : Window
             catch (Exception ex)
             {
                 LogService.Log("LanguageTool installation failed", ex);
-                MessageBox.Show(this, ex.Message, "LanguageTool Installation",
+                MessageBox.Show(DialogOwner, ex.Message, "LanguageTool Installation",
                     MessageBoxButton.OK, MessageBoxImage.Error);
                 return;
             }
@@ -225,11 +229,11 @@ public partial class ComposeWindow : Window
             if (issues.Count == 0)
             {
                 _vm.StatusText = "Grammar check complete. No issues found.";
-                MessageBox.Show(this, "No grammar issues were found in the selected text.", "Grammar Check",
+                MessageBox.Show(DialogOwner, "No grammar issues were found in the selected text.", "Grammar Check",
                     MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
             }
-            var dialog = new GrammarCheckWindow(selected, issues) { Owner = this };
+            var dialog = new GrammarCheckWindow(selected, issues) { Owner = DialogOwner };
             if (dialog.ShowDialog() == true && HtmlBodyEditor.CoreWebView2 is not null)
                 await HtmlBodyEditor.CoreWebView2.ExecuteScriptAsync(
                     $"window.quickmailReplaceSelection({JsonSerializer.Serialize(dialog.CorrectedText)})");
@@ -239,7 +243,7 @@ public partial class ComposeWindow : Window
         {
             LogService.Log("LanguageTool grammar check failed", ex);
             _vm.StatusText = "Grammar check failed.";
-            MessageBox.Show(this, ex.Message, "Grammar Check", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show(DialogOwner, ex.Message, "Grammar Check", MessageBoxButton.OK, MessageBoxImage.Error);
         }
         finally
         {
@@ -324,7 +328,7 @@ public partial class ComposeWindow : Window
 
         // Wire the View confirmation callback so the VM stays out of System.Windows.
         vm.ConfirmationRequested = (message, title) =>
-            MessageBox.Show(this, message, title, MessageBoxButton.YesNo, MessageBoxImage.Warning)
+            MessageBox.Show(DialogOwner, message, title, MessageBoxButton.YesNo, MessageBoxImage.Warning)
             == MessageBoxResult.Yes;
 
         // Win32 file dialogs are View-layer (CLAUDE.md MVVM rules); the VM requests
@@ -332,22 +336,22 @@ public partial class ComposeWindow : Window
         vm.OpenFilePathsRequested = () =>
         {
             var dlg = new Microsoft.Win32.OpenFileDialog { Multiselect = true, Title = "Add Attachments" };
-            return dlg.ShowDialog(this) == true ? dlg.FileNames : null;
+            return dlg.ShowDialog(DialogOwner) == true ? dlg.FileNames : null;
         };
 
         vm.PromptTemplateNameRequested = suggested =>
         {
-            var dialog = new TextPromptWindow("Save as Template", "Template name:", suggested) { Owner = this };
+            var dialog = new TextPromptWindow("Save as Template", "Template name:", suggested) { Owner = DialogOwner };
             return dialog.ShowDialog() == true ? dialog.Value : null;
         };
         vm.PromptScheduleTimeRequested = suggested =>
         {
             var dialog = new TextPromptWindow("Send Later", "Local date and time:", suggested.ToString("g"))
-            { Owner = this };
+            { Owner = DialogOwner };
             if (dialog.ShowDialog() != true) return null;
             if (DateTime.TryParse(dialog.Value, System.Globalization.CultureInfo.CurrentCulture,
                     System.Globalization.DateTimeStyles.AllowWhiteSpaces, out var value)) return value;
-            MessageBox.Show(this, "Enter a valid local date and time.", "Send Later",
+            MessageBox.Show(DialogOwner, "Enter a valid local date and time.", "Send Later",
                 MessageBoxButton.OK, MessageBoxImage.Warning);
             return null;
         };
@@ -356,7 +360,7 @@ public partial class ComposeWindow : Window
         vm.InsertTemplateRequested += () =>
         {
             var pickerVm = new TemplatePickerViewModel(_templateService);
-            var dialog = new TemplatePickerWindow(pickerVm) { Owner = this };
+            var dialog = new TemplatePickerWindow(pickerVm) { Owner = DialogOwner };
             if (dialog.ShowDialog() == true)
                 return Task.FromResult(dialog.SelectedTemplate);
             return Task.FromResult<MessageTemplate?>(null);
@@ -388,36 +392,14 @@ public partial class ComposeWindow : Window
         FromCombo.DropDownClosed    += (_, _) => AnnounceSenderAccount(onlyIfChanged: true);
         FromCombo.LostKeyboardFocus += (_, _) => AnnounceSenderAccount(onlyIfChanged: true);
 
-        Loaded += async (_, _) =>
-        {
-            // Whatever account the window opened on is already the baseline, so leaving
-            // the From combo without changing anything stays silent.
-            _announcedSenderAccountId = _vm.SenderAccount?.Id;
-            await InitializeHtmlEditorAsync();
-            ApplyDefaultComposeMode();
-            if (string.IsNullOrWhiteSpace(_vm.To))
-            {
-                // Forward: body caret goes to 0 so tabbing to body lands at the top,
-                // not the end of the seeded content. HTML caret is already at ContentStart
-                // after LoadHtmlIntoEditorRequested fires during ApplyDefaultComposeMode.
-                if (_vm.ComposeKind == ComposeKind.Forward && _vm.CurrentMode != ComposeMode.Html)
-                    BodyBox.CaretIndex = 0;
-                ToBox.FocusInput();
-            }
-            else
-            {
-                FocusActiveEditor();
-                if (_vm.CurrentMode != ComposeMode.Html)
-                    BodyBox.CaretIndex = 0;
-            }
-        };
+        Loaded += async (_, _) => await InitializeEditorOnLoadedAsync();
         BodyBox.SelectionChanged += BodyBox_SelectionChanged;
         RichBodyBox.SelectionChanged += RichBodyBox_SelectionChanged;
         RichBodyBox.PreviewKeyDown += RichBodyBox_PreviewKeyDown;
         Closing += OnWindowClosing;
         ConfirmSaveOnClose = () =>
         {
-            var r = MessageBox.Show(this,
+            var r = MessageBox.Show(DialogOwner,
                 "Do you want to save this message as a draft before closing?",
                 "Save Draft?",
                 MessageBoxButton.YesNoCancel,
@@ -1578,7 +1560,7 @@ public partial class ComposeWindow : Window
             toAction:  c => ToBox.AddAddress(c.DisplayName ?? string.Empty, c.EmailAddress),
             ccAction:  c => CcBox.AddAddress(c.DisplayName ?? string.Empty, c.EmailAddress),
             bccAction: c => BccBox.AddAddress(c.DisplayName ?? string.Empty, c.EmailAddress));
-        var win = new AddressBookWindow(vm) { Owner = this };
+        var win = new AddressBookWindow(vm) { Owner = DialogOwner };
         win.ShowDialog();
     }
 
@@ -1609,7 +1591,7 @@ public partial class ComposeWindow : Window
     private void OpenCommandPalette()
     {
         var previousFocus = Keyboard.FocusedElement as IInputElement;
-        var palette = new CommandPaletteWindow(_registry) { Owner = this };
+        var palette = new CommandPaletteWindow(_registry) { Owner = DialogOwner };
         palette.ShowDialog();
         (previousFocus ?? BodyBox).Focus();
     }
@@ -1623,7 +1605,7 @@ public partial class ComposeWindow : Window
         }
         var fragment = _vm.GetBodyHtml();
         _previewWindow = new MarkdownPreviewWindow(_vm.Subject, fragment,
-            _themeService?.BuildMessageCss(forceOnContent: false)) { Owner = this };
+            _themeService?.BuildMessageCss(forceOnContent: false)) { Owner = DialogOwner };
         _previewWindow.Closed += (_, _) => { _previewWindow = null; FocusActiveEditor(); };
         _previewWindow.Show();
     }
@@ -1692,7 +1674,7 @@ public partial class ComposeWindow : Window
                 return;
             }
 
-            var dialog = new SpellCheckDialog(vm) { Owner = this };
+            var dialog = new SpellCheckDialog(vm) { Owner = DialogOwner };
             _spellCheckDialog = dialog;
             dialog.Closed += (_, _) =>
             {
@@ -1740,7 +1722,7 @@ public partial class ComposeWindow : Window
         {
             AccessibilityHelper.Announce(this, vm.CompletionAnnouncement,
                 category: AnnouncementCategory.Result);
-            MessageBox.Show(this, vm.CompletionText, "Spelling",
+            MessageBox.Show(DialogOwner, vm.CompletionText, "Spelling",
                 MessageBoxButton.OK, MessageBoxImage.Information);
         }
         else
@@ -1991,6 +1973,75 @@ public partial class ComposeWindow : Window
             LogService.Log("Compose HTML editor initialization failed", ex);
         }
     }
+
+    private async Task InitializeEditorOnLoadedAsync()
+    {
+        _announcedSenderAccountId = _vm.SenderAccount?.Id;
+        await InitializeHtmlEditorAsync();
+        ApplyDefaultComposeMode();
+        if (string.IsNullOrWhiteSpace(_vm.To))
+        {
+            if (_vm.ComposeKind == ComposeKind.Forward && _vm.CurrentMode != ComposeMode.Html)
+                BodyBox.CaretIndex = 0;
+            ToBox.FocusInput();
+        }
+        else
+        {
+            FocusActiveEditor();
+            if (_vm.CurrentMode != ComposeMode.Html) BodyBox.CaretIndex = 0;
+        }
+    }
+
+    public FrameworkElement DetachForDockedHost(Window owner)
+    {
+        _dockedOwner = owner;
+        var root = (FrameworkElement)Content;
+        Content = null;
+        while (InputBindings.Count > 0)
+        {
+            var binding = InputBindings[0];
+            InputBindings.RemoveAt(0);
+            root.InputBindings.Add(binding);
+        }
+        while (CommandBindings.Count > 0)
+        {
+            var binding = CommandBindings[0];
+            CommandBindings.RemoveAt(0);
+            root.CommandBindings.Add(binding);
+        }
+        root.PreviewKeyDown += Window_PreviewKeyDown;
+        root.PreviewKeyUp += Window_PreviewKeyUp;
+        root.Loaded += async (_, _) => await InitializeEditorOnLoadedAsync();
+        return root;
+    }
+
+    public async Task<bool> TryCloseDockedAsync()
+    {
+        _vm.CancelAutoSave();
+        _previewWindow?.Close();
+        CloseSpellCheckDialogSilently();
+        if (!_vm.IsSent && _vm.IsDirty)
+        {
+            var decision = ConfirmSaveOnClose is null ? false : await ConfirmSaveOnClose();
+            if (decision is null) return false;
+            if (decision == true)
+            {
+                await _vm.SaveDraftCommand.ExecuteAsync(null);
+                if (_vm.StatusText.Contains("failed", StringComparison.OrdinalIgnoreCase)) return false;
+            }
+        }
+        DisposeDockedHost();
+        return true;
+    }
+
+    private void DisposeDockedHost()
+    {
+        if (_dockedDisposed) return;
+        _dockedDisposed = true;
+        OnClosed(EventArgs.Empty);
+    }
+
+    public void ForceDisposeDockedHost() => DisposeDockedHost();
 
     private static string EffectiveWebViewLanguage(string? language) => language switch
     {
@@ -2771,7 +2822,7 @@ public partial class ComposeWindow : Window
         var selectionText = inMarkdown
             ? BodyBox.SelectedText.Trim()
             : _vm.CurrentMode == ComposeMode.Html ? string.Empty : RichBodyBox.Selection.Text.Trim();
-        var dialog = new InsertLinkDialog(selectionText) { Owner = this };
+        var dialog = new InsertLinkDialog(selectionText) { Owner = DialogOwner };
         if (dialog.ShowDialog() != true)
         {
             FocusActiveEditor();
@@ -2895,7 +2946,7 @@ public partial class ComposeWindow : Window
     /// </summary>
     private void ShowFormatting()
     {
-        var window = new FormattingListWindow(GetFormattingParts()) { Owner = this };
+        var window = new FormattingListWindow(GetFormattingParts()) { Owner = DialogOwner };
         window.ShowDialog();
         FocusActiveEditor();
     }

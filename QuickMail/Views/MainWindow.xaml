@@ -2049,6 +2049,12 @@
 
                     </Grid>
                 </DockPanel>
+
+                <ContentControl Grid.Row="0" Grid.RowSpan="3" Panel.ZIndex="100"
+                                Content="{Binding ActiveComposeContent}"
+                                Background="{DynamicResource Theme.WindowBackground}"
+                                Visibility="{Binding IsComposeTabActive, Converter={StaticResource BoolToVisibilityConverter}}"
+                                AutomationProperties.Name="Docked message editor"/>
                 </Grid>
 
             </DockPanel>

@@ -7,6 +7,7 @@ public enum TabKind
 {
     Message,
     MessageList,
+    Compose,
     Unknown,
 }
 

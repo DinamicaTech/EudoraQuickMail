@@ -699,6 +699,32 @@
                             </StackPanel>
                         </GroupBox>
 
+                        <GroupBox Header="_Compose Open Mode" Padding="10" Margin="0,0,0,15"
+                                  AutomationProperties.Name="Compose open mode settings">
+                            <StackPanel KeyboardNavigation.TabNavigation="Once"
+                                        KeyboardNavigation.DirectionalNavigation="Cycle"
+                                        helpers:RadioGroupNavigation.SelectionFollowsFocus="True">
+                                <TextBlock Text="Choose where New, Reply, Forward, Draft and Scheduled messages are edited."
+                                           TextWrapping="Wrap" Margin="0,0,0,8"
+                                           Foreground="{DynamicResource Theme.TextSecondary}"
+                                           FontSize="{DynamicResource Theme.FontSizeSmall}"/>
+                                <RadioButton Content="_Floating window (default)"
+                                             IsChecked="{Binding IsComposeFloatingWindow, Mode=TwoWay}"
+                                             GroupName="ComposeOpenMode"/>
+                                <TextBlock Text="Opens each editor in a separate window, suitable for multiple monitors."
+                                           TextWrapping="Wrap" Margin="16,2,0,8"
+                                           Foreground="{DynamicResource Theme.TextSecondary}"
+                                           FontSize="{DynamicResource Theme.FontSizeSmall}"/>
+                                <RadioButton Content="_Docked tab"
+                                             IsChecked="{Binding IsComposeDockedTab, Mode=TwoWay}"
+                                             GroupName="ComposeOpenMode"/>
+                                <TextBlock Text="Opens the editor as a tab inside the main QuickMail window."
+                                           TextWrapping="Wrap" Margin="16,2,0,0"
+                                           Foreground="{DynamicResource Theme.TextSecondary}"
+                                           FontSize="{DynamicResource Theme.FontSizeSmall}"/>
+                            </StackPanel>
+                        </GroupBox>
+
                         <!-- Tab behaviour -->
                         <GroupBox Header="_Tab Behaviour" Padding="10" Margin="0,0,0,0"
                                   AutomationProperties.Name="Tab behaviour settings">

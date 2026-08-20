@@ -806,6 +806,8 @@ public partial class MainWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
+        foreach (var tab in _vm.OpenTabs.OfType<ComposeTabViewModel>().ToList())
+            tab.ForceDispose();
         foreach (var w in _openComposeWindows.ToList())
             w.Close();
         // Standalone message windows (MessageOpenMode = Window) are unowned, so WPF keeps the
@@ -1249,7 +1251,7 @@ public partial class MainWindow : Window
             id: "tabs.close", category: "View", title: "Close Tab",
             execute: () => { if (_vm.ActiveTab != null) _vm.CloseTab(_vm.ActiveTab); },
             defaultKey: Key.W, defaultModifiers: ModifierKeys.Control,
-            isAvailable: () => _vm.ActiveTab is MessageTabViewModel));
+            isAvailable: () => _vm.ActiveTab is MessageTabViewModel or ComposeTabViewModel));
 
         _registry.Register(new CommandDefinition(
             id: "mail.closeMessage", category: "Mail", title: "Close Message",
@@ -5587,12 +5589,44 @@ public partial class MainWindow : Window
             composeVm.Seed(composeModel);
             composeVm.LocalFolderChanged += accountId =>
                 _ = _vm.RefreshFolderListAsync(accountId);
-            var window = new ComposeWindow(composeVm, _contactService, _templateService, _configService, _customDictionary, _themeService);
+            OpenComposeSurface(composeVm);
+        }, DispatcherPriority.Input);
+    }
+
+    private ComposeWindow OpenComposeSurface(ComposeViewModel composeVm, Action? closed = null)
+    {
+        var window = new ComposeWindow(composeVm, _contactService, _templateService, _configService,
+            _customDictionary, _themeService);
+        if (_configService.Load().Windowing.ComposeOpenMode == ComposeOpenMode.DockedTab)
+        {
+            var content = window.DetachForDockedHost(this);
+            ComposeTabViewModel? tab = null;
+            tab = new ComposeTabViewModel(composeVm.WindowTitle, content, async () =>
+            {
+                var mayClose = await window.TryCloseDockedAsync();
+                if (mayClose) closed?.Invoke();
+                return mayClose;
+            }, window.ForceDisposeDockedHost);
+            composeVm.PropertyChanged += (_, e) =>
+            {
+                if (e.PropertyName == nameof(ComposeViewModel.WindowTitle) && tab is not null)
+                    tab.Title = composeVm.WindowTitle;
+            };
+            composeVm.CloseRequested += () => _vm.CloseTab(tab);
+            _vm.OpenComposeTab(tab);
+        }
+        else
+        {
             composeVm.CloseRequested += window.Close;
             _openComposeWindows.Add(window);
-            window.Closed += (_, _) => _openComposeWindows.Remove(window);
+            window.Closed += (_, _) =>
+            {
+                _openComposeWindows.Remove(window);
+                closed?.Invoke();
+            };
             window.Show();
-        }, DispatcherPriority.Input);
+        }
+        return window;
     }
 
     private Task<IReadOnlyList<AttachmentModel>?> ShowForwardAttachmentDialogAsync(IReadOnlyList<AttachmentModel> attachments)
@@ -6432,19 +6466,14 @@ public partial class MainWindow : Window
         ComposeWindow? pending = null;
         ComposeWindow GetOrOpenCompose()
         {
-            if (pending?.IsLoaded == true) return pending;
+            if (pending is not null) return pending;
             var cvm = new ComposeViewModel(_smtp, _accountService, _credentials, _imap, _templateService);
             // Seed with an empty new-message model so the sender-account list is populated and the
             // default account + signature are applied — same as the normal "New message" path. Without
             // this the From picker is empty and the user can't choose who to send from (a pre-existing
             // bug the address book exposes whenever To/Cc opens a compose window).
             cvm.Seed(new ComposeModel());
-            pending = new ComposeWindow(cvm, _contactService, _templateService, _configService, _customDictionary, _themeService);
-            cvm.CloseRequested += pending.Close;
-            var tracked = pending;
-            _openComposeWindows.Add(tracked);
-            tracked.Closed += (_, _) => _openComposeWindows.Remove(tracked);
-            pending.Show();
+            pending = OpenComposeSurface(cvm, () => pending = null);
             return pending;
         }
         vm.SetInsertActions(
