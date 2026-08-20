@@ -19,6 +19,11 @@ containing:
 
 The `vpk` CLI is a .NET global tool: `dotnet tool install -g vpk`.
 
+For an autonomous test installer that never checks GitHub for updates, run
+`build.bat installer-standalone`. It packages a `quickmail-standalone-install` marker beside
+the executable; `UpdateCheckService` detects that marker and skips both Velopack and GitHub API
+checks. The ordinary `installer` target does not include the marker.
+
 ## Two architectures, two channels
 
 Releases ship both an x64 and a native ARM64 build (issue #18). They are packed into the

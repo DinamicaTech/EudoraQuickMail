@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text.Json;
@@ -12,6 +13,7 @@ namespace QuickMail.Services;
 
 public class UpdateCheckService : IUpdateCheckService, IDisposable
 {
+    private const string StandaloneMarkerFile = "quickmail-standalone-install";
     // Single source of truth for the project location — VelopackRuntime and MainViewModel
     // build their URLs from these rather than repeating the literal.
     public const string RepoUrl = "https://github.com/kellylford/QuickMail";
@@ -59,6 +61,12 @@ public class UpdateCheckService : IUpdateCheckService, IDisposable
 
     public async Task<Models.UpdateInfo?> CheckForUpdateAsync(CancellationToken cancellationToken = default)
     {
+        // Local test installers deliberately have no release feed. A marker beside the executable
+        // keeps them completely detached from both Velopack's GitHub source and the portable API
+        // fallback, while production packages (which omit it) retain normal update behaviour.
+        if (File.Exists(Path.Combine(AppContext.BaseDirectory, StandaloneMarkerFile)))
+            return null;
+
         // Velopack path only applies when running from a Velopack install
         // (%LocalAppData%\QuickMail\current\). The portable exe and dev builds fall through
         // to the GitHub API check below, which can only notify — not silently update.

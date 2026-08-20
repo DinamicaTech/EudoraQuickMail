@@ -6,6 +6,10 @@ if /i "%1"=="release" set CONFIG=Release
 if /i "%1"=="publish"   goto publish
 if /i "%1"=="publish-arm64" goto publish-arm64
 if /i "%1"=="installer" goto installer
+if /i "%1"=="installer-standalone" (
+    set STANDALONE_INSTALLER=1
+    goto installer
+)
 if /i "%1"=="run"     goto run
 if /i "%1"=="clean"   goto clean
 if /i "%1"=="smoke"   goto smoke
@@ -71,6 +75,10 @@ if errorlevel 1 (
 )
 copy /y publish-importer\EudoraImporter.exe publish\EudoraImporter.exe >nul
 rmdir /s /q publish-importer\
+if defined STANDALONE_INSTALLER (
+    echo Standalone installer: disabling GitHub update checks...
+    type nul > publish\quickmail-standalone-install
+)
 echo.
 echo Locating vpk (Velopack CLI)...
 where vpk >nul 2>nul
