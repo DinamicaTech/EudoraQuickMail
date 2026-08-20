@@ -2880,6 +2880,32 @@ public partial class MainWindow : Window
                 _vm.IsMessageOpen = false;
                 return;
             }
+            // Drafts and scheduled messages follow the same interaction as ordinary mail:
+            // one click previews; double-click (handled separately) opens the editor.
+            if (_vm.IsSelectedFolderDrafts || _vm.IsSelectedFolderScheduled)
+            {
+                _vm.SelectedMessage = summary;
+                await _vm.SelectMessageCommand.ExecuteAsync(summary);
+                if (_vm.IsMessageOpen && _vm.MessageDetail != null)
+                    await ShowMessageBodyAsync(_vm.MessageDetail);
+            }
+            else
+            {
+                await OpenMessageFromListAsync(summary);
+            }
+        }
+    }
+
+    private async void MessageList_MouseDoubleClick(object sender, MouseButtonEventArgs e)
+    {
+        if (ItemsControl.ContainerFromElement(MessageList, e.OriginalSource as DependencyObject)
+                is not ListViewItem
+            || MessageList.SelectedItem is not MailMessageSummary summary)
+            return;
+
+        if (_vm.IsSelectedFolderDrafts || _vm.IsSelectedFolderScheduled)
+        {
+            e.Handled = true;
             await OpenMessageFromListAsync(summary);
         }
     }

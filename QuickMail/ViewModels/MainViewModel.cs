@@ -7941,7 +7941,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
           && rootKind == SpecialFolderKind.Drafts) ||
          string.Equals(SelectedFolder.FullName, AllDraftsFolder.FullName, StringComparison.Ordinal));
 
-    public bool IsSelectedFolderScheduled => SelectedFolder?.Kind == SpecialFolderKind.Scheduled;
+    public bool IsSelectedFolderScheduled =>
+        SelectedFolder != null &&
+        (SelectedFolder.Kind == SpecialFolderKind.Scheduled ||
+         (TryParseRootAggregate(SelectedFolder.FullName, out _, out var rootKind)
+          && rootKind == SpecialFolderKind.Scheduled));
 
     [RelayCommand]
     private async Task OpenScheduledAsync()

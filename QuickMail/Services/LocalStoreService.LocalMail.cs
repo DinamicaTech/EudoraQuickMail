@@ -537,6 +537,22 @@ public partial class LocalStoreService
         await EnsureNotContainerAsync(conn, tx, accountId, destinationFolder, allowMissing: false, ct);
         foreach (var id in messageIds)
         {
+            // A previous move of the same local identity may already exist in Trash (for
+            // example after an interrupted refresh). Make the move idempotent instead of letting
+            // the destination primary key roll the transaction back and resurrect the source row.
+            await ExecuteKeyMutationAsync(conn, tx,
+                "DELETE FROM LocalMessageFts WHERE rowid IN " +
+                "(SELECT fts_rowid FROM LocalMessageFtsKey WHERE account_id=$aid AND folder_name=$source AND unique_id=$uid);",
+                accountId, destinationFolder, id, destinationFolder, ct);
+            await ExecuteKeyMutationAsync(conn, tx,
+                "DELETE FROM AttachmentContentFts WHERE rowid IN " +
+                "(SELECT fts_rowid FROM AttachmentContent WHERE account_id=$aid AND folder_name=$source AND unique_id=$uid);",
+                accountId, destinationFolder, id, destinationFolder, ct);
+            foreach (var table in new[] { "LocalMessageFtsKey", "AttachmentContent", "MessageDetail", "MessageSummary" })
+                await ExecuteKeyMutationAsync(conn, tx,
+                    $"DELETE FROM {table} WHERE account_id=$aid AND folder_name=$source AND unique_id=$uid;",
+                    accountId, destinationFolder, id, destinationFolder, ct);
+
             foreach (var table in new[] { "MessageSummary", "MessageDetail" })
                 await ExecuteKeyMutationAsync(conn, tx,
                     $"UPDATE {table} SET folder_name=$dest WHERE account_id=$aid AND folder_name=$source AND unique_id=$uid;",

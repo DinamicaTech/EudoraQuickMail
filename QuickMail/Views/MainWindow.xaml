@@ -1481,6 +1481,7 @@
                               PreviewMouseWheel="MessageList_PreviewMouseWheel"
                               ScrollViewer.VerticalScrollBarVisibility="Hidden"
                               Margin="0,0,16,0"
+                              MouseDoubleClick="MessageList_MouseDoubleClick"
                               MouseLeftButtonUp="MessageList_MouseLeftButtonUp">
                         <ListView.Resources>
                             <!-- With a bounded 500-row page, pixel scrolling keeps the thumb
