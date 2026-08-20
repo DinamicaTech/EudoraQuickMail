@@ -286,10 +286,9 @@ public partial class ComposeWindow : Window
         _catalanSpellCheck = new CatalanSpellCheckService(customDictionary);
         _languageTool = new LanguageToolService(TranslationProfile);
         _themeService = themeService;
-        // Decide the real initial editor before XAML is displayed. The old Loaded-time
-        // switch briefly showed Plain Text and then replaced it with the HTML WebView.
-        if (vm.ComposeKind == ComposeKind.NewMessage)
-            vm.CurrentMode = ComposeMode.Html;
+        // Decide the real initial editor before XAML is displayed. This includes reopened
+        // drafts/scheduled mail and rich replies, so the plain TextBox is never rendered first.
+        vm.CurrentMode = ResolveInitialComposeMode();
         InitializeComponent();
         DataContext = vm;
         ApplyComposeMode();
@@ -326,6 +325,10 @@ public partial class ComposeWindow : Window
         };
 
         WireRichCompose();
+        // Queue the seeded document before WebView2 starts. InitializeHtmlEditorAsync consumes
+        // it as its first document instead of briefly loading an empty HTML editor and reloading.
+        if (vm.CurrentMode == ComposeMode.Html)
+            vm.LoadSeededHtmlBody();
 
         // Wire the View confirmation callback so the VM stays out of System.Windows.
         vm.ConfirmationRequested = (message, title) =>
@@ -2156,18 +2159,7 @@ public partial class ComposeWindow : Window
     /// </summary>
     private void ApplyDefaultComposeMode()
     {
-        ComposeMode targetMode;
-        if (_vm.ComposeKind == ComposeKind.NewMessage)
-            targetMode = ComposeMode.Html;
-        else if (_vm.ComposeKind is ComposeKind.EditDraft or ComposeKind.NewDraft or ComposeKind.EditScheduled
-            || (_vm.ComposeKind is ComposeKind.Reply or ComposeKind.ReplyAll or ComposeKind.Forward
-                && _vm.SeededMode == ComposeMode.Html))
-            targetMode = _vm.SeededMode;       // restore saved mode or preserve the source's rich reply/forward body
-        else if (_vm.ComposeKind is ComposeKind.EditTemplate)
-            targetMode = ComposeMode.PlainText; // templates are plain-text only
-        else
-            targetMode = _configService.Load().DefaultComposeMode;
-
+        var targetMode = ResolveInitialComposeMode();
         if (targetMode == ComposeMode.PlainText) return;
         if (targetMode == ComposeMode.Html && _vm.CurrentMode == ComposeMode.Html)
         {
@@ -2175,6 +2167,19 @@ public partial class ComposeWindow : Window
             return;
         }
         _vm.SetMode(targetMode);
+    }
+
+    private ComposeMode ResolveInitialComposeMode()
+    {
+        if (_vm.ComposeKind == ComposeKind.NewMessage)
+            return ComposeMode.Html;
+        if (_vm.ComposeKind is ComposeKind.EditDraft or ComposeKind.NewDraft or ComposeKind.EditScheduled
+            || (_vm.ComposeKind is ComposeKind.Reply or ComposeKind.ReplyAll or ComposeKind.Forward
+                && _vm.SeededMode == ComposeMode.Html))
+            return _vm.SeededMode; // restore saved mode or preserve rich reply/forward content
+        if (_vm.ComposeKind is ComposeKind.EditTemplate)
+            return ComposeMode.PlainText;
+        return _configService.Load().DefaultComposeMode;
     }
 
     /// <summary>
