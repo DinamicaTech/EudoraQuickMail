@@ -80,16 +80,18 @@ public sealed class ScheduledSendService : IDisposable
             var index = queue.FindIndex(x => x.Id == id);
             if (index < 0) throw new InvalidOperationException("Scheduled message no longer exists.");
             var old = queue[index];
+            var localMessageId = old.LocalMessageId ?? "scheduled-" + old.Id.ToString("N");
             var account = _accounts.LoadAccounts().First(a => a.Id == message.AccountId);
             await _store.SaveLocalMessageAsync(new MailMessageDetail
             {
-                AccountId = message.AccountId, FolderName = "Scheduled", MessageId = old.LocalMessageId!,
+                AccountId = message.AccountId, FolderName = "Scheduled", MessageId = localMessageId,
                 From = account.Username, To = message.To, Cc = message.Cc, Subject = message.Subject,
                 Date = sendAtUtc, PlainTextBody = message.Body, HtmlBody = message.HtmlBody ?? string.Empty,
                 DraftComposeMode = message.Mode, DraftSpellLanguage = message.SpellLanguage,
                 Preview = message.Body.Length <= 240 ? message.Body : message.Body[..240], IsRead = true,
             });
-            queue[index] = old with { SendAtUtc = sendAtUtc.ToUniversalTime(), Message = message, Attempts = 0, LastError = null };
+            queue[index] = old with { SendAtUtc = sendAtUtc.ToUniversalTime(), Message = message,
+                Attempts = 0, LastError = null, LocalMessageId = localMessageId };
             await SaveAsync(queue);
         }
         finally { _gate.Release(); }

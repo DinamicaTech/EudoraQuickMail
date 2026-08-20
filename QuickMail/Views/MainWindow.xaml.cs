@@ -1162,6 +1162,7 @@ public partial class MainWindow : Window
             execute: () => _vm.DeleteMessageCommand.Execute(null),
             defaultKey: Key.Delete, defaultModifiers: ModifierKeys.None,
             isAvailable: () => _vm.HasSelectedMessage
+                && !_vm.IsComposeTabActive
                 && !(IsMessageListFocused() && MessageList.SelectedItems.Count > 1)
                 && !IsGroupTreeFocused()
                 && !FolderList.IsKeyboardFocusWithin)); // folder.delete owns Delete in the folder tree
@@ -1745,6 +1746,7 @@ public partial class MainWindow : Window
         // Permanent deletion must work even when WebView2 or the reading pane has taken focus.
         // Text editors retain their normal Shift+Delete (cut) behaviour.
         if (key == Key.Delete && modifiers == ModifierKeys.Shift
+            && !_vm.IsComposeTabActive
             && _vm.IsMessagesView && MessageList.SelectedItems.Count > 0
             && Keyboard.FocusedElement is not TextBoxBase
             && Keyboard.FocusedElement is not PasswordBox)
@@ -2900,9 +2902,12 @@ public partial class MainWindow : Window
 
     private async void MessageList_MouseDoubleClick(object sender, MouseButtonEventArgs e)
     {
-        if (ItemsControl.ContainerFromElement(MessageList, e.OriginalSource as DependencyObject)
-                is not ListViewItem
-            || MessageList.SelectedItem is not MailMessageSummary summary)
+        // ContainerFromElement can return null for GridViewRowPresenter descendants after
+        // virtualization. Walking the visual tree makes double-click reliable on any cell text.
+        var current = e.OriginalSource as DependencyObject;
+        while (current is not null && current is not ListViewItem)
+            current = System.Windows.Media.VisualTreeHelper.GetParent(current);
+        if (current is not ListViewItem || MessageList.SelectedItem is not MailMessageSummary summary)
             return;
 
         if (_vm.IsSelectedFolderDrafts || _vm.IsSelectedFolderScheduled)

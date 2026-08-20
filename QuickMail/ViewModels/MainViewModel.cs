@@ -7953,6 +7953,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (SelectedMessage is not { } summary ||
             System.Windows.Application.Current is not App { ScheduledSender: { } scheduler }) return;
         var item = await scheduler.FindByLocalMessageIdAsync(summary.MessageId);
+        if (item is null && summary.MessageId.StartsWith("scheduled-", StringComparison.OrdinalIgnoreCase)
+            && Guid.TryParse(summary.MessageId["scheduled-".Length..], out var scheduledId))
+            item = (await scheduler.GetSnapshotAsync()).FirstOrDefault(x => x.Id == scheduledId);
         if (item is null) { StatusText = "Scheduled message no longer exists."; return; }
         var source = item.Message;
         ComposeRequested?.Invoke(new ComposeModel
@@ -7961,7 +7964,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             To = source.To, Cc = source.Cc, Bcc = source.Bcc, Subject = source.Subject,
             Body = source.Body, Mode = source.Mode, HtmlBody = source.HtmlBody,
             SpellLanguage = source.SpellLanguage, Attachments = source.Attachments,
-            ScheduledId = item.Id, ScheduledLocalMessageId = item.LocalMessageId,
+            ScheduledId = item.Id, ScheduledLocalMessageId = item.LocalMessageId ?? summary.MessageId,
             ScheduledAt = item.SendAtUtc,
         });
     }
