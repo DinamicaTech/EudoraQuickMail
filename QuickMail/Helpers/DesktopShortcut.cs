@@ -33,6 +33,9 @@ public static class DesktopShortcut
             link.TargetPath = target;
             link.WorkingDirectory = Path.GetDirectoryName(target);
             link.Description = "QuickMail";
+            var profileDir = Services.ProfileContext.ParseProfileDir(Environment.GetCommandLineArgs());
+            if (!string.IsNullOrWhiteSpace(profileDir))
+                link.Arguments = $"--profileDir \"{profileDir.Replace("\"", "\\\"")}\"";
             link.Save();
             return true;
         }

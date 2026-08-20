@@ -14,11 +14,13 @@ Windows installer (`quickmail-v<version>-setup.exe`).
 From the repository root:
 
 ```bat
-build.bat installer
+build.bat installer-production
 ```
 
-This publishes the self-contained single-file executable to `publish\QuickMail.exe`, then
-compiles the installer to `installer\Output\quickmail-v<version>-setup.exe`.
+This publishes QuickMail plus EudoraImporter and the offline web assets, adds the standalone
+marker that disables GitHub update checks, then compiles the installer to
+`installer\Output\quickmail-v<version>-setup.exe`. The default installation is
+`C:\Docs\QuickMail`; shortcuts always launch with `--profileDir "C:\Docs\QuickMail\Data"`.
 
 To recompile the installer without re-publishing (when `publish\QuickMail.exe` already
 exists), run the compiler directly:

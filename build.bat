@@ -10,6 +10,7 @@ if /i "%1"=="installer-standalone" (
     set STANDALONE_INSTALLER=1
     goto installer
 )
+if /i "%1"=="installer-production" goto installer-production
 if /i "%1"=="run"     goto run
 if /i "%1"=="clean"   goto clean
 if /i "%1"=="smoke"   goto smoke
@@ -21,7 +22,24 @@ goto end
 
 :run
 echo Running QuickMail (%CONFIG%)...
-dotnet run --project QuickMail\QuickMail.csproj -c %CONFIG%
+dotnet run --project QuickMail\QuickMail.csproj -c %CONFIG% -- --profileDir "%~dp0TestData"
+goto end
+
+:installer-production
+call "%~f0" publish
+if errorlevel 1 exit /b 1
+type nul > publish\quickmail-standalone-install
+set "ISCC=%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe"
+if not exist "%ISCC%" set "ISCC=%ProgramFiles%\Inno Setup 6\ISCC.exe"
+if not exist "%ISCC%" set "ISCC=%LocalAppData%\Programs\Inno Setup 6\ISCC.exe"
+if not exist "%ISCC%" (
+    echo INSTALLER FAILED: Inno Setup 6 was not found.
+    exit /b 1
+)
+"%ISCC%" installer\quickmail.iss
+if errorlevel 1 exit /b 1
+echo.
+echo Production installer: installer\Output\quickmail-v*-setup.exe
 goto end
 
 :publish

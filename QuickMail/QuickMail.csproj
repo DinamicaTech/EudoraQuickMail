@@ -9,6 +9,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
+    <ApplicationIcon>Assets\App\QuickMail.ico</ApplicationIcon>
     <!-- WinForms is enabled ONLY for the system-tray NotifyIcon (Views/TrayIconManager). WPF has no
          native tray icon. WinForms types are always fully qualified; the implicit global usings for
          System.Windows.Forms / System.Drawing are removed below so they never collide with the WPF

@@ -13,6 +13,7 @@
 #define MyAppSupportURL MyAppURL + "/issues"
 #define MyAppExeName MyAppName + ".exe"
 #define MyAppDescription "Keyboard-first, accessible desktop email client for Windows"
+#define ProductionProfileDir "{app}\Data"
 
 ; Source path (relative to this script). Matches the output of `build.bat publish`
 ; and the GitHub Actions release step (`dotnet publish ... -o publish/`).
@@ -34,13 +35,14 @@ AppUpdatesURL={#MyAppURL}/releases
 AppCopyright=Copyright (c) 2026 {#MyAppPublisher}.
 
 ; Installation directory
-DefaultDirName={autopf}\{#MyAppName}
+DefaultDirName={sd}\Docs\QuickMail
 DefaultGroupName={#MyAppName}
 AllowNoIcons=yes
 
 ; Output configuration
 OutputDir=Output
 OutputBaseFilename={#MyAppNameLower}-v{#MyAppVersion}-setup
+SetupIconFile=..\QuickMail\Assets\App\QuickMail.ico
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
@@ -79,18 +81,17 @@ Name: "en"; MessagesFile: "compiler:Default.isl,Languages\Custom.en.isl"
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
 [Files]
-; Self-contained single-file build: QuickMail.exe is the only artifact we ship.
-; The .pdb (debug symbols) and Microsoft.Web.WebView2.*.xml (NuGet IntelliSense
-; docs) that also land in the publish folder are intentionally excluded.
-Source: "{#SourcePath}\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+; Include the self-contained executables plus the offline HTML editor, calendar and
+; dictionaries. Debug symbols and NuGet IntelliSense XML are not runtime assets.
+Source: "{#SourcePath}\*"; DestDir: "{app}"; Excludes: "*.pdb,*.xml"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Comment: "{cm:AppDescription}"
+Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Parameters: "--profileDir ""{#ProductionProfileDir}"""; Comment: "{cm:AppDescription}"
 Name: "{group}\{cm:UninstallProgram,{#MyAppName}}"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Comment: "{cm:AppDescription}"; Tasks: desktopicon
+Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Parameters: "--profileDir ""{#ProductionProfileDir}"""; Comment: "{cm:AppDescription}"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#MyAppExeName}"; Parameters: "--profileDir ""{#ProductionProfileDir}"""; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
 
 #include "CodeDependencies.iss"
 
@@ -107,17 +108,14 @@ begin
   Result := True;
 end;
 
-// Offer to remove user data (accounts config, local mail cache, contacts, rules,
-// templates, saved views) on uninstall. QuickMail stores everything under
-// %APPDATA%\QuickMail. Credentials live in Windows Credential Manager and are not
-// touched here.
+// Offer to remove the production profile. Credentials remain in Windows Credential Manager.
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
   UserDataPath: String;
 begin
   if CurUninstallStep = usPostUninstall then
   begin
-    UserDataPath := ExpandConstant('{userappdata}\{#MyAppName}');
+    UserDataPath := ExpandConstant('{#ProductionProfileDir}');
     if DirExists(UserDataPath) then
     begin
       if MsgBox(CustomMessage('RemoveUserData'),
