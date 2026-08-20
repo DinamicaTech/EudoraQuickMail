@@ -1029,7 +1029,7 @@
                      the tab shows just the message rather than a copy of the list with a body sliver. -->
                 <Grid>
                     <Grid.RowDefinitions>
-                        <RowDefinition Height="{Binding IsMessageListAreaVisible, Converter={StaticResource BoolToGridLengthConverter}, ConverterParameter='*|0'}"/>
+                        <RowDefinition Height="{Binding IsPrimaryContentAreaVisible, Converter={StaticResource BoolToGridLengthConverter}, ConverterParameter='*|0'}"/>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition x:Name="ReadingPaneRow" Height="0" MinHeight="0"/>
                     </Grid.RowDefinitions>

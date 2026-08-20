@@ -1525,6 +1525,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [NotifyPropertyChangedFor(nameof(ReadingPaneVisible))]
     [NotifyPropertyChangedFor(nameof(IsMessageListAreaVisible))]
     [NotifyPropertyChangedFor(nameof(IsComposeTabActive))]
+    [NotifyPropertyChangedFor(nameof(IsPrimaryContentAreaVisible))]
     [NotifyPropertyChangedFor(nameof(ActiveComposeContent))]
     private TabSessionViewModel? _activeTab;
 
@@ -1542,6 +1543,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         !(MessageOpenMode == MessageOpenMode.Tab && ActiveTab is MessageTabViewModel && IsMessageOpen);
 
     public bool IsComposeTabActive => ActiveTab is ComposeTabViewModel;
+    public bool IsPrimaryContentAreaVisible => IsComposeTabActive || IsMessageListAreaVisible;
     public object? ActiveComposeContent => (ActiveTab as ComposeTabViewModel)?.Content;
 
     /// <summary>
