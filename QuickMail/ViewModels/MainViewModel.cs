@@ -1565,7 +1565,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// existing IsMessageOpen flag is still used as the gate (it is set when
     /// the active tab activates its message).
     /// </summary>
-    public bool ReadingPaneVisible => IsMessageOpen;
+    public bool ReadingPaneVisible => IsMessageOpen && !IsComposeTabActive;
 
     /// <summary>Current message open mode, read from config on startup.</summary>
     public MessageOpenMode MessageOpenMode { get; private set; } = MessageOpenMode.ReadingPane;

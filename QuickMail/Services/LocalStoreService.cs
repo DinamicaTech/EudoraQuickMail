@@ -89,6 +89,8 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
         cmd.ExecuteNonQuery();
         RunMigration(conn, "ALTER TABLE MessageDetail ADD COLUMN calendar_ics TEXT DEFAULT NULL;");
         RunMigration(conn, "ALTER TABLE MessageDetail ADD COLUMN raw_headers TEXT NOT NULL DEFAULT '';");
+        RunMigration(conn, "ALTER TABLE MessageDetail ADD COLUMN draft_compose_mode INTEGER NOT NULL DEFAULT 0;");
+        RunMigration(conn, "ALTER TABLE MessageDetail ADD COLUMN draft_spell_language TEXT NOT NULL DEFAULT '';");
         // Stable RFC 5322 Message-ID for collapsing duplicate copies across folders (issue #220).
         // Adds the column for DBs already past the v1→v2 rebuild; fresh/v1 DBs get it from the
         // rebuild's schema below. No index: deduplication runs in memory (MessageDeduplicator), so
@@ -370,11 +372,14 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
                     attachments_json TEXT DEFAULT NULL,
                     calendar_ics TEXT DEFAULT NULL,
                     raw_headers TEXT NOT NULL DEFAULT '',
+                    draft_compose_mode INTEGER NOT NULL DEFAULT 0,
+                    draft_spell_language TEXT NOT NULL DEFAULT '',
                     PRIMARY KEY (unique_id, account_id, folder_name)
                 );
                 INSERT INTO MessageDetail_v2
                 SELECT CAST(unique_id AS TEXT), account_id, folder_name, to_addr, cc,
-                       reply_to, plain_body, html_body, attachments_json, calendar_ics, raw_headers
+                       reply_to, plain_body, html_body, attachments_json, calendar_ics, raw_headers,
+                       draft_compose_mode, draft_spell_language
                 FROM MessageDetail;
                 DROP TABLE MessageDetail;
                 ALTER TABLE MessageDetail_v2 RENAME TO MessageDetail;
@@ -928,8 +933,8 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
         await using var tx = await conn.BeginTransactionAsync();
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = """
-            INSERT INTO MessageDetail(unique_id, account_id, folder_name, to_addr, cc, reply_to, plain_body, html_body, attachments_json, calendar_ics, raw_headers)
-            VALUES($uid, $aid, $fn, $to, $cc, $rt, $plain, $html, $attjson, $ics, $headers)
+            INSERT INTO MessageDetail(unique_id, account_id, folder_name, to_addr, cc, reply_to, plain_body, html_body, attachments_json, calendar_ics, raw_headers, draft_compose_mode, draft_spell_language)
+            VALUES($uid, $aid, $fn, $to, $cc, $rt, $plain, $html, $attjson, $ics, $headers, $mode, $language)
             ON CONFLICT(unique_id, account_id, folder_name) DO UPDATE SET
                 to_addr          = excluded.to_addr,
                 cc               = excluded.cc,
@@ -938,7 +943,9 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
                 html_body        = excluded.html_body,
                 attachments_json = excluded.attachments_json,
                 calendar_ics     = excluded.calendar_ics,
-                raw_headers      = excluded.raw_headers;
+                raw_headers      = excluded.raw_headers,
+                draft_compose_mode = excluded.draft_compose_mode,
+                draft_spell_language = excluded.draft_spell_language;
             """;
         cmd.Parameters.AddWithValue("$uid",    detail.MessageId);
         cmd.Parameters.AddWithValue("$aid",    detail.AccountId.ToString());
@@ -951,6 +958,8 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
         cmd.Parameters.AddWithValue("$attjson", (object?)attJson ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$ics",    (object?)detail.CalendarIcs ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$headers", detail.RawHeaders ?? string.Empty);
+        cmd.Parameters.AddWithValue("$mode", (int)detail.DraftComposeMode);
+        cmd.Parameters.AddWithValue("$language", detail.DraftSpellLanguage ?? string.Empty);
         await cmd.ExecuteNonQueryAsync();
 
         // Update the summary's has_attachments flag
@@ -978,7 +987,8 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
         // INNER JOIN returns nothing.
         cmd.CommandText = """
             SELECT d.to_addr, d.cc, d.reply_to, d.plain_body, d.html_body,
-                   s.from_disp, s.subject, s.date_ticks, s.is_read, d.attachments_json, d.calendar_ics, d.raw_headers
+                   s.from_disp, s.subject, s.date_ticks, s.is_read, d.attachments_json, d.calendar_ics, d.raw_headers,
+                   d.draft_compose_mode, d.draft_spell_language
             FROM MessageDetail d
             LEFT JOIN MessageSummary s USING (unique_id, account_id, folder_name)
             WHERE d.unique_id=$uid AND d.account_id=$aid AND d.folder_name=$fn;
@@ -1010,6 +1020,13 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
         }
 
         var calendarIcs = r.IsDBNull(10) ? string.Empty : r.GetString(10);
+        var storedComposeMode = !r.IsDBNull(12) && Enum.IsDefined(typeof(ComposeMode), r.GetInt32(12))
+            ? (ComposeMode)r.GetInt32(12)
+            : ComposeMode.PlainText;
+        // Drafts saved by builds predating draft_compose_mode have the default zero even when
+        // html_body contains the authoritative editor document. Recover those existing drafts.
+        if (storedComposeMode == ComposeMode.PlainText && !string.IsNullOrWhiteSpace(r.GetString(4)))
+            storedComposeMode = ComposeMode.Html;
 
         return new MailMessageDetail
         {
@@ -1028,6 +1045,8 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
             Attachments   = attachments,
             CalendarIcs   = calendarIcs,
             RawHeaders    = r.IsDBNull(11) ? string.Empty : r.GetString(11),
+            DraftComposeMode = storedComposeMode,
+            DraftSpellLanguage = r.IsDBNull(13) ? string.Empty : r.GetString(13),
             CalendarInvite = string.IsNullOrWhiteSpace(calendarIcs) ? null : IcsModel.Parse(calendarIcs),
         };
     }

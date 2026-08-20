@@ -109,12 +109,14 @@ public partial class LocalStoreService
             detail.Transaction = tx;
             detail.CommandText = """
                 INSERT INTO MessageDetail
-                    (unique_id,account_id,folder_name,to_addr,cc,reply_to,plain_body,html_body,attachments_json,calendar_ics,raw_headers)
-                VALUES ($uid,$aid,$fn,$to,$cc,$reply,$plain,$html,NULL,NULL,$headers)
+                    (unique_id,account_id,folder_name,to_addr,cc,reply_to,plain_body,html_body,attachments_json,calendar_ics,raw_headers,draft_compose_mode,draft_spell_language)
+                VALUES ($uid,$aid,$fn,$to,$cc,$reply,$plain,$html,NULL,NULL,$headers,$mode,$language)
                 ON CONFLICT(unique_id,account_id,folder_name) DO UPDATE SET
                     to_addr=excluded.to_addr,cc=excluded.cc,reply_to=excluded.reply_to,
                     plain_body=excluded.plain_body,html_body=excluded.html_body,
-                    attachments_json=NULL,calendar_ics=NULL,raw_headers=excluded.raw_headers;
+                    attachments_json=NULL,calendar_ics=NULL,raw_headers=excluded.raw_headers,
+                    draft_compose_mode=excluded.draft_compose_mode,
+                    draft_spell_language=excluded.draft_spell_language;
                 """;
             AddMessageKey(detail, message);
             detail.Parameters.AddWithValue("$to", message.To ?? string.Empty);
@@ -123,6 +125,8 @@ public partial class LocalStoreService
             detail.Parameters.AddWithValue("$plain", message.PlainTextBody ?? string.Empty);
             detail.Parameters.AddWithValue("$html", message.HtmlBody ?? string.Empty);
             detail.Parameters.AddWithValue("$headers", message.RawHeaders ?? string.Empty);
+            detail.Parameters.AddWithValue("$mode", (int)message.DraftComposeMode);
+            detail.Parameters.AddWithValue("$language", message.DraftSpellLanguage ?? string.Empty);
             await detail.ExecuteNonQueryAsync(ct);
         }
 

@@ -564,9 +564,11 @@ public partial class MainWindow : Window
                     _vm.UpdateMessageListTabTitle(_vm.SelectedFolder?.DisplayName);
                 Dispatcher.InvokeAsync(() => SyncFolderTreeSelection(false), DispatcherPriority.Input);
             }
-            else if (e.PropertyName == nameof(MainViewModel.IsMessageOpen))
+            else if (e.PropertyName == nameof(MainViewModel.IsMessageOpen) ||
+                     e.PropertyName == nameof(MainViewModel.ReadingPaneVisible) ||
+                     e.PropertyName == nameof(MainViewModel.IsComposeTabActive))
             {
-                ReadingPaneRow.Height = vm.IsMessageOpen
+                ReadingPaneRow.Height = vm.ReadingPaneVisible
                     ? new GridLength(Math.Clamp(_configService.Load().Windowing.ReadingPaneHeight, 120, 1200))
                     : new GridLength(0);
             }
@@ -955,7 +957,7 @@ public partial class MainWindow : Window
             ? new GridLength(Math.Clamp(paneConfig.AccountPaneHeight, 60, 800)) : new GridLength(0);
         TodayAgendaRow.Height = navigationConfig.ShowTodayAgenda
             ? new GridLength(Math.Clamp(paneConfig.TodayAgendaHeight, 80, 800)) : new GridLength(0);
-        ReadingPaneRow.Height = _vm.IsMessageOpen
+        ReadingPaneRow.Height = _vm.ReadingPaneVisible
             ? new GridLength(Math.Clamp(paneConfig.ReadingPaneHeight, 120, 1200))
             : new GridLength(0);
 
