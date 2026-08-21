@@ -92,8 +92,41 @@ public partial class App : Application
         // launch simply ends. --help is exempt so usage is always available.
         if (!IsHelpRequest(args))
         {
-            _singleInstance = SingleInstanceService.TryAcquire(args);
-            if (_singleInstance is null) return;
+            _singleInstance = SingleInstanceService.TryAcquireWithActivationCheck(
+                args, TimeSpan.FromSeconds(3), out var unresponsive);
+            if (_singleInstance is null)
+            {
+                // A null owner means the existing UI acknowledged the activation request.
+                if (unresponsive is null) return;
+                var close = MessageBox.Show(
+                    "Eudora QuickMail is already running but is not responding.\n\n" +
+                    "Do you want to close the unresponsive instance and start a new one?\n\n" +
+                    "Unsaved message edits in that instance may be lost.",
+                    "Eudora QuickMail is not responding",
+                    MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
+                if (close != MessageBoxResult.Yes) return;
+                if (!SingleInstanceService.TryTerminateUnresponsive(unresponsive, out var error))
+                {
+                    MessageBox.Show(error, "Unable to close Eudora QuickMail",
+                        MessageBoxButton.OK, MessageBoxImage.Error);
+                    return;
+                }
+
+                // Kernel mutex teardown can trail process termination very briefly.
+                for (var attempt = 0; attempt < 20 && _singleInstance is null; attempt++)
+                {
+                    Thread.Sleep(100);
+                    _singleInstance = SingleInstanceService.TryAcquire(args);
+                }
+                if (_singleInstance is null)
+                {
+                    MessageBox.Show(
+                        "The previous process was closed, but its profile lock was not released in time. " +
+                        "Please try opening Eudora QuickMail again.",
+                        "Eudora QuickMail", MessageBoxButton.OK, MessageBoxImage.Information);
+                    return;
+                }
+            }
         }
 
         using (_singleInstance)
@@ -599,7 +632,7 @@ public partial class App : Application
             // another process; restore the window (and drop the tray icon) exactly as the
             // tray icon's Open action would. The signal arrives on a thread-pool thread.
             _singleInstance?.ListenForActivation(() =>
-                mainWindow.Dispatcher.BeginInvoke(() => mainWindow.RestoreFromTray()));
+                mainWindow.Dispatcher.Invoke(() => mainWindow.RestoreFromTray()));
         }
         catch (Exception ex)
         {
