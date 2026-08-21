@@ -44,15 +44,8 @@
             </Grid>
         </GroupBox>
 
-        <GroupBox Grid.Row="4" Header="Attachments and import options" Margin="0,0,0,18">
+        <GroupBox Grid.Row="4" Header="Import options and attachments" Margin="0,0,0,18">
             <StackPanel Margin="12">
-                <RadioButton x:Name="KeepAttachments" IsChecked="True" Margin="0,3" Content="Keep them in their current Eudora folders"/>
-                <TextBlock Margin="24,0,0,7" Opacity="0.75" TextWrapping="Wrap" Text="Uses no additional disk space. Eudora QuickMail keeps links to the existing files."/>
-                <RadioButton x:Name="CopyAttachments" Margin="0,3" Content="Copy referenced attachments to the Eudora QuickMail data folder"/>
-                <TextBlock Margin="24,0,0,7" Opacity="0.75" TextWrapping="Wrap" Text="Only files linked by an imported message are copied; orphan files are ignored. Additional disk space is required."/>
-                <RadioButton x:Name="MoveAttachments" Margin="0,3" Content="Move referenced attachments to the Eudora QuickMail data folder"/>
-                <TextBlock Margin="24,0,0,0" Foreground="#B3261E" TextWrapping="Wrap" Text="Advanced option: Eudora will lose access to those attachments. Files are removed from Eudora only after a verified copy and a successful message import."/>
-                <Separator Margin="0,13,0,10"/>
                 <CheckBox x:Name="ImportFiltersCheckBox" IsChecked="True" Margin="0,3"
                           Content="Import Eudora filters (filters.pce)"/>
                 <TextBlock Margin="24,0,0,0" Opacity="0.75" TextWrapping="Wrap"
@@ -60,12 +53,21 @@
                 <CheckBox x:Name="RespectCheckMailSettingsCheckBox" IsChecked="False" Margin="0,11,0,3"
                           Content="Respect 'Check mail' settings for existing accounts"
                           ToolTip="Recommended off until you have reviewed the imported accounts, passwords and folders and are ready to put Eudora QuickMail into production. When off, automatic incoming-mail checks are disabled for every imported account."/>
+                <Separator Margin="0,13,0,10"/>
+                <RadioButton x:Name="KeepAttachments" IsChecked="True" Margin="0,3" Content="Keep them in their current Eudora folders"/>
+                <TextBlock Margin="24,0,0,7" Opacity="0.75" TextWrapping="Wrap" Text="Uses no additional disk space. Eudora QuickMail keeps links to the existing files."/>
+                <RadioButton x:Name="CopyAttachments" Margin="0,3" Content="Copy referenced attachments to the Eudora QuickMail data folder"/>
+                <TextBlock Margin="24,0,0,7" Opacity="0.75" TextWrapping="Wrap" Text="Only files linked by an imported message are copied; orphan files are ignored. Additional disk space is required."/>
+                <RadioButton x:Name="MoveAttachments" Margin="0,3" Content="Move referenced attachments to the Eudora QuickMail data folder"/>
+                <TextBlock Margin="24,0,0,0" Foreground="#B3261E" TextWrapping="Wrap" Text="Advanced option: Eudora will lose access to those attachments. Files are removed from Eudora only after a verified copy and a successful message import."/>
             </StackPanel>
         </GroupBox>
 
         <Grid Grid.Row="5">
             <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-            <Button x:Name="WithoutEudoraButton" Grid.Column="1" Margin="0,0,8,0" Padding="18,7" Content="Set up without Eudora" Click="WithoutEudora_Click"/>
+            <Button x:Name="WithoutEudoraButton" Grid.Column="1" Margin="0,0,8,0" Padding="18,7"
+                    Content="Skip Eudora import (you can run it later from the Tools menu)"
+                    Click="WithoutEudora_Click"/>
             <Button Grid.Column="2" Padding="18,7" Content="Import Eudora" IsDefault="True" Click="Import_Click"/>
         </Grid>
     </Grid>
