@@ -76,6 +76,7 @@
 
   <ItemGroup>
     <!-- Built-in themes ship inside the assembly; ThemeStore parses them with the same loader as user theme files. -->
+    <Resource Include="Assets\App\QuickMail.ico" />
     <EmbeddedResource Include="Themes\BuiltIn\*.json" />
     <!-- HugeRTE is MIT-licensed and self-hosted: no CDN, API key, telemetry, or runtime fee. -->
     <Content Include="Assets\HugeRte\**\*" CopyToOutputDirectory="PreserveNewest"
