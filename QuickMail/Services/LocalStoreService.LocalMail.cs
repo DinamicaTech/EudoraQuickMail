@@ -1,5 +1,7 @@
 using Microsoft.Data.Sqlite;
 using QuickMail.Models;
+using System.Security.Cryptography;
+using System.Text.Json;
 
 namespace QuickMail.Services;
 
@@ -41,6 +43,14 @@ public partial class LocalStoreService
     {
         if (string.IsNullOrWhiteSpace(message.MessageId)) throw new ArgumentException("MessageId is required.");
         if (string.IsNullOrWhiteSpace(message.FolderName)) throw new ArgumentException("FolderName is required.");
+        if (uidl is not null)
+            await MaterializePop3ResourcesAsync(message, ct);
+        var attachmentJson = message.Attachments.Count == 0 ? null : JsonSerializer.Serialize(
+            message.Attachments.Select(a => new
+            {
+                a.FileName, a.ContentType, a.FileSize, a.PartSpecifier, a.ContentId, a.IsInline,
+            }));
+        var hasVisibleAttachments = message.Attachments.Any(a => !a.IsInline);
         await using var conn = await OpenAsync();
         await using var tx = (SqliteTransaction)await conn.BeginTransactionAsync(ct);
         // A locally-authored message is authoritative. Ensure its folder is catalogued in the same
@@ -84,10 +94,11 @@ public partial class LocalStoreService
                 INSERT INTO MessageSummary
                     (unique_id,account_id,folder_name,from_disp,to_addr,subject,date_ticks,is_read,
                      preview_text,is_replied,is_forwarded,has_attachments,is_mailing_list,flag_id,internet_message_id)
-                VALUES ($uid,$aid,$fn,$from,$to,$subject,$date,$read,$preview,$replied,$forwarded,0,$list,NULL,$imid)
+                VALUES ($uid,$aid,$fn,$from,$to,$subject,$date,$read,$preview,$replied,$forwarded,$hasAttachments,$list,NULL,$imid)
                 ON CONFLICT(unique_id,account_id,folder_name) DO UPDATE SET
                     from_disp=excluded.from_disp,to_addr=excluded.to_addr,subject=excluded.subject,
                     date_ticks=excluded.date_ticks,is_read=excluded.is_read,preview_text=excluded.preview_text,
+                    has_attachments=excluded.has_attachments,
                     internet_message_id=excluded.internet_message_id;
                 """;
             AddMessageKey(summary, message);
@@ -99,6 +110,7 @@ public partial class LocalStoreService
             summary.Parameters.AddWithValue("$preview", message.Preview ?? string.Empty);
             summary.Parameters.AddWithValue("$replied", message.IsReplied ? 1 : 0);
             summary.Parameters.AddWithValue("$forwarded", message.IsForwarded ? 1 : 0);
+            summary.Parameters.AddWithValue("$hasAttachments", hasVisibleAttachments ? 1 : 0);
             summary.Parameters.AddWithValue("$list", message.IsMailingList ? 1 : 0);
             summary.Parameters.AddWithValue("$imid", message.InternetMessageId ?? string.Empty);
             await summary.ExecuteNonQueryAsync(ct);
@@ -110,11 +122,11 @@ public partial class LocalStoreService
             detail.CommandText = """
                 INSERT INTO MessageDetail
                     (unique_id,account_id,folder_name,to_addr,cc,reply_to,plain_body,html_body,attachments_json,calendar_ics,raw_headers,draft_compose_mode,draft_spell_language)
-                VALUES ($uid,$aid,$fn,$to,$cc,$reply,$plain,$html,NULL,NULL,$headers,$mode,$language)
+                VALUES ($uid,$aid,$fn,$to,$cc,$reply,$plain,$html,$attachments,NULL,$headers,$mode,$language)
                 ON CONFLICT(unique_id,account_id,folder_name) DO UPDATE SET
                     to_addr=excluded.to_addr,cc=excluded.cc,reply_to=excluded.reply_to,
                     plain_body=excluded.plain_body,html_body=excluded.html_body,
-                    attachments_json=NULL,calendar_ics=NULL,raw_headers=excluded.raw_headers,
+                    attachments_json=excluded.attachments_json,calendar_ics=NULL,raw_headers=excluded.raw_headers,
                     draft_compose_mode=excluded.draft_compose_mode,
                     draft_spell_language=excluded.draft_spell_language;
                 """;
@@ -124,6 +136,7 @@ public partial class LocalStoreService
             detail.Parameters.AddWithValue("$reply", message.ReplyTo ?? string.Empty);
             detail.Parameters.AddWithValue("$plain", message.PlainTextBody ?? string.Empty);
             detail.Parameters.AddWithValue("$html", message.HtmlBody ?? string.Empty);
+            detail.Parameters.AddWithValue("$attachments", (object?)attachmentJson ?? DBNull.Value);
             detail.Parameters.AddWithValue("$headers", message.RawHeaders ?? string.Empty);
             detail.Parameters.AddWithValue("$mode", (int)message.DraftComposeMode);
             detail.Parameters.AddWithValue("$language", message.DraftSpellLanguage ?? string.Empty);
@@ -170,6 +183,55 @@ public partial class LocalStoreService
         }
         await UpdateFolderCountsAsync(conn, tx, message.AccountId, message.FolderName, ct);
         await tx.CommitAsync(ct);
+    }
+
+    private async Task MaterializePop3ResourcesAsync(MailMessageDetail message, CancellationToken ct)
+    {
+        var profileDir = Path.GetDirectoryName(_dbPath)
+            ?? throw new InvalidOperationException("The QuickMail data folder is not available.");
+        foreach (var attachment in message.Attachments)
+        {
+            ct.ThrowIfCancellationRequested();
+            if (attachment.Content is null)
+                throw new InvalidDataException($"POP3 resource '{attachment.FileName}' has no decoded content.");
+
+            var category = attachment.IsInline ? "Embedded" : "Received";
+            var year = message.Date == DateTimeOffset.MinValue ? DateTime.Now.Year : message.Date.Year;
+            var directory = Path.Combine(profileDir, "Attachments", category, year.ToString());
+            Directory.CreateDirectory(directory);
+            var safeName = SanitizeAttachmentFileName(attachment.FileName);
+            var hash = Convert.ToHexString(SHA256.HashData(attachment.Content)).ToLowerInvariant();
+            var path = Path.Combine(directory, $"{hash[..16]}-{safeName}");
+            if (!File.Exists(path))
+            {
+                var temporaryPath = path + ".tmp-" + Guid.NewGuid().ToString("N");
+                try
+                {
+                    await File.WriteAllBytesAsync(temporaryPath, attachment.Content, ct);
+                    File.Move(temporaryPath, path, overwrite: false);
+                }
+                catch (IOException) when (File.Exists(path))
+                {
+                    if (File.Exists(temporaryPath)) File.Delete(temporaryPath);
+                }
+                finally
+                {
+                    if (File.Exists(temporaryPath)) File.Delete(temporaryPath);
+                }
+            }
+            attachment.PartSpecifier = path;
+            attachment.FileSize = attachment.Content.LongLength;
+            attachment.Content = null;
+        }
+    }
+
+    private static string SanitizeAttachmentFileName(string? fileName)
+    {
+        var value = Path.GetFileName(string.IsNullOrWhiteSpace(fileName) ? "attachment.bin" : fileName);
+        foreach (var invalid in Path.GetInvalidFileNameChars()) value = value.Replace(invalid, '_');
+        value = value.Trim();
+        if (value.Length == 0) value = "attachment.bin";
+        return value.Length <= 160 ? value : value[..160];
     }
 
     private static void AddMessageKey(SqliteCommand command, MailMessageDetail message)

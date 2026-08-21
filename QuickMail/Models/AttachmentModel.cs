@@ -13,6 +13,12 @@ public class AttachmentModel
     /// <summary>IMAP body-part specifier (e.g. "2", "2.1"). Null for compose-only attachments.</summary>
     public string? PartSpecifier { get; set; }
 
+    /// <summary>Content-ID used by HTML bodies (cid:...) for an embedded MIME resource.</summary>
+    public string? ContentId { get; set; }
+
+    /// <summary>True for a MIME resource embedded in the body rather than a user attachment.</summary>
+    public bool IsInline { get; set; }
+
     /// <summary>Raw bytes. Null for received attachments until explicitly downloaded.</summary>
     public byte[]? Content { get; set; }
 

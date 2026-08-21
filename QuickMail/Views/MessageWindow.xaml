@@ -179,7 +179,7 @@
 
                 <!-- Attachments -->
                 <ListBox x:Name="AttachmentList"
-                         ItemsSource="{Binding MessageDetail.Attachments}"
+                         ItemsSource="{Binding MessageDetail.VisibleAttachments}"
                          SelectionMode="Single"
                          BorderThickness="0"
                          Margin="0,4,0,0"

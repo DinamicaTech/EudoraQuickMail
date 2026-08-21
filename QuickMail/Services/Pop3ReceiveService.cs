@@ -107,10 +107,44 @@ public sealed class Pop3ReceiveService : IPop3ReceiveService
             PlainTextBody = plain,
             HtmlBody = html,
             RawHeaders = message.Headers.ToString() ?? string.Empty,
-            // POP3 mail is deleted from the server. Attachments are deliberately outside the MVP;
-            // never advertise metadata for content that cannot subsequently be downloaded.
-            Attachments = [],
+            Attachments = ExtractMimeResources(message),
         };
+    }
+
+    private static List<AttachmentModel> ExtractMimeResources(MimeMessage message)
+    {
+        var resources = new List<AttachmentModel>();
+        foreach (var entity in message.BodyParts)
+        {
+            if (entity is not MimePart part || part.Content is null) continue;
+            if (part.ContentType.IsMimeType("text", "plain") ||
+                part.ContentType.IsMimeType("text", "html") ||
+                part.ContentType.IsMimeType("text", "calendar")) continue;
+
+            var isAttachment = part.ContentDisposition?.IsAttachment == true;
+            var contentId = part.ContentId?.Trim().Trim('<', '>');
+            var isInline = !isAttachment &&
+                (part.ContentDisposition?.Disposition?.Equals("inline", StringComparison.OrdinalIgnoreCase) == true ||
+                 !string.IsNullOrWhiteSpace(contentId));
+            var fileName = part.FileName;
+            if (string.IsNullOrWhiteSpace(fileName))
+                fileName = isInline && !string.IsNullOrWhiteSpace(contentId)
+                    ? contentId
+                    : "attachment." + part.ContentType.MediaSubtype;
+
+            using var stream = new MemoryStream();
+            part.Content.DecodeTo(stream);
+            resources.Add(new AttachmentModel
+            {
+                FileName = fileName,
+                ContentType = part.ContentType.MimeType,
+                FileSize = stream.Length,
+                Content = stream.ToArray(),
+                ContentId = contentId,
+                IsInline = isInline,
+            });
+        }
+        return resources;
     }
 
     private static string StableMessageId(Guid accountId, string uidl)

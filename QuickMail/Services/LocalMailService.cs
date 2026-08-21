@@ -194,6 +194,15 @@ public sealed class LocalMailService : IMailService
             PlainTextBody = compose.Body, Preview = compose.Body.Length <= 240 ? compose.Body : compose.Body[..240],
             HtmlBody = compose.HtmlBody ?? string.Empty, DraftComposeMode = compose.Mode,
             DraftSpellLanguage = compose.SpellLanguage, IsRead = true,
+            Attachments = compose.Attachments.Select(a => new AttachmentModel
+            {
+                FileName = a.FileName,
+                ContentType = a.ContentType,
+                FileSize = a.FileSize,
+                PartSpecifier = a.PartSpecifier,
+                ContentId = a.ContentId,
+                IsInline = a.IsInline,
+            }).ToList(),
         };
     }
 
@@ -201,9 +210,9 @@ public sealed class LocalMailService : IMailService
         string partSpecifier, CancellationToken ct = default)
     {
         if (!Path.IsPathFullyQualified(partSpecifier))
-            throw new InvalidOperationException("The imported attachment reference is not an absolute path.");
+            throw new InvalidOperationException("The locally stored attachment reference is not an absolute path.");
         if (!File.Exists(partSpecifier))
-            throw new FileNotFoundException("The original Eudora attachment is no longer at its imported location.", partSpecifier);
+            throw new FileNotFoundException("The attachment is no longer available at its stored location.", partSpecifier);
         return await File.ReadAllBytesAsync(partSpecifier, ct);
     }
     public Task CopyMessagesAsync(Guid accountId, string folderName, IList<string> messageIds,

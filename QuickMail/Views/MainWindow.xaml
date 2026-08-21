@@ -1106,7 +1106,7 @@
 
                             <!-- Attachments (visible when selected message has attachments) -->
                             <ListBox x:Name="ReadingPaneAttachmentList"
-                                     ItemsSource="{Binding MessageDetail.Attachments}"
+                                     ItemsSource="{Binding MessageDetail.VisibleAttachments}"
                                      SelectionMode="Single"
                                      BorderThickness="0"
                                      Margin="0,4,0,0"

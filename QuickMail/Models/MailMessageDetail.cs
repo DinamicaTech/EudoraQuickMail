@@ -37,11 +37,14 @@ public partial class MailMessageDetail : MailMessageSummary
         set
         {
             _attachments = value ?? [];
-            HasAttachments = _attachments.Count > 0;
+            HasAttachments = _attachments.Any(a => !a.IsInline);
         }
     }
 
     private List<AttachmentModel> _attachments = [];
+
+    public IReadOnlyList<AttachmentModel> VisibleAttachments =>
+        _attachments.Where(a => !a.IsInline).ToList();
 
     /// <summary>Parsed calendar invite, if this message contains a text/calendar MIME part.</summary>
     public IcsModel? CalendarInvite { get; set; }

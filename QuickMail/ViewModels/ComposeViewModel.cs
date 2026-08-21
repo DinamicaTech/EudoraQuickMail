@@ -886,6 +886,7 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
             FileName    = info.Name,
             ContentType = AttachmentModel.ContentTypeFromFileName(info.Name),
             FileSize    = info.Length,
+            PartSpecifier = info.FullName,
             Content     = bytes,
         });
     }

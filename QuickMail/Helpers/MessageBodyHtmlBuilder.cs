@@ -75,7 +75,7 @@ public static class MessageBodyHtmlBuilder
 
     private static string BuildBodyDocument(MailMessageDetail detail, string? themeCss, bool forcePlainText)
     {
-        var htmlBody = detail.HtmlBody ?? string.Empty;
+        var htmlBody = ResolveEmbeddedResources(detail, detail.HtmlBody ?? string.Empty);
 
         // Plain-text view (issue #34): the user asked to read this message as plain text.
         // Render the sender's original text/plain part verbatim for maximum fidelity, and only
@@ -133,6 +133,33 @@ public static class MessageBodyHtmlBuilder
             ? "This message uses complex HTML, so QuickMail is showing a simplified body."
             : null;
         return BuildPlainTextHtmlDocument(detail.Subject, text, note, themeCss);
+    }
+
+    private static string ResolveEmbeddedResources(MailMessageDetail detail, string html)
+    {
+        if (string.IsNullOrWhiteSpace(html)) return html;
+        foreach (var resource in detail.Attachments.Where(a => a.IsInline
+                     && !string.IsNullOrWhiteSpace(a.ContentId)
+                     && !string.IsNullOrWhiteSpace(a.PartSpecifier)))
+        {
+            try
+            {
+                if (!File.Exists(resource.PartSpecifier) || resource.FileSize > 20 * 1024 * 1024) continue;
+                var bytes = File.ReadAllBytes(resource.PartSpecifier);
+                var dataUri = $"data:{resource.ContentType};base64,{Convert.ToBase64String(bytes)}";
+                var id = resource.ContentId!.Trim().Trim('<', '>');
+                html = Regex.Replace(html,
+                    "cid:" + Regex.Escape(id),
+                    _ => dataUri,
+                    RegexOptions.IgnoreCase,
+                    HtmlRegexTimeout);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or RegexMatchTimeoutException)
+            {
+                LogService.Log($"Unable to render embedded resource '{resource.FileName}': {ex.Message}");
+            }
+        }
+        return html;
     }
 
     public static bool ShouldUseReaderMode(string html) =>

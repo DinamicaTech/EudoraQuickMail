@@ -926,7 +926,7 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
     public async Task UpsertDetailAsync(MailMessageDetail detail)
     {
         var attJson = detail.Attachments.Count > 0
-            ? JsonSerializer.Serialize(detail.Attachments.Select(a => new { a.FileName, a.ContentType, a.FileSize, a.PartSpecifier }))
+            ? JsonSerializer.Serialize(detail.Attachments.Select(a => new { a.FileName, a.ContentType, a.FileSize, a.PartSpecifier, a.ContentId, a.IsInline }))
             : null;
 
         await using var conn = await OpenAsync();
@@ -967,7 +967,7 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
         cmd2.CommandText =
             "UPDATE MessageSummary SET has_attachments=$ha " +
             "WHERE unique_id=$uid AND account_id=$aid AND folder_name=$fn;";
-        cmd2.Parameters.AddWithValue("$ha",  detail.Attachments.Count > 0 ? 1 : 0);
+        cmd2.Parameters.AddWithValue("$ha", detail.Attachments.Any(a => !a.IsInline) ? 1 : 0);
         cmd2.Parameters.AddWithValue("$uid", detail.MessageId);
         cmd2.Parameters.AddWithValue("$aid", detail.AccountId.ToString());
         cmd2.Parameters.AddWithValue("$fn",  detail.FolderName);
@@ -1014,6 +1014,8 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
                         ContentType   = m.ContentType,
                         FileSize      = m.FileSize,
                         PartSpecifier = m.PartSpecifier,
+                        ContentId     = m.ContentId,
+                        IsInline      = m.IsInline,
                     }).ToList();
             }
             catch { /* corrupt json — ignore */ }
@@ -1209,7 +1211,9 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
         string  FileName,
         string  ContentType,
         long    FileSize,
-        string? PartSpecifier);
+        string? PartSpecifier,
+        string? ContentId = null,
+        bool IsInline = false);
 
     // ── Calendar events ──────────────────────────────────────────────────────────
 
