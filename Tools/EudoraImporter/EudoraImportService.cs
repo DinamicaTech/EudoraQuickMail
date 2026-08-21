@@ -99,6 +99,14 @@ internal static class EudoraImportService
                 subject.Value = message.Subject ?? string.Empty;
                 var extracted = MessageTextExtractor.ExtractAll(message, sourceDirectory, mailbox.RelativePath);
                 var rawMessage = await ReadRawMessageAsync(rawStream, positionBefore, parser.Position, cancellationToken);
+                // Eudora sometimes stores an HTML document in its private <x-html> wrapper while
+                // leaving a multipart Content-Type whose declared boundary never occurs. MimeKit
+                // quite correctly finds no MIME body parts in that damaged message. Recover the
+                // wrapped document itself rather than exposing the inner MIME headers and HTML
+                // source as plain text in QuickMail.
+                var wrappedHtml = MessageTextExtractor.ExtractEudoraWrappedHtml(rawMessage);
+                if (wrappedHtml is not null && string.IsNullOrWhiteSpace(extracted.Html))
+                    extracted = wrappedHtml;
                 // MimeKit correctly rejects malformed RFC addresses and stops parsing headers at
                 // the first blank line. Real Eudora mailboxes nevertheless contain useful values
                 // such as "Softaculous <admin@>" and messages whose From/To block follows an

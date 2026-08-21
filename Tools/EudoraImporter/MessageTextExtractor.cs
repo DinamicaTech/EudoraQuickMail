@@ -8,6 +8,15 @@ internal static partial class MessageTextExtractor
 {
     internal sealed record ExtractedMessage(string PlainText, string Html, IReadOnlyList<string> AttachmentPaths);
 
+    public static ExtractedMessage? ExtractEudoraWrappedHtml(string rawMessage)
+    {
+        var match = EudoraHtmlBlock().Match(rawMessage);
+        if (!match.Success) return null;
+        var html = match.Groups["html"].Value.Trim();
+        if (!LooksLikeHtml(html)) return null;
+        return new ExtractedMessage(HtmlToText(html), html, []);
+    }
+
     public static ExtractedMessage ExtractAll(MimeMessage message, string sourceDirectory, string? mailboxPath = null)
     {
         var plain = message.TextBody ?? ExtractEntity(message.Body);
@@ -141,6 +150,8 @@ internal static partial class MessageTextExtractor
     private static partial Regex MailboxYear();
     [GeneratedRegex(@"(?is)</?x-(?:embedded|eudora-option)[^>]*>")]
     private static partial Regex EudoraEmbeddedTag();
+    [GeneratedRegex(@"(?is)<x-html\b[^>]*>\s*(?<html>.*?)\s*</x-html\s*>")]
+    private static partial Regex EudoraHtmlBlock();
     [GeneratedRegex(@"(?is)<(script|style)\b[^>]*>.*?</\1\s*>")]
     private static partial Regex ScriptOrStyle();
     [GeneratedRegex(@"(?i)<(?:br\s*/?|/p|/div|/li|/tr|/h[1-6])\s*>")]
