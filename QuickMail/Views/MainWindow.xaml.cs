@@ -829,6 +829,15 @@ public partial class MainWindow : Window
         // their CTS handles. OnClosed, not OnClosing — the close cannot be cancelled here.
         _vm.Dispose();
         base.OnClosed(e);
+
+        // Do not rely on WPF's OnLastWindowClose heuristic here. QuickMail creates several
+        // temporary, detached and WebView-backed windows during its lifetime; in rare cases WPF
+        // can retain one in its application window collection after every native HWND has gone.
+        // The dispatcher then remains alive with no visible window and continues holding the
+        // per-profile single-instance mutex. Reaching OnClosed means this was a real close (the
+        // close-to-tray path cancels OnClosing), so explicitly end the application dispatcher.
+        if (!Application.Current.Dispatcher.HasShutdownStarted)
+            Application.Current.Shutdown();
     }
 
     // Debounced UIA notification for rapid status-text changes during sync. Multiple
