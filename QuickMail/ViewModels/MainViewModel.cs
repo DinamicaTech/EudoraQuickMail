@@ -1197,6 +1197,15 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         if (_advancedSearchCriteria is { Count: > 0 }) { await ApplyAdvancedSearchAsync(_advancedSearchCriteria); return; }
         if (!string.IsNullOrWhiteSpace(SearchText)) { await ApplyLocalSearchAsync(SearchText); return; }
+        // Unified system folders (the root-level In/Draft/Scheduled/Sent/Trash/Junk nodes) are
+        // sentinels, not physical SQLite folder names. Passing one through the generic page loader
+        // turns folderName into null and therefore loads the whole database. Re-enter the same
+        // aggregate loader used by folder selection so changing a column never widens its scope.
+        if (SelectedFolder is { } virtualFolder && IsVirtualFolder(virtualFolder))
+        {
+            await FetchVirtualAsync(virtualFolder);
+            return;
+        }
         if (_localStore is not ILocalMailboxStore store) return;
         Guid? accountId = SelectedFolder?.AccountId != Guid.Empty ? SelectedFolder?.AccountId : null;
         var folderName = SelectedFolder is { } folder && !IsVirtualFolder(folder) ? folder.FullName : null;
@@ -6951,12 +6960,15 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 // InternetMessageId hides physical drafts from the grid; deleting every visible
                 // row then leaves the hidden copies behind, which look as if they came back on the
                 // next refresh. Deduplication remains useful for mail aggregates, but never here.
-                var local = (localAggregateKind is SpecialFolderKind.Drafts
+                IEnumerable<MailMessageSummary> localScope = localAggregateKind is SpecialFolderKind.Drafts
                                 or SpecialFolderKind.Scheduled
                                 or SpecialFolderKind.Trash
                     ? all
-                    : MessageDeduplicator.CollapseForAggregate(all, ResolveFolderKind))
-                    .OrderByDescending(m => m.Date).ToList();
+                    : MessageDeduplicator.CollapseForAggregate(all, ResolveFolderKind);
+                // Sort the complete aggregate before taking the rendered page. Sorting only the
+                // already-rendered rows makes "oldest first" show the oldest of the newest page,
+                // rather than the actual oldest messages in the selected folder.
+                var local = SortMessageSequence(localScope, ActiveSort).ToList();
                 LocalTotalMessages = local.Count;
                 SetMessages(local.Take(LocalMailConstants.MaxRenderedMessages).ToList());
                 if (expectedFolder != null)
@@ -7104,6 +7116,23 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         return Task.CompletedTask;
     }
+
+    private static IOrderedEnumerable<MailMessageSummary> SortMessageSequence(
+        IEnumerable<MailMessageSummary> messages, MessageSort sort) => sort switch
+    {
+        MessageSort.DateAscending => messages.OrderBy(m => m.Date),
+        MessageSort.AlphaAscending => messages.OrderBy(m => m.Subject, StringComparer.OrdinalIgnoreCase),
+        MessageSort.AlphaDescending => messages.OrderByDescending(m => m.Subject, StringComparer.OrdinalIgnoreCase),
+        MessageSort.FromAscending => messages.OrderBy(m => m.From, StringComparer.OrdinalIgnoreCase),
+        MessageSort.FromDescending => messages.OrderByDescending(m => m.From, StringComparer.OrdinalIgnoreCase),
+        MessageSort.ToAscending => messages.OrderBy(m => m.To, StringComparer.OrdinalIgnoreCase),
+        MessageSort.ToDescending => messages.OrderByDescending(m => m.To, StringComparer.OrdinalIgnoreCase),
+        MessageSort.ReadStateAscending => messages.OrderBy(m => m.IsRead).ThenByDescending(m => m.Date),
+        MessageSort.ReadStateDescending => messages.OrderByDescending(m => m.IsRead).ThenByDescending(m => m.Date),
+        MessageSort.AttachmentsFirst => messages.OrderByDescending(m => m.HasAttachments).ThenByDescending(m => m.Date),
+        MessageSort.AttachmentsLast => messages.OrderBy(m => m.HasAttachments).ThenByDescending(m => m.Date),
+        _ => messages.OrderByDescending(m => m.Date),
+    };
 
     private async Task FetchRootMailAsync(Guid rootId, MailFolderModel expectedFolder)
     {
