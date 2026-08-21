@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Globalization;
 using Microsoft.Data.Sqlite;
 
 namespace EudoraImporter;
@@ -30,11 +31,15 @@ internal static class AttachmentRelocator
         await connection.OpenAsync();
         await using (var select = connection.CreateCommand())
         {
-            select.CommandText = "SELECT id,attachments_json FROM messages WHERE attachments_json IS NOT NULL;";
+            // Stable message order also makes the shared-file rule deterministic: when the same
+            // Eudora file is referenced by messages from different years, the first message owns
+            // the single physical copy and every later reference points to it.
+            select.CommandText = "SELECT id,date_utc,attachments_json FROM messages WHERE attachments_json IS NOT NULL ORDER BY id;";
             await using var reader = await select.ExecuteReaderAsync();
             while (await reader.ReadAsync())
             {
-                var attachments = JsonSerializer.Deserialize<List<AttachmentData>>(reader.GetString(1)) ?? [];
+                var year = MessageYear(reader.IsDBNull(1) ? null : reader.GetString(1));
+                var attachments = JsonSerializer.Deserialize<List<AttachmentData>>(reader.GetString(2)) ?? [];
                 var changed = false;
                 foreach (var attachment in attachments)
                 {
@@ -48,7 +53,9 @@ internal static class AttachmentRelocator
                             throw new IOException($"Refusing to copy linked attachment: {source}");
                         var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(source)))[..12];
                         var safeName = Path.GetFileName(source);
-                        var destination = Path.Combine(destinationRoot, hash + "-" + safeName);
+                        var yearDirectory = Path.Combine(destinationRoot, year);
+                        Directory.CreateDirectory(yearDirectory);
+                        var destination = Path.Combine(yearDirectory, hash + "-" + safeName);
                         File.Copy(source, destination, overwrite: true);
                         var destinationLength = new FileInfo(destination).Length;
                         if (destinationLength != info.Length)
@@ -77,6 +84,15 @@ internal static class AttachmentRelocator
         await tx.CommitAsync();
         Console.WriteLine($"Referenced attachments copied: {copied.Count:N0}");
         return new Result(copied.Values.ToList());
+    }
+
+    private static string MessageYear(string? value)
+    {
+        if (DateTimeOffset.TryParse(value, CultureInfo.InvariantCulture,
+                DateTimeStyles.AllowWhiteSpaces | DateTimeStyles.AssumeUniversal, out var date)
+            && date.Year is >= 1900 and <= 2200)
+            return date.Year.ToString(CultureInfo.InvariantCulture);
+        return "Unknown";
     }
 
     public static void DeleteVerifiedSources(Result result, string eudoraRoot)
