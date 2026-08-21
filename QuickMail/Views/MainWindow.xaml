@@ -675,6 +675,8 @@
                           AutomationProperties.Name="Rebuild Search Indexes"/>
                 <MenuItem Header="_Update Attachment Index"
                           Click="MenuUpdateAttachmentIndex_Click"/>
+                <MenuItem Header="Delete _Orphaned Attachments…"
+                          Click="MenuDeleteOrphanedAttachments_Click"/>
                 <MenuItem Header="Empty _Trash"
                           Command="{Binding EmptyTrashCommand}"
                           InputGestureText="Ctrl+Shift+E"/>

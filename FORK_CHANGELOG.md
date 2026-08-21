@@ -10,6 +10,10 @@ before a public release.
 
 ## Unreleased
 
+- Added Tools > Delete Orphaned Attachments: it safely compares physical files in the applicable
+  Eudora `Attach*` or QuickMail Attachments tree with live database references, presents a sortable
+  path/date/size grid, supports guarded double-click opening, clipboard export, and confirmed
+  selected/all deletion without traversing or deleting filesystem links.
 - Eudora account migration now decodes valid `SavePasswordText` values and immediately re-protects
   them with current-user Windows DPAPI. A new opt-in migration setting can respect each persona's
   `CheckMailByDefault`; it defaults off so imported accounts cannot fetch mail before review.

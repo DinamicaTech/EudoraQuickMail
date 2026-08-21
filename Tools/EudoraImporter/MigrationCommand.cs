@@ -43,6 +43,11 @@ internal static class MigrationCommand
                 "--eudora-root", source, "--root-name", rootName,
                 "--filters", importFilters ? Path.Combine(source, "filters.pce") : string.Empty,
                 "--respect-check-mail", respectCheckMail ? "true" : "false"]);
+            if (result == 0)
+            {
+                try { EudoraImportMetadata.Save(profile, source, attachmentMode); }
+                catch (Exception ex) { Console.WriteLine($"Warning: import location metadata was not saved: {ex.Message}"); }
+            }
             if (result == 0 && attachmentMode == "move")
                 AttachmentRelocator.DeleteVerifiedSources(relocation, source);
             WriteResult(profile, result == 0

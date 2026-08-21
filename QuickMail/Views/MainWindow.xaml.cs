@@ -7141,6 +7141,18 @@ public partial class MainWindow : Window
         catch (Exception ex) { LogService.Log("Manual attachment indexing", ex); _vm.StatusText = $"Attachment indexing failed: {ex.Message}"; }
     }
 
+    private void MenuDeleteOrphanedAttachments_Click(object sender, RoutedEventArgs e)
+    {
+        if (_localStore is not LocalStoreService store)
+        {
+            MessageBox.Show(this, "Orphaned attachment scanning is unavailable for this profile.",
+                "Delete Orphaned Attachments", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+        new OrphanedAttachmentsWindow(new OrphanAttachmentService(store, _profileContext))
+            { Owner = this }.ShowDialog();
+    }
+
     private async Task StartInitialAttachmentIndexIfNeededAsync()
     {
         if (_localStore is not LocalStoreService localStore) return;
