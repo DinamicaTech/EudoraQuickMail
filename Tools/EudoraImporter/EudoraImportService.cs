@@ -96,12 +96,20 @@ internal static class EudoraImportService
                 messageId.Value = message.MessageId ?? string.Empty;
                 var messageDate = FindMessageDate(message, parser.MboxMarker);
                 date.Value = messageDate == DateTimeOffset.MinValue ? DBNull.Value : messageDate.UtcDateTime.ToString("O");
-                from.Value = message.From.ToString();
-                to.Value = message.To.ToString();
-                cc.Value = message.Cc.ToString();
                 subject.Value = message.Subject ?? string.Empty;
                 var extracted = MessageTextExtractor.ExtractAll(message, sourceDirectory, mailbox.RelativePath);
                 var rawMessage = await ReadRawMessageAsync(rawStream, positionBefore, parser.Position, cancellationToken);
+                // MimeKit correctly rejects malformed RFC addresses and stops parsing headers at
+                // the first blank line. Real Eudora mailboxes nevertheless contain useful values
+                // such as "Softaculous <admin@>" and messages whose From/To block follows an
+                // accidental blank line. Preserve those literal headers when the strict parse has
+                // no value; an importer must not silently discard source data merely because it is
+                // unsuitable for sending a new message.
+                from.Value = ParsedOrRawAddress(message.From.ToString(), rawMessage,
+                    "From", "X-Envelope-From", "Return-Path");
+                to.Value = ParsedOrRawAddress(message.To.ToString(), rawMessage,
+                    "To", "Delivered-To", "X-Rcpt-To", "X-MDRcpt-To", "X-MDaemon-Deliver-To", "Apparently-To");
+                cc.Value = ParsedOrRawAddress(message.Cc.ToString(), rawMessage, "Cc");
                 headers.Value = ExtractRawHeaders(rawMessage);
                 if (string.IsNullOrWhiteSpace(extracted.PlainText) && string.IsNullOrWhiteSpace(extracted.Html))
                 {
@@ -221,6 +229,23 @@ internal static class EudoraImportService
             separator = raw.IndexOf("\n\n", start, StringComparison.Ordinal);
         }
         return separator < 0 ? string.Empty : raw.Substring(start, separator - start).TrimEnd('\r', '\n');
+    }
+
+    private static string ParsedOrRawAddress(string parsed, string raw, params string[] headerNames)
+    {
+        if (!string.IsNullOrWhiteSpace(parsed)) return parsed;
+        foreach (var name in headerNames)
+        {
+            var match = System.Text.RegularExpressions.Regex.Match(raw,
+                $@"(?im)^{System.Text.RegularExpressions.Regex.Escape(name)}[ \t]*:[ \t]*(?<value>[^\r\n]*(?:\r?\n[ \t]+[^\r\n]*)*)",
+                System.Text.RegularExpressions.RegexOptions.CultureInvariant,
+                TimeSpan.FromMilliseconds(250));
+            if (!match.Success) continue;
+            var value = System.Text.RegularExpressions.Regex.Replace(match.Groups["value"].Value,
+                @"\r?\n[ \t]+", " ").Trim();
+            if (value.Length > 0) return value;
+        }
+        return string.Empty;
     }
 
     private static DateTimeOffset FindMessageDate(MimeMessage message, string? mboxMarker)
