@@ -7070,7 +7070,12 @@ public partial class MainWindow : Window
 
         var hasAnyPassword = _vm.Accounts.Any(account =>
         {
-            try { return !string.IsNullOrWhiteSpace(_credentials.GetPassword(account.Id)); }
+            try
+            {
+                return account.BackendKind == BackendKind.Pop3Smtp
+                    ? !string.IsNullOrWhiteSpace(new DpapiAccountSecretProtector().GetPop3Password(account))
+                    : !string.IsNullOrWhiteSpace(_credentials.GetPassword(account.Id));
+            }
             catch { return false; }
         });
         if (hasAnyPassword) return;
@@ -7079,7 +7084,7 @@ public partial class MainWindow : Window
         catch { }
 
         MessageBox.Show(this,
-            "Eudora account passwords cannot be imported. Enter each account password manually in File > Manage Accounts before checking or sending mail.",
+            "No saved Eudora account password was found. Enter each account password manually in File > Manage Accounts before checking or sending mail.",
             "Account passwords required",
             MessageBoxButton.OK,
             MessageBoxImage.Information);
@@ -7117,7 +7122,7 @@ public partial class MainWindow : Window
             wizard.Choice != FirstRunWelcomeWindow.WelcomeChoice.ImportEudora) return;
         var options = new EudoraImportOptions(
             wizard.EudoraRoot, wizard.DataFolder, wizard.RootDisplayName, wizard.AttachmentMode,
-            wizard.ImportFilters);
+            wizard.ImportFilters, wizard.RespectCheckMailSettings);
         if (!EudoraImportLauncher.TryStart(options, out var error))
         {
             MessageBox.Show(this, error, "Import from Eudora", MessageBoxButton.OK, MessageBoxImage.Error);

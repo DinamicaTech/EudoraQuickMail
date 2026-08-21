@@ -8,7 +8,8 @@ public sealed record EudoraImportOptions(
     string DataFolder,
     string RootDisplayName,
     string AttachmentMode,
-    bool ImportFilters);
+    bool ImportFilters,
+    bool RespectCheckMailSettings);
 
 /// <summary>Starts the external Eudora migration with one argument-safe code path.</summary>
 public static class EudoraImportLauncher
@@ -38,6 +39,7 @@ public static class EudoraImportLauncher
                 "--quickmail", Environment.ProcessPath ?? string.Empty,
                 "--root-name", options.RootDisplayName, "--attachments", options.AttachmentMode,
                 "--filters", options.ImportFilters ? "true" : "false",
+                "--respect-check-mail", options.RespectCheckMailSettings ? "true" : "false",
             }) start.ArgumentList.Add(argument);
             Process.Start(start);
             error = null;

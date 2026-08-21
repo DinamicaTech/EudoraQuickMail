@@ -1,27 +1,31 @@
 using QuickMail.Models;
 using System.IO;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace QuickMail.Services;
 
 public static class EudoraAccountImporter
 {
-    public sealed record ImportResult(int Added, Guid DominantAccountId);
+    public sealed record ImportResult(int Added, Guid DominantAccountId, int PasswordsImported = 0);
 
     public static int Import(string iniPath, IAccountService accountService)
         => ImportAccounts(iniPath, accountService).Added;
 
     public static ImportResult ImportAccounts(string iniPath, IAccountService accountService,
-        string rootDisplayName = "Eudora")
+        string rootDisplayName = "Eudora", bool respectCheckMailSettings = false)
     {
         if (!File.Exists(iniPath)) return new ImportResult(0, Guid.Empty);
         var sections = Parse(File.ReadAllLines(iniPath));
-        var accounts = accountService.LoadAccounts(); var added = 0;
+        var accounts = accountService.LoadAccounts(); var added = 0; var passwordsImported = 0;
+        var secrets = new DpapiAccountSecretProtector();
 
         // Eudora calls the unqualified [Settings] identity "Dominant". It is the effective default
         // persona and owns the imported messages; a synthetic archive account is no longer needed.
         if (!sections.TryGetValue("Settings", out var dominantValues))
             return new ImportResult(0, Guid.Empty);
-        var dominant = UpsertAccount(accounts, "Dominant", dominantValues, ref added);
+        var dominant = UpsertAccount(accounts, "Dominant", dominantValues, ref added,
+            secrets, respectCheckMailSettings, ref passwordsImported);
         if (dominant is null) return new ImportResult(added, Guid.Empty);
 
         foreach (var account in accounts) account.IsDefault = false;
@@ -34,17 +38,19 @@ public static class EudoraAccountImporter
         {
             if (!sections.TryGetValue(sectionName, out var values)) continue;
             var name = sectionName.StartsWith("Persona-", StringComparison.OrdinalIgnoreCase) ? sectionName[8..] : sectionName;
-            var account = UpsertAccount(accounts, name, values, ref added);
+            var account = UpsertAccount(accounts, name, values, ref added,
+                secrets, respectCheckMailSettings, ref passwordsImported);
             if (account is null) continue;
             account.FolderTreeRootId = dominant.Id;
             account.FolderTreeRootName = rootDisplayName;
         }
         accountService.SaveAccounts(accounts);
-        return new ImportResult(added, dominant.Id);
+        return new ImportResult(added, dominant.Id, passwordsImported);
     }
 
     private static AccountModel? UpsertAccount(List<AccountModel> accounts, string name,
-        Dictionary<string, string> values, ref int added)
+        Dictionary<string, string> values, ref int added, IAccountSecretProtector secrets,
+        bool respectCheckMailSettings, ref int passwordsImported)
     {
         var address = values.GetValueOrDefault("ReturnAddress")?.Trim();
         var popHost = values.GetValueOrDefault("PopServer")?.Trim();
@@ -68,9 +74,34 @@ public static class EudoraAccountImporter
         account.SmtpHost = values.GetValueOrDefault("SMTPServer")?.Trim() ?? "127.0.0.1";
         account.SmtpPort = 25;
         account.SmtpUseSsl = false;
-        account.CheckIncomingMail = true;
+        account.CheckIncomingMail = respectCheckMailSettings
+            && values.GetValueOrDefault("CheckMailByDefault")?.Trim() == "1";
         account.IsActive = true;
+        var password = DecodeEudoraPassword(values.GetValueOrDefault("SavePasswordText"));
+        if (password is not null)
+        {
+            secrets.SetPop3Password(account, password);
+            account.SmtpUsesPop3Credentials = true;
+            passwordsImported++;
+        }
         return account;
+    }
+
+    internal static string? DecodeEudoraPassword(string? encoded)
+    {
+        if (string.IsNullOrWhiteSpace(encoded) || encoded.Length % 4 != 0) return null;
+        byte[] clear;
+        try { clear = Convert.FromBase64String(encoded); }
+        catch (FormatException) { return null; }
+        try
+        {
+            // Eudora stored eight-bit password bytes. ASCII is by far the common case; Latin-1
+            // preserves every remaining byte one-to-one instead of replacing invalid UTF-8.
+            return clear.All(value => value <= 0x7f)
+                ? Encoding.ASCII.GetString(clear)
+                : Encoding.Latin1.GetString(clear);
+        }
+        finally { CryptographicOperations.ZeroMemory(clear); }
     }
 
     private static Dictionary<string, Dictionary<string, string>> Parse(IEnumerable<string> lines)

@@ -10,6 +10,7 @@ internal static class MigrationCommand
         var rootName = Value(args, "--root-name") ?? "Eudora";
         var attachmentMode = (Value(args, "--attachments") ?? "keep").ToLowerInvariant();
         var importFilters = !string.Equals(Value(args, "--filters"), "false", StringComparison.OrdinalIgnoreCase);
+        var respectCheckMail = string.Equals(Value(args, "--respect-check-mail"), "true", StringComparison.OrdinalIgnoreCase);
         if (attachmentMode is not ("keep" or "copy" or "move"))
             throw new ArgumentException("--attachments must be keep, copy, or move.");
         var intermediate = Path.Combine(Path.GetFullPath(profile), "eudora-import.db");
@@ -40,7 +41,8 @@ internal static class MigrationCommand
             var result = await NativeProfileImportCommand.RunAsync([
                 "--database", intermediate, "--profile", profile,
                 "--eudora-root", source, "--root-name", rootName,
-                "--filters", importFilters ? Path.Combine(source, "filters.pce") : string.Empty]);
+                "--filters", importFilters ? Path.Combine(source, "filters.pce") : string.Empty,
+                "--respect-check-mail", respectCheckMail ? "true" : "false"]);
             if (result == 0 && attachmentMode == "move")
                 AttachmentRelocator.DeleteVerifiedSources(relocation, source);
             WriteResult(profile, result == 0

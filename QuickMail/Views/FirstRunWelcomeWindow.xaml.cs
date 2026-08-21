@@ -15,6 +15,7 @@ public partial class FirstRunWelcomeWindow : Window
     public string AttachmentMode => MoveAttachments.IsChecked == true ? "move"
         : CopyAttachments.IsChecked == true ? "copy" : "keep";
     public bool ImportFilters => ImportFiltersCheckBox.IsChecked == true;
+    public bool RespectCheckMailSettings => RespectCheckMailSettingsCheckBox.IsChecked == true;
 
     public FirstRunWelcomeWindow(string defaultDataFolder, bool importOnly = false)
     {
@@ -91,6 +92,7 @@ public partial class FirstRunWelcomeWindow : Window
             $"All Eudora messages from the following folder will be imported:\n\n{EudoraRoot}\n\n" +
             $"Eudora QuickMail data folder:\n{DataFolder}\n\n" +
             $"Import filters: {(ImportFilters ? "Yes" : "No")}\n\n" +
+            $"Respect Eudora automatic mail checks: {(RespectCheckMailSettings ? "Yes" : "No")}\n\n" +
             "Any previous Eudora import in that data folder will be replaced. Other accounts and messages are preserved. " +
             "Eudora QuickMail will close during the import and reopen automatically when it finishes. Continue?",
             "Import from Eudora", MessageBoxButton.YesNo, MessageBoxImage.Information);

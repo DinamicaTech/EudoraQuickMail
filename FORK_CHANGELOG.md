@@ -10,6 +10,9 @@ before a public release.
 
 ## Unreleased
 
+- Eudora account migration now decodes valid `SavePasswordText` values and immediately re-protects
+  them with current-user Windows DPAPI. A new opt-in migration setting can respect each persona's
+  `CheckMailByDefault`; it defaults off so imported accounts cannot fetch mail before review.
 - Moved Detach Preview to the upper-right of the reading-pane header and added local in-place
   message editing on double-click: received and sent mail can change only Subject and Body through
   the existing rich composer, with envelope fields locked, only Save/Cancel actions exposed, and

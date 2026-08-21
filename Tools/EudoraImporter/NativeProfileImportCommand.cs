@@ -23,11 +23,14 @@ internal static class NativeProfileImportCommand
             var rootName = ValueAfter(args, "--root-name") ?? "Eudora";
             var eudoraRoot = ValueAfter(args, "--eudora-root");
             var filtersPath = ValueAfter(args, "--filters");
+            var respectCheckMail = string.Equals(ValueAfter(args, "--respect-check-mail"), "true",
+                StringComparison.OrdinalIgnoreCase);
             Console.WriteLine("[1/5] Importing Eudora account configuration…");
             var accountImporter = new AccountService(profile);
             var importedAccounts = string.IsNullOrWhiteSpace(eudoraRoot)
                 ? new EudoraAccountImporter.ImportResult(0, Guid.Empty)
-                : EudoraAccountImporter.ImportAccounts(Path.Combine(eudoraRoot, "Eudora.ini"), accountImporter, rootName);
+                : EudoraAccountImporter.ImportAccounts(Path.Combine(eudoraRoot, "Eudora.ini"),
+                    accountImporter, rootName, respectCheckMail);
             var targetAccountId = importedAccounts.DominantAccountId;
             if (targetAccountId == Guid.Empty)
                 throw new ArgumentException("No se pudo localizar la cuenta Dominant en [Settings] de Eudora.ini.");
@@ -64,6 +67,7 @@ internal static class NativeProfileImportCommand
                 Console.WriteLine("      Filter import was disabled.");
             Console.WriteLine($"Perfil: {profile.ProfileDir}");
             Console.WriteLine($"Cuenta Dominant: {targetAccountId}");
+            Console.WriteLine($"Passwords protected and imported: {importedAccounts.PasswordsImported:N0}");
             Console.WriteLine($"Carpetas: {folders.Count:N0}");
             Console.WriteLine($"Mensajes: {count:N0}");
             if (filterResult is not null)

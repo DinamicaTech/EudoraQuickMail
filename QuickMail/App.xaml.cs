@@ -745,7 +745,7 @@ public partial class App : Application
     {
         var options = new Services.EudoraImportOptions(
             welcome.EudoraRoot, welcome.DataFolder, welcome.RootDisplayName, welcome.AttachmentMode,
-            welcome.ImportFilters);
+            welcome.ImportFilters, welcome.RespectCheckMailSettings);
         if (!Services.EudoraImportLauncher.TryStart(options, out var error))
         {
             MessageBox.Show(error, "Import Eudora", MessageBoxButton.OK, MessageBoxImage.Error);

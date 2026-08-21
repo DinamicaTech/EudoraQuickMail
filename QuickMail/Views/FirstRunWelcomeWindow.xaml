@@ -44,7 +44,7 @@
             </Grid>
         </GroupBox>
 
-        <GroupBox Grid.Row="4" Header="Referenced attachments" Margin="0,0,0,18">
+        <GroupBox Grid.Row="4" Header="Attachments and import options" Margin="0,0,0,18">
             <StackPanel Margin="12">
                 <RadioButton x:Name="KeepAttachments" IsChecked="True" Margin="0,3" Content="Keep them in their current Eudora folders"/>
                 <TextBlock Margin="24,0,0,7" Opacity="0.75" TextWrapping="Wrap" Text="Uses no additional disk space. Eudora QuickMail keeps links to the existing files."/>
@@ -57,6 +57,9 @@
                           Content="Import Eudora filters (filters.pce)"/>
                 <TextBlock Margin="24,0,0,0" Opacity="0.75" TextWrapping="Wrap"
                            Text="Imports supported From, To, Subject and Body contains filters. Existing QuickMail rules are preserved and duplicates are not added."/>
+                <CheckBox x:Name="RespectCheckMailSettingsCheckBox" IsChecked="False" Margin="0,11,0,3"
+                          Content="Respect 'Check mail' settings for existing accounts"
+                          ToolTip="Recommended off until you have reviewed the imported accounts, passwords and folders and are ready to put Eudora QuickMail into production. When off, automatic incoming-mail checks are disabled for every imported account."/>
             </StackPanel>
         </GroupBox>
 
