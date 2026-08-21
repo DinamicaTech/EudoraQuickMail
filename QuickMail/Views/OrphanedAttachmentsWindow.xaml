@@ -35,7 +35,7 @@
                   AutomationProperties.Name="Orphaned attachments">
             <DataGrid.Columns>
                 <DataGridTextColumn Header="Full path" Binding="{Binding FullPath}" Width="*" SortMemberPath="FullPath"/>
-                <DataGridTextColumn Header="Date/time" Binding="{Binding LastWriteTime, StringFormat={}{0:G}}"
+                <DataGridTextColumn Header="Date/time" Binding="{Binding LastWriteTimeDisplay}"
                                     Width="180" SortMemberPath="LastWriteTime"/>
                 <DataGridTextColumn Header="Size (KB)" Binding="{Binding SizeKb, StringFormat={}{0:N0}}"
                                     Width="120" SortMemberPath="SizeKb">

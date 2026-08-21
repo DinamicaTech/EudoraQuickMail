@@ -1,11 +1,13 @@
 using QuickMail.Models;
 using System.IO;
+using System.Globalization;
 
 namespace QuickMail.Services;
 
 public sealed record OrphanAttachmentItem(string FullPath, DateTime LastWriteTime, long SizeBytes)
 {
     public long SizeKb => (SizeBytes + 1023) / 1024;
+    public string LastWriteTimeDisplay => LastWriteTime.ToString("G", CultureInfo.CurrentCulture);
 }
 
 public sealed class OrphanAttachmentService(LocalStoreService store, ProfileContext profile)
