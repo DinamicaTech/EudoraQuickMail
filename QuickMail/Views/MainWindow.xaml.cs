@@ -7153,6 +7153,44 @@ public partial class MainWindow : Window
             { Owner = this }.ShowDialog();
     }
 
+    private async void MenuDeduplicateEmbeddedResources_Click(object sender, RoutedEventArgs e)
+    {
+        if (_localStore is not LocalStoreService store)
+        {
+            MessageBox.Show(this, "Embedded-resource deduplication is unavailable for this profile.",
+                "Deduplicate Embedded Resources", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+        if (MessageBox.Show(this,
+                "QuickMail will identify identical embedded resources by SHA-256, update every message reference, " +
+                "and then remove redundant copies. Continue?",
+                "Deduplicate Embedded Resources", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+            return;
+        try
+        {
+            _vm.IsStatusHighlighted = true;
+            _vm.StatusText = "Scanning embedded resources…";
+            var progress = new Progress<(int Current, int Total, string FileName)>(value =>
+                _vm.StatusText = $"Scanning embedded resource {value.Current:N0}/{value.Total:N0}: {value.FileName}");
+            var result = await store.DeduplicateEmbeddedResourcesAsync(progress);
+            _vm.StatusText = $"Embedded resources deduplicated: {result.DuplicateFilesRemoved:N0} files removed.";
+            MessageBox.Show(this,
+                $"Files scanned: {result.FilesScanned:N0}\n" +
+                $"Duplicate files removed: {result.DuplicateFilesRemoved:N0}\n" +
+                $"Message references updated: {result.MessageReferencesUpdated:N0}\n" +
+                $"Disk space recovered: {result.BytesRecovered / 1_048_576.0:N2} MB",
+                "Deduplicate Embedded Resources", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+        catch (Exception ex)
+        {
+            LogService.Log("Deduplicate embedded resources", ex);
+            _vm.StatusText = "Embedded-resource deduplication failed.";
+            MessageBox.Show(this, ex.Message, "Deduplicate Embedded Resources",
+                MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally { _vm.IsStatusHighlighted = false; }
+    }
+
     private async Task StartInitialAttachmentIndexIfNeededAsync()
     {
         if (_localStore is not LocalStoreService localStore) return;
