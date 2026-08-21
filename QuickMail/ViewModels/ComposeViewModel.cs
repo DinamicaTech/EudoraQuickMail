@@ -55,6 +55,7 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
                 ComposeKind.NewDraft     => "Draft",
                 ComposeKind.EditScheduled => "Scheduled Message",
                 ComposeKind.EditTemplate => "Edit Template",
+                ComposeKind.EditStoredMessage => "Edit Message",
                 _                        => "New Message",
             };
             var lead = string.IsNullOrWhiteSpace(Subject) ? kindLabel : Subject.Trim();
@@ -151,6 +152,9 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
     private Guid? _scheduledId;
     private string? _scheduledLocalMessageId;
     private DateTimeOffset? _scheduledAt;
+    private Guid _storedMessageAccountId;
+    private string? _storedMessageId;
+    private string? _storedFolderName;
     private bool _isDirty;
     private bool _isSent;
     private ComposeMode _seededMode = ComposeMode.PlainText;
@@ -160,6 +164,7 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
 
     public bool IsDirty => _isDirty;
     public bool IsSent  => _isSent;
+    public bool IsEditingStoredMessage => ComposeKind == ComposeKind.EditStoredMessage;
 
     public bool IsEditingDraft(Guid accountId, string folderName, string messageId) =>
         SenderAccount?.Id == accountId
@@ -171,6 +176,7 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
     public ComposeMode SeededMode => _seededMode;
 
     public event Action? CloseRequested;
+    public Func<ComposeModel, Task>? SaveStoredMessageRequested { get; set; }
 
     /// <summary>
     /// Set by the View to show a Yes/No confirmation dialog.
@@ -225,6 +231,7 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
             ComposeKind.EditDraft or ComposeKind.NewDraft => "Draft",
             ComposeKind.EditScheduled => "Scheduled Message",
             ComposeKind.EditTemplate => "Edit Template",
+            ComposeKind.EditStoredMessage => "Edit Message",
             _ => "New Message",
         }
         : Subject.Trim();
@@ -237,6 +244,9 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
         _scheduledId = model.ScheduledId;
         _scheduledLocalMessageId = model.ScheduledLocalMessageId;
         _scheduledAt = model.ScheduledAt;
+        _storedMessageAccountId = model.AccountId;
+        _storedMessageId = model.StoredMessageId;
+        _storedFolderName = model.StoredFolderName;
         ComposeKind         = model.Kind;
         OnPropertyChanged(nameof(WindowTitle));
         OnPropertyChanged(nameof(TabTitle));
@@ -268,6 +278,7 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
         // Auto-append signature if this is a new compose (not a draft re-open) and the
         // account has a signature configured. Drafts already have the signature in the body.
         if (model.DraftMessageId == null && model.ScheduledId == null
+            && model.Kind != ComposeKind.EditStoredMessage
             && model.Kind != ComposeKind.EditScheduled
             && SenderAccount != null && !string.IsNullOrWhiteSpace(SenderAccount.Signature))
         {
@@ -454,7 +465,7 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
     public async Task AutoSaveAsync()
     {
         if (!_isDirty || _isSent || IsBusy) return;
-        if (ComposeKind == ComposeKind.EditTemplate) return;
+        if (ComposeKind is ComposeKind.EditTemplate or ComposeKind.EditStoredMessage) return;
         var account = SenderAccount;
         if (account == null) return;
         if (!HasAutoSavableContent()) return;
@@ -620,6 +631,35 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
 
     [RelayCommand]
     private void Cancel() => CloseRequested?.Invoke();
+
+    [RelayCommand]
+    private async Task SaveStoredMessageAsync()
+    {
+        if (!IsEditingStoredMessage || string.IsNullOrWhiteSpace(_storedMessageId)
+            || string.IsNullOrWhiteSpace(_storedFolderName) || SaveStoredMessageRequested is null)
+        {
+            SetStatusOutcome("This message cannot be updated in the local store.");
+            return;
+        }
+
+        IsBusy = true;
+        SetProgress("Saving message…");
+        try
+        {
+            var model = BuildComposeModel(_storedMessageAccountId);
+            model.StoredMessageId = _storedMessageId;
+            model.StoredFolderName = _storedFolderName;
+            await SaveStoredMessageRequested(model);
+            _isDirty = false;
+            SetStatusOutcome("Message saved.");
+            CloseRequested?.Invoke();
+        }
+        catch (Exception ex)
+        {
+            SetStatusOutcome($"Save failed: {ex.Message}");
+        }
+        finally { IsBusy = false; }
+    }
 
     // ── Compose modes ──────────────────────────────────────────────────────────
 

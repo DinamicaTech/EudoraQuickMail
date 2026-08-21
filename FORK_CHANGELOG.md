@@ -10,6 +10,10 @@ before a public release.
 
 ## Unreleased
 
+- Moved Detach Preview to the upper-right of the reading-pane header and added local in-place
+  message editing on double-click: received and sent mail can change only Subject and Body through
+  the existing rich composer, with envelope fields locked, only Save/Cancel actions exposed, and
+  the summary, preview and full-text index updated atomically without altering attachments.
 - The Eudora migration wizard can now optionally import `filters.pce` (enabled by default),
   converting supported contains-and-move filters into global QuickMail rules while preserving
   automatic/manual behavior, resolving Eudora folder paths, retaining existing rules, avoiding

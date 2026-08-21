@@ -291,6 +291,7 @@ public partial class ComposeWindow : Window
         vm.CurrentMode = ResolveInitialComposeMode();
         InitializeComponent();
         DataContext = vm;
+        ConfigureStoredMessageEditMode();
         ApplyComposeMode();
         Closed += (_, _) => _languageTool.Dispose();
 
@@ -405,9 +406,12 @@ public partial class ComposeWindow : Window
         Closing += OnWindowClosing;
         ConfirmSaveOnClose = () =>
         {
+            var editingStored = vm.IsEditingStoredMessage;
             var r = MessageBox.Show(DialogOwner,
-                "Do you want to save this message as a draft before closing?",
-                "Save Draft?",
+                editingStored
+                    ? "Do you want to save the changes to this locally stored message before closing?"
+                    : "Do you want to save this message as a draft before closing?",
+                editingStored ? "Save Message?" : "Save Draft?",
                 MessageBoxButton.YesNoCancel,
                 MessageBoxImage.Question);
             return Task.FromResult<bool?>(r switch
@@ -423,7 +427,7 @@ public partial class ComposeWindow : Window
         vm.AutoSaveFailed += message =>
             AccessibilityHelper.Announce(this, message, category: AnnouncementCategory.Status);
         var cfg = _configService.Load();
-        if (cfg.AutoSaveDrafts)
+        if (cfg.AutoSaveDrafts && !vm.IsEditingStoredMessage)
         {
             _autoSaveTimer = new DispatcherTimer
             {
@@ -444,6 +448,38 @@ public partial class ComposeWindow : Window
     /// Set to null in headless/test contexts to skip the dialog and discard.
     /// </summary>
     internal Func<Task<bool?>>? ConfirmSaveOnClose { get; set; }
+
+    private void ConfigureStoredMessageEditMode()
+    {
+        if (!_vm.IsEditingStoredMessage) return;
+
+        FromCombo.IsEnabled = false;
+        ToBox.IsEnabled = false;
+        CcBox.IsEnabled = false;
+        BccBox.IsEnabled = false;
+        AddFilesButton.Visibility = Visibility.Collapsed;
+        AttachmentList.Visibility = Visibility.Collapsed;
+
+        NormalComposeButtons.Visibility = Visibility.Collapsed;
+        StoredMessageEditButtons.Visibility = Visibility.Visible;
+        MenuSend.Visibility = Visibility.Collapsed;
+        MenuSendLater.Visibility = Visibility.Collapsed;
+        MenuSaveDraft.Visibility = Visibility.Collapsed;
+        MenuSaveStoredMessage.Visibility = Visibility.Visible;
+        MenuInsertTemplate.Visibility = Visibility.Collapsed;
+        MenuSaveTemplate.Visibility = Visibility.Collapsed;
+        MenuAddAttachments.Visibility = Visibility.Collapsed;
+        MenuComposeSeparator1.Visibility = Visibility.Collapsed;
+        MenuComposeSeparator2.Visibility = Visibility.Collapsed;
+        MenuComposeSeparator3.Visibility = Visibility.Collapsed;
+
+        foreach (var binding in InputBindings.OfType<KeyBinding>())
+            if (binding.Key == Key.S && binding.Modifiers == ModifierKeys.Control)
+                binding.Command = _vm.SaveStoredMessageCommand;
+        foreach (var binding in InputBindings.OfType<KeyBinding>()
+                     .Where(item => item.Key == Key.S && item.Modifiers == ModifierKeys.Alt).ToList())
+            InputBindings.Remove(binding);
+    }
 
     // ── Autocomplete ─────────────────────────────────────────────────────────
 
@@ -880,8 +916,11 @@ public partial class ComposeWindow : Window
             return;
         }
 
-        // decision == true: save the draft first
-        await _vm.SaveDraftCommand.ExecuteAsync(null);
+        // decision == true: save either the local annotation or a draft first.
+        if (_vm.IsEditingStoredMessage)
+            await _vm.SaveStoredMessageCommand.ExecuteAsync(null);
+        else
+            await _vm.SaveDraftCommand.ExecuteAsync(null);
         if (_vm.StatusText.Contains("failed", StringComparison.OrdinalIgnoreCase))
             return;
 
@@ -1482,17 +1521,26 @@ public partial class ComposeWindow : Window
         _registry.Register(new CommandDefinition(
             id: "compose.send", category: "Compose", title: "Send Message",
             execute: () => { CommitAllAddressInputs(); _vm.SendCommand.Execute(null); },
-            defaultKey: Key.S, defaultModifiers: ModifierKeys.Alt));
+            defaultKey: Key.S, defaultModifiers: ModifierKeys.Alt,
+            isAvailable: () => !_vm.IsEditingStoredMessage));
 
         _registry.Register(new CommandDefinition(
             id: "compose.saveDraft", category: "Compose", title: "Save Draft",
             execute: () => _vm.SaveDraftCommand.Execute(null),
-            defaultKey: Key.S, defaultModifiers: ModifierKeys.Control));
+            defaultKey: Key.S, defaultModifiers: ModifierKeys.Control,
+            isAvailable: () => !_vm.IsEditingStoredMessage));
+
+        _registry.Register(new CommandDefinition(
+            id: "compose.saveStoredMessage", category: "Compose", title: "Save Message",
+            execute: () => _vm.SaveStoredMessageCommand.Execute(null),
+            defaultKey: Key.S, defaultModifiers: ModifierKeys.Control,
+            isAvailable: () => _vm.IsEditingStoredMessage));
 
         _registry.Register(new CommandDefinition(
             id: "compose.addAttachments", category: "Compose", title: "Add Attachments…",
             execute: () => _vm.AddAttachmentsCommand.Execute(null),
-            defaultKey: Key.H, defaultModifiers: ModifierKeys.Control));
+            defaultKey: Key.H, defaultModifiers: ModifierKeys.Control,
+            isAvailable: () => !_vm.IsEditingStoredMessage));
 
         _registry.Register(new CommandDefinition(
             id: "compose.focusAttachments", category: "Compose", title: "Focus Attachment List",
@@ -2176,6 +2224,7 @@ public partial class ComposeWindow : Window
         if (_vm.ComposeKind == ComposeKind.NewMessage)
             return ComposeMode.Html;
         if (_vm.ComposeKind is ComposeKind.EditDraft or ComposeKind.NewDraft or ComposeKind.EditScheduled
+            or ComposeKind.EditStoredMessage
             || (_vm.ComposeKind is ComposeKind.Reply or ComposeKind.ReplyAll or ComposeKind.Forward
                 && _vm.SeededMode == ComposeMode.Html))
             return _vm.SeededMode; // restore saved mode or preserve rich reply/forward content

@@ -1360,6 +1360,41 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
         await tx.CommitAsync();
     }
 
+    /// <summary>Updates the user-editable local subject/body without altering envelope data,
+    /// headers, dates, attachments or embedded-resource references.</summary>
+    public async Task UpdateStoredMessageContentAsync(Guid accountId, string folderName,
+        string messageId, string subject, string plainBody, string? htmlBody, ComposeMode mode)
+    {
+        var preview = string.Join(' ', (plainBody ?? string.Empty)
+            .Replace('\r', ' ').Replace('\n', ' ').Split(' ', StringSplitOptions.RemoveEmptyEntries));
+        if (preview.Length > 240) preview = preview[..240];
+
+        await using var conn = await OpenAsync();
+        await using var tx = await conn.BeginTransactionAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.Transaction = (SqliteTransaction)tx;
+        cmd.CommandText = """
+            UPDATE MessageSummary SET subject=$subject, preview_text=$preview
+             WHERE account_id=$aid AND folder_name=$fn AND unique_id=$uid;
+            UPDATE MessageDetail SET plain_body=$plain, html_body=$html, draft_compose_mode=$mode
+             WHERE account_id=$aid AND folder_name=$fn AND unique_id=$uid;
+            UPDATE LocalMessageFts SET subject=$subject, body_text=$body
+             WHERE rowid IN (SELECT fts_rowid FROM LocalMessageFtsKey
+                              WHERE account_id=$aid AND folder_name=$fn AND unique_id=$uid);
+            """;
+        cmd.Parameters.AddWithValue("$aid", accountId.ToString());
+        cmd.Parameters.AddWithValue("$fn", folderName);
+        cmd.Parameters.AddWithValue("$uid", messageId);
+        cmd.Parameters.AddWithValue("$subject", subject ?? string.Empty);
+        cmd.Parameters.AddWithValue("$preview", preview);
+        cmd.Parameters.AddWithValue("$plain", plainBody ?? string.Empty);
+        cmd.Parameters.AddWithValue("$html", htmlBody ?? string.Empty);
+        cmd.Parameters.AddWithValue("$body", string.IsNullOrWhiteSpace(plainBody) ? htmlBody ?? string.Empty : plainBody);
+        cmd.Parameters.AddWithValue("$mode", (int)mode);
+        await cmd.ExecuteNonQueryAsync();
+        await tx.CommitAsync();
+    }
+
     public async Task DeleteGraphCalendarEventsInRangeAsync(Guid accountId, DateTime startUtc, DateTime endUtc)
     {
         await using var conn = await OpenAsync();

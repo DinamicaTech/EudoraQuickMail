@@ -37,15 +37,17 @@
               IsTabStop="False"
               KeyboardNavigation.TabNavigation="None">
             <MenuItem Header="_File">
-                <MenuItem Header="_Send" InputGestureText="Alt+S" Click="MenuSend_Click"/>
-                <MenuItem Header="Send _later" Command="{Binding ScheduleSendCommand}"/>
-                <MenuItem Header="Save _Draft" Command="{Binding SaveDraftCommand}" InputGestureText="Ctrl+S"/>
-                <Separator/>
-                <MenuItem Header="_Insert Template…" Command="{Binding InsertTemplateCommand}"/>
-                <MenuItem Header="Save as _Template" Command="{Binding SaveAsTemplateCommand}"/>
-                <Separator/>
-                <MenuItem Header="_Add Attachments…" Command="{Binding AddAttachmentsCommand}" InputGestureText="Ctrl+H"/>
-                <Separator/>
+                <MenuItem x:Name="MenuSend" Header="_Send" InputGestureText="Alt+S" Click="MenuSend_Click"/>
+                <MenuItem x:Name="MenuSendLater" Header="Send _later" Command="{Binding ScheduleSendCommand}"/>
+                <MenuItem x:Name="MenuSaveDraft" Header="Save _Draft" Command="{Binding SaveDraftCommand}" InputGestureText="Ctrl+S"/>
+                <MenuItem x:Name="MenuSaveStoredMessage" Header="_Save" Command="{Binding SaveStoredMessageCommand}"
+                          InputGestureText="Ctrl+S" Visibility="Collapsed"/>
+                <Separator x:Name="MenuComposeSeparator1"/>
+                <MenuItem x:Name="MenuInsertTemplate" Header="_Insert Template…" Command="{Binding InsertTemplateCommand}"/>
+                <MenuItem x:Name="MenuSaveTemplate" Header="Save as _Template" Command="{Binding SaveAsTemplateCommand}"/>
+                <Separator x:Name="MenuComposeSeparator2"/>
+                <MenuItem x:Name="MenuAddAttachments" Header="_Add Attachments…" Command="{Binding AddAttachmentsCommand}" InputGestureText="Ctrl+H"/>
+                <Separator x:Name="MenuComposeSeparator3"/>
                 <MenuItem Header="_Close" Command="{Binding CancelCommand}" InputGestureText="Esc"/>
             </MenuItem>
             <MenuItem Header="_Edit">
@@ -212,7 +214,7 @@
                 <ComboBoxItem Content="Markdown"/>
                 <ComboBoxItem Content="HTML"/>
             </ComboBox>
-            <WrapPanel DockPanel.Dock="Right" HorizontalAlignment="Right">
+            <WrapPanel x:Name="NormalComposeButtons" DockPanel.Dock="Right" HorizontalAlignment="Right">
                 <Button Content="Send later" Command="{Binding ScheduleSendCommand}"
                         AutomationProperties.Name="Schedule message" MinWidth="90" Margin="6,2,0,0"/>
                 <Button x:Name="SendButton"
@@ -244,6 +246,16 @@
                         IsCancel="True"
                         MinWidth="80" Margin="6,2,0,0"
                         TabIndex="11"/>
+            </WrapPanel>
+            <WrapPanel x:Name="StoredMessageEditButtons" DockPanel.Dock="Right"
+                       HorizontalAlignment="Right" Visibility="Collapsed">
+                <Button Content="_Save" Command="{Binding SaveStoredMessageCommand}"
+                        AutomationProperties.Name="Save local message changes"
+                        AutomationProperties.AcceleratorKey="Ctrl+S"
+                        MinWidth="80" Margin="6,2,0,0"/>
+                <Button Content="_Cancel" Command="{Binding CancelCommand}"
+                        AutomationProperties.Name="Cancel local message changes"
+                        IsCancel="True" MinWidth="80" Margin="6,2,0,0"/>
             </WrapPanel>
             <!-- Deliberately NOT IsDefault. A default button makes Enter send the
                  message from any control that does not handle Enter itself — the
@@ -411,7 +423,7 @@
             <Separator Grid.Row="6" Grid.ColumnSpan="2" Margin="0,4"/>
 
             <!-- Attachments -->
-            <Button Grid.Row="7" Grid.Column="0" Grid.ColumnSpan="2"
+            <Button Grid.Row="7" Grid.Column="0" Grid.ColumnSpan="2" x:Name="AddFilesButton"
                     Content="Add Files…"
                     Command="{Binding AddAttachmentsCommand}"
                     AutomationProperties.Name="Add file attachments"

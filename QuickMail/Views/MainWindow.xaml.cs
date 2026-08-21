@@ -2933,7 +2933,36 @@ public partial class MainWindow : Window
         {
             e.Handled = true;
             await OpenMessageFromListAsync(summary);
+            return;
         }
+
+        e.Handled = true;
+        await OpenStoredMessageEditorAsync(summary);
+    }
+
+    private async Task OpenStoredMessageEditorAsync(MailMessageSummary summary)
+    {
+        var detail = await _localStore.LoadDetailAsync(summary.AccountId, summary.FolderName, summary.MessageId);
+        if (detail is null)
+        {
+            detail = await _imap.GetMessageDetailAsync(summary.AccountId, summary.FolderName, summary.MessageId);
+            await _localStore.UpsertDetailAsync(detail);
+        }
+
+        var mode = string.IsNullOrWhiteSpace(detail.HtmlBody) ? ComposeMode.PlainText : ComposeMode.Html;
+        OpenComposeWindow(new ComposeModel
+        {
+            Kind = ComposeKind.EditStoredMessage,
+            AccountId = summary.AccountId,
+            To = detail.To,
+            Cc = detail.Cc,
+            Subject = detail.Subject,
+            Body = detail.PlainTextBody,
+            HtmlBody = mode == ComposeMode.Html ? detail.HtmlBody : null,
+            Mode = mode,
+            StoredMessageId = summary.MessageId,
+            StoredFolderName = summary.FolderName,
+        });
     }
 
     private void MessageList_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -5671,6 +5700,8 @@ public partial class MainWindow : Window
         {
             var composeVm = new ComposeViewModel(_smtp, _accountService, _credentials, _imap, _templateService);
             composeVm.Seed(composeModel);
+            if (composeVm.IsEditingStoredMessage)
+                composeVm.SaveStoredMessageRequested = SaveStoredMessageAsync;
             composeVm.LocalFolderChanged += accountId =>
                 Dispatcher.InvokeAsync(async () =>
                 {
@@ -5680,6 +5711,35 @@ public partial class MainWindow : Window
                 });
             OpenComposeSurface(composeVm);
         }, DispatcherPriority.Input);
+    }
+
+    private async Task SaveStoredMessageAsync(ComposeModel model)
+    {
+        if (_localStore is not LocalStoreService store || string.IsNullOrWhiteSpace(model.StoredMessageId)
+            || string.IsNullOrWhiteSpace(model.StoredFolderName))
+            throw new InvalidOperationException("Local message editing is unavailable.");
+
+        await store.UpdateStoredMessageContentAsync(model.AccountId, model.StoredFolderName,
+            model.StoredMessageId, model.Subject, model.Body, model.HtmlBody, model.Mode);
+
+        var summary = _vm.Messages.FirstOrDefault(item => item.AccountId == model.AccountId
+            && item.MessageId == model.StoredMessageId
+            && item.FolderName.Equals(model.StoredFolderName, StringComparison.OrdinalIgnoreCase));
+        if (summary is not null)
+        {
+            summary.Subject = model.Subject;
+            summary.Preview = model.Body.Length <= 240 ? model.Body : model.Body[..240];
+            System.Windows.Data.CollectionViewSource.GetDefaultView(_vm.Messages).Refresh();
+        }
+        if (_vm.MessageDetail is { } detail && detail.AccountId == model.AccountId
+            && detail.MessageId == model.StoredMessageId
+            && detail.FolderName.Equals(model.StoredFolderName, StringComparison.OrdinalIgnoreCase))
+        {
+            detail.Subject = model.Subject;
+            detail.PlainTextBody = model.Body;
+            detail.HtmlBody = model.HtmlBody ?? string.Empty;
+            await ShowMessageBodyAsync(detail);
+        }
     }
 
     private ComposeWindow OpenComposeSurface(ComposeViewModel composeVm, Action? closed = null)

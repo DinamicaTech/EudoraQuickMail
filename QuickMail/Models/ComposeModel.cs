@@ -14,6 +14,7 @@ public enum ComposeKind
     EditScheduled,
     NewDraft,
     EditTemplate,
+    EditStoredMessage,
 }
 
 public class ComposeModel
@@ -50,6 +51,10 @@ public class ComposeModel
     public Guid? ScheduledId { get; set; }
     public string? ScheduledLocalMessageId { get; set; }
     public DateTimeOffset? ScheduledAt { get; set; }
+
+    /// <summary>Identity of an existing locally stored message being annotated in place.</summary>
+    public string? StoredMessageId { get; set; }
+    public string? StoredFolderName { get; set; }
 
     public List<AttachmentModel> Attachments { get; set; } = [];
 }
