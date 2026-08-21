@@ -1,3 +1,5 @@
+using QuickMail.Services;
+
 namespace EudoraImporter;
 
 internal static class MigrationCommand

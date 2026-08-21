@@ -1,5 +1,6 @@
 using Microsoft.Data.Sqlite;
 using QuickMail.Models;
+using System.IO;
 using System.Security.Cryptography;
 using System.Text.Json;
 
