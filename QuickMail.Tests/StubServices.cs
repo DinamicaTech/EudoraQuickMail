@@ -263,6 +263,7 @@ sealed class StubLocalStoreService : ILocalStoreService
         => Task.FromResult(new List<(Guid, string, string, string)>());
     public Task ClearOrphanedCalendarSourceLinksAsync() => Task.CompletedTask;
     public Task ReplaceGraphCalendarEventsAsync(Guid accountId, IReadOnlyList<CalendarEvent> events) => Task.CompletedTask;
+    public Task DeleteGraphCalendarEventsInRangeAsync(Guid accountId, DateTime startUtc, DateTime endUtc) => Task.CompletedTask;
     public Task<string?> GetDeltaTokenAsync(Guid accountId, string folderId) => Task.FromResult<string?>(null);
     public Task SetDeltaTokenAsync(Guid accountId, string folderId, string deltaToken) => Task.CompletedTask;
 }
@@ -419,6 +420,9 @@ sealed class StubRuleService : IRuleService
     public List<MailMessageSummary> TestRule(MailRule rule, IEnumerable<MailMessageSummary> messages)
         => messages.ToList(); // Stub matches everything
 
+    public Task<int> ApplyRuleToMessagesAsync(MailRule rule, List<MailMessageSummary> messages,
+        ILocalStoreService store, CancellationToken ct) => Task.FromResult(messages.Count);
+
     public Task<List<MailMessageSummary>> ApplyRulesToExistingAsync(
         ILocalStoreService store, IReadOnlyDictionary<Guid, string> inboxFolderByAccount, CancellationToken ct)
         => Task.FromResult(new List<MailMessageSummary>());
@@ -560,6 +564,12 @@ sealed class StubGraphCalendarSyncService : IGraphCalendarSyncService
     public List<CalendarEvent> CreatedEvents { get; } = [];
 
     public Task<GraphCalendarSyncResult> SyncAllAsync(CancellationToken ct = default)
+    {
+        SyncCallCount++;
+        return Task.FromResult(Result);
+    }
+
+    public Task<GraphCalendarSyncResult> SyncDayAsync(DateTime localDay, CancellationToken ct = default)
     {
         SyncCallCount++;
         return Task.FromResult(Result);

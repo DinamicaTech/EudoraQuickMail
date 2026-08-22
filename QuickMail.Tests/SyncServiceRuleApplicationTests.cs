@@ -82,6 +82,8 @@ public class SyncServiceRuleApplicationTests : IDisposable
         public List<MailRule> LoadRules() => OneEnabledRule;
         public void SaveRules(List<MailRule> rules) { }
         public List<MailMessageSummary> TestRule(MailRule rule, IEnumerable<MailMessageSummary> messages) => [];
+        public Task<int> ApplyRuleToMessagesAsync(MailRule rule, List<MailMessageSummary> messages,
+            ILocalStoreService store, CancellationToken ct) => Task.FromResult(0);
         public Task<List<MailMessageSummary>> ApplyRulesToExistingAsync(ILocalStoreService store, IReadOnlyDictionary<Guid, string> inboxFolderByAccount, CancellationToken ct)
             => Task.FromResult(new List<MailMessageSummary>());
     }
