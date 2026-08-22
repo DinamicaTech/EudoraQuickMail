@@ -265,6 +265,25 @@ internal static class NativeProfileImportCommand
 
             INSERT INTO LocalMessageFtsKey(account_id,unique_id,folder_name,fts_rowid)
             SELECT account_id,unique_id,folder_name,rowid FROM LocalMessageFts WHERE account_id=$aid;
+
+            -- Persist counts during the import so the first QuickMail launch has the same tree
+            -- badges as subsequent launches; previously they appeared only after a reconnect.
+            DROP TABLE IF EXISTS temp.ImportedFolderCounts;
+            CREATE TEMP TABLE ImportedFolderCounts(
+                folder_name TEXT PRIMARY KEY,
+                message_count INTEGER NOT NULL,
+                unread_count INTEGER NOT NULL
+            ) WITHOUT ROWID;
+            INSERT INTO ImportedFolderCounts(folder_name,message_count,unread_count)
+            SELECT folder_name,COUNT(*),COALESCE(SUM(CASE WHEN is_read=0 THEN 1 ELSE 0 END),0)
+            FROM MessageSummary WHERE account_id=$aid GROUP BY folder_name;
+            UPDATE Folder SET
+                message_count=COALESCE((SELECT message_count FROM ImportedFolderCounts c
+                                       WHERE c.folder_name=Folder.full_name),0),
+                unread_count=COALESCE((SELECT unread_count FROM ImportedFolderCounts c
+                                      WHERE c.folder_name=Folder.full_name),0)
+            WHERE account_id=$aid;
+            DROP TABLE ImportedFolderCounts;
             """;
         copy.Parameters.AddWithValue("$aid", accountId.ToString());
         copy.Parameters.AddWithValue("$recipient", dominantAddress);

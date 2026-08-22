@@ -24,6 +24,7 @@ public sealed class AttachmentIndexingService
 
     public async Task IndexAllAsync(CancellationToken ct = default)
     {
+        using var timing = PerformanceLogService.Measure("Attachment index: incremental");
         await IndexGate.WaitAsync(ct);
         try { await IndexAllCoreAsync(ct); }
         finally { IndexGate.Release(); }
@@ -31,6 +32,7 @@ public sealed class AttachmentIndexingService
 
     public async Task<int> RebuildAllAsync(CancellationToken ct = default)
     {
+        using var timing = PerformanceLogService.Measure("Attachment index: full rebuild");
         await IndexGate.WaitAsync(ct);
         try
         {

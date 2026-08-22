@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Globalization;
 
 namespace QuickMail.Models;
 
@@ -40,8 +41,8 @@ public sealed class FolderTreeNode : INotifyPropertyChanged
         + Children.Sum(child => child.RecursiveUnreadCount);
     private int RecursiveMessageCount => (Folder?.MessageCount ?? 0)
         + Children.Sum(child => child.RecursiveMessageCount);
-    private bool UsesTotalCount => Folder?.Kind is SpecialFolderKind.Drafts or SpecialFolderKind.Trash or SpecialFolderKind.Scheduled;
-    private int DisplayCount => UsesTotalCount ? RecursiveMessageCount : RecursiveUnreadCount;
+    private int DisplayUnreadCount => RecursiveUnreadCount;
+    private int DisplayMessageCount => RecursiveMessageCount;
 
     /// <summary>
     /// Accessibility name announced by screen readers (AutomationProperties.Name).
@@ -53,7 +54,7 @@ public sealed class FolderTreeNode : INotifyPropertyChanged
     /// Do not move the count back out of the Name without checking with a screen-reader user first.
     /// </summary>
     public string AutomationName =>
-        ShowCount ? UsesTotalCount ? $"{Label}, {DisplayCount:N0} messages" : $"{Label}, {DisplayCount:N0} unread"
+        ShowCount ? $"{Label}, {DisplayUnreadCount:N0} unread of {DisplayMessageCount:N0} messages"
         : IsDefaultCalendar ? $"{Label}, default calendar"
         : IsSharedAccount ? $"{Label}, shared mailbox"
         : Label;
@@ -84,7 +85,7 @@ public sealed class FolderTreeNode : INotifyPropertyChanged
 
     // Gmail's All Mail / Important / Starred report unread counts that overlap the Inbox and include
     // archived mail, so they're hidden here to avoid a misleading count (issue #227).
-    private bool ShowCount => DisplayCount > 0;
+    private bool ShowCount => DisplayMessageCount > 0 || DisplayUnreadCount > 0;
 
     /// <summary>
     /// UIA ItemStatus string used by AutomationProperties.ItemStatus on the TreeViewItem.
@@ -92,14 +93,24 @@ public sealed class FolderTreeNode : INotifyPropertyChanged
     /// Empty for folders with no unread messages and for header/group nodes.
     /// </summary>
     public string ItemStatusLabel =>
-        ShowCount ? UsesTotalCount ? $"{DisplayCount:N0} messages" : $"{DisplayCount:N0} unread" : string.Empty;
+        ShowCount ? $"{DisplayUnreadCount:N0} unread of {DisplayMessageCount:N0} messages" : string.Empty;
 
     /// <summary>
-    /// Visual unread badge shown next to the folder label, e.g. "(5)".
-    /// Empty string for folders with no unread messages and for header/group nodes.
+    /// Visual count badge shown next to the folder label, e.g. "(253/4K)" (new/total).
+    /// Empty string for folders with no messages and for header/group nodes.
     /// </summary>
     public string UnreadDisplay =>
-        ShowCount ? $"({DisplayCount:N0})" : string.Empty;
+        ShowCount ? $"({CompactCount(DisplayUnreadCount)}/{CompactCount(DisplayMessageCount)})" : string.Empty;
+
+    private static string CompactCount(int count)
+    {
+        if (count < 1_000)
+            return count.ToString("N0", CultureInfo.CurrentCulture);
+
+        var thousands = count / 1_000d;
+        return thousands.ToString(thousands >= 100 || count % 1_000 == 0 ? "0" : "0.#",
+            CultureInfo.CurrentCulture) + "K";
+    }
 
     private bool _isExpanded;
 

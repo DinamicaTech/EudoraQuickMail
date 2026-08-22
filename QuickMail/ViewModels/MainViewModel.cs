@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.IO;
+using System.Globalization;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -1089,6 +1090,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private async Task ApplyLocalSearchAsync(string value)
     {
+        using var timing = PerformanceLogService.Measure("Search: quick",
+            $"queryLength={value?.Length ?? 0}; folder={SelectedFolder?.DisplayName ?? "none"}");
         var previous = Interlocked.Exchange(ref _localSearchCts, new CancellationTokenSource());
         previous?.Cancel();
         previous?.Dispose();
@@ -1155,6 +1158,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     public async Task ApplyAdvancedSearchAsync(IReadOnlyList<AdvancedSearchCriterion> criteria)
     {
+        using var timing = PerformanceLogService.Measure("Search: advanced",
+            $"criteria={criteria.Count}; folder={SelectedFolder?.DisplayName ?? "none"}");
         if (_localStore is not ILocalMailboxStore store || criteria.Count == 0) return;
         Guid? accountScope = SelectedFolder is { AccountId: var aid } folder
             && aid != Guid.Empty && !IsVirtualFolder(folder) ? aid : null;
@@ -1429,7 +1434,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private string _connectionStatusText = "Offline";
 
     [ObservableProperty]
-    private string _lastSyncText = "Never synced";
+    private string _lastSyncText = "Never";
 
     [ObservableProperty]
     private bool _isBusy;
@@ -2932,8 +2937,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// </summary>
     public async Task InitialLoadAsync()
     {
+        using var timing = PerformanceLogService.Measure("Startup: initial mailbox load");
         SelectedFolder = AllMailFolder;
-        LastSyncText = "Never synced";  // Ensure sync time is visible in status bar
+        LastSyncText = "Never";  // Ensure sync time is visible in status bar
         if (_flagService != null)
         {
             var defs = await _flagService.LoadFlagDefinitionsAsync();
@@ -3195,7 +3201,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         ConnectionStatusText = "Syncing…";
         // If we've never synced before, show "In progress" instead of "Never synced"
         // to avoid the confusing impression that syncing will never happen
-        if (LastSyncText == "Never synced")
+        if (LastSyncText == "Never")
             LastSyncText = "In progress";
         _suppressFolderSyncUpdates = true;
 
@@ -3219,7 +3225,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
             var count = Messages.Count;
             StatusText = $"{count} messages.";
-            LastSyncText = $"Synced {DateTime.Now:t}";
+            LastSyncText = DateTime.Now.ToString("T", CultureInfo.CurrentCulture);
             // Report accounts that connected, not accounts configured — this label read
             // "3 accounts connected" with two of them offline.
             ConnectionStatusText = $"{accountList.Count} account{(accountList.Count == 1 ? "" : "s")} connected";
@@ -3323,8 +3329,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         // Don't leave the label stuck at its pre-sync defaults once an account is actually connected;
         // the sync/poll paths (OnFolderSynced, StartBackgroundSyncAsync) keep it current from here.
-        if (_connectedAccountIds.Count > 0 && LastSyncText is "Never synced" or "In progress")
-            LastSyncText = $"Synced {DateTime.Now:t}";
+        if (_connectedAccountIds.Count > 0 && LastSyncText is "Never" or "In progress")
+            LastSyncText = DateTime.Now.ToString("T", CultureInfo.CurrentCulture);
     }
 
     private async Task AnnounceLoadingProgressAsync(CancellationToken ct)
@@ -3563,7 +3569,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (_suppressFolderSyncUpdates) return;
 
         // Update sync time whenever any folder syncs (targeted IDLE syncs, manual refreshes, etc.)
-        LastSyncText = $"Synced {DateTime.Now:t}";
+        LastSyncText = DateTime.Now.ToString("T", CultureInfo.CurrentCulture);
 
         var selected = SelectedFolder;
         if (selected == null) return;
@@ -4388,6 +4394,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// </summary>
     public async Task ConnectAllAccountsAsync()
     {
+        using var timing = PerformanceLogService.Measure("Startup: connect all accounts", $"accounts={Accounts.Count}");
         if (Accounts.Count == 0) return;
 
         StatusText = Accounts.Count == 1
@@ -4605,6 +4612,40 @@ public partial class MainViewModel : ObservableObject, IDisposable
     // dropped every connection at once) don't reconnect in lockstep and re-trip the limit.
     private static double JitteredBackoffSeconds(int baseSeconds) =>
         baseSeconds * (0.7 + Random.Shared.NextDouble() * 0.6);
+
+    public async Task RecalculateFolderCountsAsync()
+    {
+        if (OnlineMode || _localStore is not LocalStoreService localStore)
+        {
+            SetStatus("Folder counts can only be recalculated for the local mailbox.", AnnouncementCategory.Result);
+            return;
+        }
+
+        IsBusy = true;
+        IsStatusHighlighted = true;
+        StatusText = "Recalculating folder counts…";
+        try
+        {
+            using var timing = PerformanceLogService.Measure("Folder counts: recalculate all");
+            await localStore.RefreshAllLocalFolderCountsAsync();
+            var refreshed = await _localStore.LoadFoldersAsync();
+            foreach (var (accountId, folders) in refreshed)
+                _cachedFolders[accountId] = folders;
+            RebuildFolderListFromCache();
+            SetStatus($"Folder counts recalculated for {refreshed.Values.Sum(f => f.Count):N0} folders.",
+                AnnouncementCategory.Result);
+        }
+        catch (Exception ex)
+        {
+            LogService.Log("Recalculate folder counts", ex);
+            SetStatus($"Folder counts could not be recalculated: {ex.Message}", AnnouncementCategory.Result);
+        }
+        finally
+        {
+            IsBusy = false;
+            IsStatusHighlighted = false;
+        }
+    }
 
     private void RebuildFolderListFromCache()
     {
@@ -5563,6 +5604,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private async Task RefreshAsync()
     {
+        using var timing = PerformanceLogService.Measure("Mailbox: refresh",
+            $"folder={SelectedFolder?.DisplayName ?? "none"}");
         // Delegate to the calendar's own refresh while it's the active view, so every entry
         // point (View menu, toolbar button, Command Palette, F5) agrees — none of those bind
         // through CommandRegistry, so an isAvailable guard alone can't disambiguate them.

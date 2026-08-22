@@ -42,16 +42,16 @@ public class FolderTreeBuilderTests
         // readers don't reliably announce it from ItemStatus alone.
         var flat = new List<MailFolderModel>
         {
-            new() { FullName = "INBOX", DisplayName = "Inbox", UnreadCount = 3 },
+            new() { FullName = "INBOX", DisplayName = "Inbox", UnreadCount = 3, MessageCount = 12 },
         };
 
         var inbox = Assert.Single(FolderTreeBuilder.Build(flat));
 
         Assert.Equal("Inbox", inbox.Label);
         Assert.DoesNotContain("unread", inbox.Label);
-        Assert.Equal("Inbox, 3 unread", inbox.AutomationName);
-        Assert.Equal("3 unread", inbox.ItemStatusLabel);
-        Assert.Equal("(3)", inbox.UnreadDisplay);
+        Assert.Equal("Inbox, 3 unread of 12 messages", inbox.AutomationName);
+        Assert.Equal("3 unread of 12 messages", inbox.ItemStatusLabel);
+        Assert.Equal("(3/12)", inbox.UnreadDisplay);
     }
 
     [Fact]
@@ -131,13 +131,13 @@ public class FolderTreeBuilderTests
     {
         var flat = new List<MailFolderModel>
         {
-            new() { FullName = "Clients", DisplayName = "Clients", UnreadCount = 1 },
-            new() { FullName = "Clients/Acme", DisplayName = "Acme", UnreadCount = 3 },
+            new() { FullName = "Clients", DisplayName = "Clients", UnreadCount = 1, MessageCount = 2 },
+            new() { FullName = "Clients/Acme", DisplayName = "Acme", UnreadCount = 3, MessageCount = 5 },
         };
         var parent = Assert.Single(FolderTreeBuilder.Build(flat));
-        Assert.Equal("(4)", parent.UnreadDisplay);
+        Assert.Equal("(4/7)", parent.UnreadDisplay);
         parent.Children[0].Folder!.UnreadCount = 2;
         parent.Children[0].NotifyUnreadChanged();
-        Assert.Equal("(3)", parent.UnreadDisplay);
+        Assert.Equal("(3/7)", parent.UnreadDisplay);
     }
 }

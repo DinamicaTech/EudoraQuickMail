@@ -155,6 +155,7 @@ public partial class MainWindow : Window
     private DispatcherTimer? _searchAnnounceTimer;
     private string? _pendingSearchAnnounceText;
     private static readonly TimeSpan SearchAnnounceDebounce = TimeSpan.FromMilliseconds(300);
+    private readonly DispatcherTimer _statusClockTimer = new() { Interval = TimeSpan.FromSeconds(1) };
 
     private static readonly TimeSpan WebViewNavigationTimeout = TimeSpan.FromSeconds(4);
 
@@ -273,6 +274,9 @@ public partial class MainWindow : Window
 
         _truthProbe       = truthProbe;
         InitializeComponent();
+        UpdateStatusClock();
+        _statusClockTimer.Tick += StatusClockTimer_Tick;
+        _statusClockTimer.Start();
         _vm.MessagesDeleting += OnMessagesDeleting;
         var initialConfig = _configService.Load();
         ApplyAccountsPanelVisibility(initialConfig.ShowAccountsPanel);
@@ -813,6 +817,8 @@ public partial class MainWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
+        _statusClockTimer.Stop();
+        _statusClockTimer.Tick -= StatusClockTimer_Tick;
         foreach (var tab in _vm.OpenTabs.OfType<ComposeTabViewModel>().ToList())
             tab.ForceDispose();
         foreach (var w in _openComposeWindows.ToList())
@@ -839,6 +845,11 @@ public partial class MainWindow : Window
         if (!Application.Current.Dispatcher.HasShutdownStarted)
             Application.Current.Shutdown();
     }
+
+    private void StatusClockTimer_Tick(object? sender, EventArgs e) => UpdateStatusClock();
+
+    private void UpdateStatusClock() =>
+        StatusClockTextBlock.Text = DateTime.Now.ToString("G", CultureInfo.CurrentCulture);
 
     // Debounced UIA notification for rapid status-text changes during sync. Multiple
     // per-folder updates ("5 messages", "12 messages", …) are coalesced so the screen
@@ -7042,6 +7053,9 @@ public partial class MainWindow : Window
             _vm.StatusText = $"Search index rebuild failed: {ex.Message}";
         }
     }
+
+    private async void MenuRecalculateFolderCounts_Click(object sender, RoutedEventArgs e) =>
+        await _vm.RecalculateFolderCountsAsync();
 
     private bool HasLinkedGoogleCalendar() => _vm.Accounts.Any(account =>
         (account.CalendarProvider?.Equals("google", StringComparison.OrdinalIgnoreCase) == true &&

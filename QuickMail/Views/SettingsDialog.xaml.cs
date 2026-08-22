@@ -40,6 +40,7 @@ public partial class SettingsDialog : Window
         _vm.SaveCommand.Execute(null);
         LogService.Format  = _vm.LogFormat;
         LogService.Enabled = _vm.EnableLogging;
+        PerformanceLogService.Enabled = _vm.EnableLogging;
 
         // Applied live rather than at next startup: someone turning this on is troubleshooting a
         // problem that is happening now, and making them restart would lose the very thing they
@@ -57,7 +58,7 @@ public partial class SettingsDialog : Window
         // disk. Leaving any diagnostic file behind because it happens to live elsewhere would
         // quietly defeat that, and nothing in the UI would hint that it still existed.
         var result = MessageBox.Show(
-            "Delete QuickMail's log files? This deletes the application log, the connection " +
+            "Delete QuickMail's log files? This deletes the application log, the performance timing log, the connection " +
             "diagnostics log, and any saved debug screenshots, and cannot be undone.",
             "Delete Logs",
             MessageBoxButton.YesNo,
@@ -67,6 +68,7 @@ public partial class SettingsDialog : Window
         if (result == MessageBoxResult.Yes)
         {
             LogService.DeleteLog();
+            PerformanceLogService.DeleteLog();
             ConnectionJournal.DeleteLog();
             // Static + profile-keyed: works in normal launches too, where only the
             // null capture service is wired but old /debug screenshots may remain.

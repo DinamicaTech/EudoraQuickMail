@@ -670,6 +670,9 @@
                           Click="MenuWatchedConversations_Click"
                           AutomationProperties.Name="Watched Conversations"/>
                 <Separator/>
+                <MenuItem Header="Recalculate _Folder Counts"
+                          Click="MenuRecalculateFolderCounts_Click"
+                          AutomationProperties.Name="Recalculate Folder Counts"/>
                 <MenuItem Header="_Rebuild Search Indexes…"
                           Click="MenuRebuildSearchIndexes_Click"
                           AutomationProperties.Name="Rebuild Search Indexes"/>
@@ -2090,8 +2093,7 @@
                    KeyboardNavigation.DirectionalNavigation="Contained"
                    AutomationProperties.Name="">
 
-            <!-- Region 1: Status message + Last sync time (single TextBlock for unified screen reader reading).
-                 E.g., "7323 messages. Synced 9:29 AM" or "Connecting and syncing... Never synced" -->
+            <!-- Region 1: the operation currently in progress. -->
             <StatusBarItem x:Name="StatusTextItem"
                            KeyboardNavigation.IsTabStop="False">
                 <StatusBarItem.Style>
@@ -2104,15 +2106,16 @@
                     </Style>
                 </StatusBarItem.Style>
                 <TextBlock x:Name="StatusTextBox"
-                           Style="{StaticResource StatusTextBlockStyle}">
-                    <Run Text="{Binding StatusText, Mode=OneWay}"/>
-                    <Run Text="{Binding LastSyncText, StringFormat=' {0}', Mode=OneWay}"/>
-                </TextBlock>
+                           Style="{StaticResource StatusTextBlockStyle}"
+                           Text="{Binding StatusText, Mode=OneWay}"/>
             </StatusBarItem>
 
+            <!-- Region 2: secondary mailbox/session information. Grid count is retained because it
+                 explains pagination/search results without competing with current activity. -->
             <StatusBarItem KeyboardNavigation.IsTabStop="False">
                 <StackPanel Orientation="Horizontal">
-                    <TextBlock Text="{Binding Messages.Count, StringFormat='Grid: {0:N0} messages'}"
+                    <TextBlock Text="{Binding LastSyncText, StringFormat='Last Sync: {0}'}"/>
+                    <TextBlock Text="{Binding Messages.Count, StringFormat=' · Grid: {0:N0}'}"
                                AutomationProperties.Name="Messages currently shown in grid"/>
                     <TextBlock Text="{Binding SelectedMessageCount, StringFormat=' · Selected: {0:N0}'}">
                         <TextBlock.Style>
@@ -2121,15 +2124,9 @@
                             </Style>
                         </TextBlock.Style>
                     </TextBlock>
+                    <TextBlock x:Name="ConnectionStatusTextBox"
+                               Text="{Binding ConnectionStatusText, StringFormat=' · {0}'}"/>
                 </StackPanel>
-            </StatusBarItem>
-
-            <!-- Region 2: Connection state (informational) -->
-            <StatusBarItem x:Name="ConnectionStatusItem"
-                           KeyboardNavigation.IsTabStop="False">
-                <TextBlock x:Name="ConnectionStatusTextBox"
-                           Style="{StaticResource StatusTextBlockStyle}"
-                           Text="{Binding ConnectionStatusText, Mode=OneWay}"/>
             </StatusBarItem>
 
             <!-- Spacer: pushes Rules and Progress to the right -->
@@ -2171,6 +2168,11 @@
                              IsIndeterminate="True"
                              Focusable="True"
                              AutomationProperties.Name="{Binding StatusText, StringFormat='Syncing — {0}'}"/>
+            </StatusBarItem>
+
+            <!-- Region 3: local date/time, kept at the far right and updated once per second. -->
+            <StatusBarItem HorizontalAlignment="Right" KeyboardNavigation.IsTabStop="False">
+                <TextBlock x:Name="StatusClockTextBlock" MinWidth="128" TextAlignment="Right"/>
             </StatusBarItem>
         </StatusBar>
 

@@ -11,9 +11,9 @@ namespace QuickMail.Tests;
 /// </summary>
 public class FolderTreeNodeTests
 {
-    private static FolderTreeNode NodeFor(int unread) => new()
+    private static FolderTreeNode NodeFor(int unread, int total = 10) => new()
     {
-        Folder = new MailFolderModel { FullName = "INBOX", DisplayName = "Inbox", UnreadCount = unread },
+        Folder = new MailFolderModel { FullName = "INBOX", DisplayName = "Inbox", UnreadCount = unread, MessageCount = total },
         Label  = "Inbox",
     };
 
@@ -21,20 +21,20 @@ public class FolderTreeNodeTests
     public void CountDisplays_ReflectUnderlyingUnreadCount()
     {
         var node = NodeFor(3);
-        Assert.Equal("3 unread", node.ItemStatusLabel);
-        Assert.Equal("(3)", node.UnreadDisplay);
+        Assert.Equal("3 unread of 10 messages", node.ItemStatusLabel);
+        Assert.Equal("(3/10)", node.UnreadDisplay);
         // The count must be in the accessible Name — screen readers don't reliably announce it
         // from ItemStatus alone (issue #227).
-        Assert.Equal("Inbox, 3 unread", node.AutomationName);
+        Assert.Equal("Inbox, 3 unread of 10 messages", node.AutomationName);
     }
 
     [Fact]
-    public void ZeroUnread_ProducesEmptyDisplays_AndCountFreeName()
+    public void ZeroUnread_StillDisplaysTotalMessages()
     {
         var node = NodeFor(0);
-        Assert.Equal("", node.ItemStatusLabel);
-        Assert.Equal("", node.UnreadDisplay);
-        Assert.Equal("Inbox", node.AutomationName);
+        Assert.Equal("0 unread of 10 messages", node.ItemStatusLabel);
+        Assert.Equal("(0/10)", node.UnreadDisplay);
+        Assert.Equal("Inbox, 0 unread of 10 messages", node.AutomationName);
     }
 
     [Fact]
@@ -53,9 +53,16 @@ public class FolderTreeNodeTests
         Assert.Contains(nameof(FolderTreeNode.ItemStatusLabel), changed);
         Assert.Contains(nameof(FolderTreeNode.UnreadDisplay), changed);
         // All reflect the new count without any tree rebuild.
-        Assert.Equal("Inbox, 4 unread", node.AutomationName);
-        Assert.Equal("4 unread", node.ItemStatusLabel);
-        Assert.Equal("(4)", node.UnreadDisplay);
+        Assert.Equal("Inbox, 4 unread of 10 messages", node.AutomationName);
+        Assert.Equal("4 unread of 10 messages", node.ItemStatusLabel);
+        Assert.Equal("(4/10)", node.UnreadDisplay);
+    }
+
+    [Fact]
+    public void LargeCounts_AreDisplayedCompactly()
+    {
+        var node = NodeFor(253, 4_000);
+        Assert.Equal("(253/4K)", node.UnreadDisplay);
     }
 
     [Fact]

@@ -240,6 +240,7 @@ public partial class App : Application
         Profile = profile;
 
         LogService.Configure(profile.ProfileDir);
+        PerformanceLogService.Configure(profile.ProfileDir);
 
         // Point the journal at the profile now; whether it actually records is decided below from
         // the ConnectionDiagnostics setting (off by default).
@@ -496,6 +497,7 @@ public partial class App : Application
             Views.AccessibilityHelper.Configure(startupCfg);
             LogService.Format  = startupCfg.LogFormat;
             LogService.Enabled = startupCfg.EnableLogging;
+            PerformanceLogService.Enabled = startupCfg.EnableLogging;
 
             // Theme tokens must be published before the first window parses so every
             // Theme.* DynamicResource resolves on first render.

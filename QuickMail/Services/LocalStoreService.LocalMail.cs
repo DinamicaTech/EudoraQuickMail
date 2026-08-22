@@ -9,18 +9,43 @@ namespace QuickMail.Services;
 public partial class LocalStoreService
 {
     public async Task RefreshLocalFolderCountsAsync(Guid accountId, CancellationToken ct = default)
+        => await RefreshLocalFolderCountsCoreAsync(accountId, ct);
+
+    public async Task RefreshAllLocalFolderCountsAsync(CancellationToken ct = default)
+        => await RefreshLocalFolderCountsCoreAsync(null, ct);
+
+    private async Task RefreshLocalFolderCountsCoreAsync(Guid? accountId, CancellationToken ct)
     {
         await using var conn = await OpenAsync();
         await using var command = conn.CreateCommand();
         command.CommandText = """
+            DROP TABLE IF EXISTS temp.qm_folder_counts;
+            CREATE TEMP TABLE qm_folder_counts (
+                account_id TEXT NOT NULL,
+                folder_name TEXT NOT NULL,
+                message_count INTEGER NOT NULL,
+                unread_count INTEGER NOT NULL,
+                PRIMARY KEY (account_id, folder_name)
+            ) WITHOUT ROWID;
+
+            INSERT INTO qm_folder_counts(account_id,folder_name,message_count,unread_count)
+            SELECT account_id,folder_name,COUNT(*),
+                   COALESCE(SUM(CASE WHEN is_read=0 THEN 1 ELSE 0 END),0)
+            FROM MessageSummary
+            WHERE ($all=1 OR account_id=$aid)
+            GROUP BY account_id,folder_name;
+
             UPDATE Folder SET
-                message_count=(SELECT COUNT(*) FROM MessageSummary s
-                               WHERE s.account_id=Folder.account_id AND s.folder_name=Folder.full_name),
-                unread_count=(SELECT COUNT(*) FROM MessageSummary s
-                              WHERE s.account_id=Folder.account_id AND s.folder_name=Folder.full_name AND s.is_read=0)
-            WHERE account_id=$aid;
+                message_count=COALESCE((SELECT c.message_count FROM qm_folder_counts c
+                               WHERE c.account_id=Folder.account_id AND c.folder_name=Folder.full_name),0),
+                unread_count=COALESCE((SELECT c.unread_count FROM qm_folder_counts c
+                              WHERE c.account_id=Folder.account_id AND c.folder_name=Folder.full_name),0)
+            WHERE ($all=1 OR account_id=$aid);
+
+            DROP TABLE qm_folder_counts;
             """;
-        command.Parameters.AddWithValue("$aid", accountId.ToString());
+        command.Parameters.AddWithValue("$all", accountId.HasValue ? 0 : 1);
+        command.Parameters.AddWithValue("$aid", accountId?.ToString() ?? string.Empty);
         await command.ExecuteNonQueryAsync(ct);
     }
 
