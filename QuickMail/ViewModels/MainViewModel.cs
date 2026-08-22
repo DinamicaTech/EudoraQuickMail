@@ -2938,6 +2938,14 @@ public partial class MainViewModel : ObservableObject, IDisposable
     public async Task InitialLoadAsync()
     {
         using var timing = PerformanceLogService.Measure("Startup: initial mailbox load");
+        var initialCheckpoint = Stopwatch.GetTimestamp();
+        void RecordInitialStage(string stage, string? details = null)
+        {
+            var now = Stopwatch.GetTimestamp();
+            PerformanceLogService.Record($"Startup/splash/mailbox: {stage}",
+                Stopwatch.GetElapsedTime(initialCheckpoint, now), details);
+            initialCheckpoint = now;
+        }
         SelectedFolder = AllMailFolder;
         LastSyncText = "Never";  // Ensure sync time is visible in status bar
         if (_flagService != null)
@@ -2947,6 +2955,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             foreach (var d in defs.OrderBy(d => d.SortOrder))
                 FlagDefinitions.Add(d);
         }
+        RecordInitialStage("load flag definitions", $"flags={FlagDefinitions.Count}");
         var rebuildNotice = ImmutableIdRebuildAnnouncePending;
         if (rebuildNotice)
         {
@@ -2980,6 +2989,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         // as duplicates (one per stale id). Local events (empty account id) are kept.
         var knownAccountIds = Accounts.Select(a => a.Id).ToList();
         await _localStore.PurgeCalendarEventsForUnknownAccountsAsync(knownAccountIds);
+        RecordInitialStage("purge orphan calendar events", $"accounts={knownAccountIds.Count}");
 
         // Restore the folder list from the local store (#516) — BEFORE resolving the startup folder
         // and loading messages, because both depend on it. Until this landed, _cachedFolders was
@@ -3000,11 +3010,14 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             LogService.Log("InitialLoad: restoring cached folder list", ex);
         }
+        RecordInitialStage("restore cached folder metadata",
+            $"accounts={_cachedFolders.Count}; folders={_cachedFolders.Values.Sum(f => f.Count)}");
 
         // Build the folder list now: ResolveStartupFolder matches virtual sentinels against Folders,
         // and the tree is worth drawing before the message load either way.
         await ReloadCalendarSourcesAsync(); // populate before the tree is built so calendars show at startup
         RebuildFolderListFromCache();
+        RecordInitialStage("load calendars and build folder tree", $"treeRoots={FolderTree.Count}");
 
         // Apply the startup folder here, not after sync. CLAUDE.md's startup rule is explicit about
         // this, and the alternative is what users reported: All Mail on screen for the first seconds,
@@ -3031,7 +3044,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
             ? await LoadViewSummariesAsync(startupView)
             : await LoadStartupSummariesAsync(SelectedFolder);
         await ResolveFlagNamesAsync(cached);
+        RecordInitialStage("query startup messages", $"messages={cached.Count}");
         SetMessages(cached);
+        RecordInitialStage("prepare and bind startup message grid", $"grid={Messages.Count}");
 
         var where = SelectedFolder == AllMailFolder && startupView == null
             ? null : startupView?.Name ?? SelectedFolder.DisplayName;
@@ -3106,6 +3121,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// </summary>
     public async Task StartBackgroundSyncAsync()
     {
+        using var timing = PerformanceLogService.Measure("Startup/post-splash: connect and background mail sync",
+            $"accounts={Accounts.Count}");
         _bgSyncCts?.Cancel();
         ReplaceCts(ref _bgSyncCts, out var ct);
 
@@ -5205,16 +5222,23 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private async Task SelectFolderAsync(MailFolderModel? folder)
     {
         if (folder == null || folder.IsHeader) return;
+        var selectionStarted = Stopwatch.GetTimestamp();
+        using var selectionTiming = PerformanceLogService.Measure("Folder selection: data and view-model",
+            $"folder={folder.DisplayName}; kind={folder.Kind}; container={folder.IsContainer}");
+        void SelectionDataReady() => FolderSelectionDataReady?.Invoke(folder,
+            Stopwatch.GetElapsedTime(selectionStarted), Messages.Count);
 
         // Intercept view sentinels BEFORE resetting filter/search — views set their own state.
         if (TryGetViewIdFromSentinel(folder.FullName, out var viewId))
         {
             await ApplyViewByIdAsync(viewId, allFolders: false);
+            SelectionDataReady();
             return;
         }
         if (TryGetViewAllIdFromSentinel(folder.FullName, out var viewAllId))
         {
             await ApplyViewByIdAsync(viewAllId, allFolders: true);
+            SelectionDataReady();
             return;
         }
 
@@ -5222,6 +5246,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (IsCalendarFolderName(folder.FullName))
         {
             await SelectCalendarAsync(folder);
+            SelectionDataReady();
             return;
         }
 
@@ -5247,7 +5272,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 SelectedAccount = Accounts.FirstOrDefault(a => a.Id == folder.AccountId) ?? SelectedAccount;
             await FetchFolderAsync();
         }
+        SelectionDataReady();
     }
+
+    public event Action<MailFolderModel, TimeSpan, int>? FolderSelectionDataReady;
 
     /// <summary>
     /// Activates the calendar view: clears message-list state, loads calendar events,
@@ -5316,6 +5344,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
             if (!OnlineMode)
             {
+                var queryStarted = Stopwatch.GetTimestamp();
                 var localAccount = Accounts.FirstOrDefault(a => a.Id == accountId);
                 LocalSearchResult? localPage = localAccount?.BackendKind is BackendKind.LocalArchive or BackendKind.Pop3Smtp
                     && _localStore is ILocalMailboxStore localMailbox
@@ -5325,12 +5354,19 @@ public partial class MainViewModel : ObservableObject, IDisposable
                     : null;
                 var cached = localPage?.Messages.ToList()
                     ?? await _localStore.LoadFolderSummariesAsync(accountId, folder.FullName);
+                PerformanceLogService.Record("Folder selection: SQLite query",
+                    Stopwatch.GetElapsedTime(queryStarted),
+                    $"folder={folder.DisplayName}; rows={cached.Count}; paged={localPage is not null}");
                 if (localPage is not null) LocalTotalMessages = localPage.TotalMatches;
                 if (!IsCurrentFolderLoad(loadVersion, folder))
                     return;
 
+                var prepareStarted = Stopwatch.GetTimestamp();
                 await ResolveFlagNamesAsync(cached);
                 SetMessages(cached);
+                PerformanceLogService.Record("Folder selection: prepare grid collection",
+                    Stopwatch.GetElapsedTime(prepareStarted),
+                    $"folder={folder.DisplayName}; grid={Messages.Count}");
                 StatusText = cached.Count > 0
                     ? localPage is { TotalMatches: > LocalMailConstants.MaxRenderedMessages }
                         ? $"Showing {cached.Count:N0} of {localPage.TotalMatches:N0} messages"

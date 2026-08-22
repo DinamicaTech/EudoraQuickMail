@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.IO;
 using System.Globalization;
 using System.Linq;
@@ -156,6 +157,7 @@ public partial class MainWindow : Window
     private string? _pendingSearchAnnounceText;
     private static readonly TimeSpan SearchAnnounceDebounce = TimeSpan.FromMilliseconds(300);
     private readonly DispatcherTimer _statusClockTimer = new() { Interval = TimeSpan.FromSeconds(1) };
+    private long? _splashClosedTimestamp;
 
     private static readonly TimeSpan WebViewNavigationTimeout = TimeSpan.FromSeconds(4);
 
@@ -278,6 +280,7 @@ public partial class MainWindow : Window
         _statusClockTimer.Tick += StatusClockTimer_Tick;
         _statusClockTimer.Start();
         _vm.MessagesDeleting += OnMessagesDeleting;
+        _vm.FolderSelectionDataReady += OnFolderSelectionDataReady;
         var initialConfig = _configService.Load();
         ApplyAccountsPanelVisibility(initialConfig.ShowAccountsPanel);
         ApplyTodayAgendaVisibility(initialConfig.ShowTodayAgenda);
@@ -819,6 +822,7 @@ public partial class MainWindow : Window
     {
         _statusClockTimer.Stop();
         _statusClockTimer.Tick -= StatusClockTimer_Tick;
+        _vm.FolderSelectionDataReady -= OnFolderSelectionDataReady;
         foreach (var tab in _vm.OpenTabs.OfType<ComposeTabViewModel>().ToList())
             tab.ForceDispose();
         foreach (var w in _openComposeWindows.ToList())
@@ -971,6 +975,14 @@ public partial class MainWindow : Window
     // On startup: initialise WebView2, connect to first account, open INBOX, focus message list
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
+        var loadedCheckpoint = Stopwatch.GetTimestamp();
+        void RecordLoadedStage(string stage, string? details = null)
+        {
+            var now = Stopwatch.GetTimestamp();
+            PerformanceLogService.Record($"Startup/splash: {stage}",
+                Stopwatch.GetElapsedTime(loadedCheckpoint, now), details);
+            loadedCheckpoint = now;
+        }
         AccessibilityHelper.RegisterDebugInputTrace(this);
         var paneConfig = _configService.Load().Windowing;
         FolderPaneColumn.Width = new GridLength(Math.Clamp(paneConfig.FolderPaneWidth, 120, 800));
@@ -1491,6 +1503,7 @@ public partial class MainWindow : Window
         // The hook intercepts WM_CONTEXTMENU first and synchronously parks WPF focus on the
         // active panel, giving WPF a non-null FocusedElement to route ContextMenuOpening from.
         HwndSource.FromHwnd(new WindowInteropHelper(this).Handle)?.AddHook(OnWmContextMenu);
+        RecordLoadedStage("apply layout, register commands and initialize window wiring");
 
         // Create the WebView2 environment — always needed, shared with MessageWindow instances.
         try
@@ -1516,7 +1529,10 @@ public partial class MainWindow : Window
         // causing Down arrow to read message content instead of navigating the list.
         // Lazy initialization fires when the user switches away from Window mode.
         if (_vm.MessageOpenMode != MessageOpenMode.Window)
+        {
+            using var readingPaneTiming = PerformanceLogService.Measure("Startup/splash: initialize reading pane WebView2");
             await InitReadingPaneWebViewAsync();
+        }
 
         // ui-probe (#180): no update check, no background sync, no startup dialogs —
         // the probe boots offline against the fixture cache, drives to its surface,
@@ -1539,16 +1555,20 @@ public partial class MainWindow : Window
         }
 
         // Show local cache immediately so the UI is never blank on startup.
-        await _vm.InitialLoadAsync();
-        UpdateTodayAgendaEmptyState();
+        using (PerformanceLogService.Measure("Startup/splash: load startup folder and message grid"))
+            await _vm.InitialLoadAsync();
+        using (PerformanceLogService.Measure("Startup/splash: update Today agenda empty state"))
+            UpdateTodayAgendaEmptyState();
         StartupReady?.Invoke();
         _ = StartInitialAttachmentIndexIfNeededAsync();
         if (navigationConfig.ShowTodayAgenda && _vm.CalendarVm != null)
-            _vm.CalendarVm.LoadAsync().LogFaults("load Today agenda");
-        FocusActiveMessagePanel();
+            _ = LoadTodayAgendaAtStartupAsync();
+        using (PerformanceLogService.Measure("Startup/post-splash: focus active message panel"))
+            FocusActiveMessagePanel();
 
         // Populate the Views menu from saved views loaded at startup.
-        RebuildViewsMenu();
+        using (PerformanceLogService.Measure("Startup/post-splash: build saved Views menu"))
+            RebuildViewsMenu();
 
         if (uiProbe != null)
         {
@@ -1565,19 +1585,46 @@ public partial class MainWindow : Window
         // One-time desktop shortcut offer for installed copies — after the window is up and
         // the background sync has been kicked off, so the dialog does not delay startup;
         // the offer handler restores focus to the message panel explicitly on close.
-        _vm.MaybeOfferDesktopShortcut();
+        using (PerformanceLogService.Measure("Startup/post-splash: desktop shortcut check"))
+            _vm.MaybeOfferDesktopShortcut();
 
-        MaybeShowImportedAccountPasswordReminder();
+        using (PerformanceLogService.Measure("Startup/post-splash: imported account password reminder"))
+            MaybeShowImportedAccountPasswordReminder();
 
         // "QuickMail Update Installed" notice, once per applied update. After the shortcut
         // offer so a first-run-after-migration launch never stacks two dialogs.
-        _vm.MaybeShowUpdateInstalledNotice();
+        using (PerformanceLogService.Measure("Startup/post-splash: update-installed notice"))
+            _vm.MaybeShowUpdateInstalledNotice();
 
         // "A native ARM build exists" notice, once per version, and only when this x64 copy is
         // emulated on an ARM64 device. Last of the startup notices: it is the least urgent of
         // them, and going last keeps it from talking over a dialog either of the two above may
         // have opened.
-        _vm.MaybeAnnounceNativeArmAvailable();
+        using (PerformanceLogService.Measure("Startup/post-splash: native ARM notice"))
+            _vm.MaybeAnnounceNativeArmAvailable();
+
+        // Let WPF finish bindings, layout and rendering before declaring the application usable.
+        // This specifically captures the otherwise opaque interval after the splash disappears.
+        await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ApplicationIdle);
+        if (_splashClosedTimestamp is { } splashClosed)
+            PerformanceLogService.Record("Startup/post-splash: until application is operational",
+                Stopwatch.GetElapsedTime(splashClosed),
+                $"folder={_vm.SelectedFolder?.DisplayName ?? "none"}; grid={_vm.Messages.Count}");
+    }
+
+    internal void NotifySplashClosed() => _splashClosedTimestamp = Stopwatch.GetTimestamp();
+
+    private async void OnFolderSelectionDataReady(MailFolderModel folder, TimeSpan dataElapsed, int messageCount)
+    {
+        var renderStarted = Stopwatch.GetTimestamp();
+        await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Render);
+        await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ApplicationIdle);
+        var renderElapsed = Stopwatch.GetElapsedTime(renderStarted);
+        PerformanceLogService.Record("Folder selection: UI render", renderElapsed,
+            $"folder={folder.DisplayName}; grid={messageCount}");
+        PerformanceLogService.Record("Folder selection: click to operational grid",
+            dataElapsed + renderElapsed,
+            $"folder={folder.DisplayName}; grid={messageCount}");
     }
 
     // ── ui-probe hooks (#180) — internal, driver-only; never user-reachable ──
@@ -3016,6 +3063,7 @@ public partial class MainWindow : Window
         var version = Interlocked.Increment(ref _totalScrollVersion);
         try
         {
+            using var webViewTiming = PerformanceLogService.Measure("Startup/splash: create WebView2 environment");
             if (delayMilliseconds > 0)
                 await Task.Delay(delayMilliseconds);
             if (version != _totalScrollVersion) return;
@@ -7214,8 +7262,17 @@ public partial class MainWindow : Window
         finally { _vm.IsStatusHighlighted = false; }
     }
 
+    private async Task LoadTodayAgendaAtStartupAsync()
+    {
+        if (_vm.CalendarVm == null) return;
+        using var timing = PerformanceLogService.Measure("Startup/post-splash: load Today agenda");
+        try { await _vm.CalendarVm.LoadAsync(); }
+        catch (Exception ex) { LogService.Log("load Today agenda", ex); }
+    }
+
     private async Task StartInitialAttachmentIndexIfNeededAsync()
     {
+        using var timing = PerformanceLogService.Measure("Startup/post-splash: initial attachment index check/run");
         if (_localStore is not LocalStoreService localStore) return;
         if (!_configService.Load().IndexAttachmentContents) return;
 

@@ -20,6 +20,12 @@ public static class PerformanceLogService
     public static IDisposable Measure(string operation, string? details = null) =>
         Enabled ? new TimingScope(operation, details) : NullScope.Instance;
 
+    public static void Record(string operation, TimeSpan elapsed, string? details = null)
+    {
+        if (!Enabled) return;
+        Write(operation, elapsed.TotalMilliseconds, details);
+    }
+
     public static void DeleteLog()
     {
         try
@@ -42,13 +48,22 @@ public static class PerformanceLogService
             _watch.Stop();
             try
             {
-                Directory.CreateDirectory(Path.GetDirectoryName(_logFile)!);
-                var suffix = string.IsNullOrWhiteSpace(details) ? string.Empty : $" | {details}";
-                var line = $"{operation} | {_watch.Elapsed.TotalMilliseconds.ToString("0.0", CultureInfo.InvariantCulture)} ms{suffix} | {DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}{Environment.NewLine}";
-                lock (WriteGate) File.AppendAllText(_logFile, line);
+                Write(operation, _watch.Elapsed.TotalMilliseconds, details);
             }
             catch { }
         }
+    }
+
+    private static void Write(string operation, double elapsedMilliseconds, string? details)
+    {
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(_logFile)!);
+            var suffix = string.IsNullOrWhiteSpace(details) ? string.Empty : $" | {details}";
+            var line = $"{operation} | {elapsedMilliseconds.ToString("0.0", CultureInfo.InvariantCulture)} ms{suffix} | {DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}{Environment.NewLine}";
+            lock (WriteGate) File.AppendAllText(_logFile, line);
+        }
+        catch { }
     }
 
     private sealed class NullScope : IDisposable

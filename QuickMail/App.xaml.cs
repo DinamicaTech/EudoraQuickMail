@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using System.Diagnostics;
 using System.Threading.Tasks;
 using System.Windows;
 using QuickMail.Helpers;
@@ -241,6 +242,16 @@ public partial class App : Application
 
         LogService.Configure(profile.ProfileDir);
         PerformanceLogService.Configure(profile.ProfileDir);
+        try { PerformanceLogService.Enabled = new ConfigService(profile).Load().EnableLogging; }
+        catch { PerformanceLogService.Enabled = false; }
+        var startupCheckpoint = Stopwatch.GetTimestamp();
+        void RecordStartupStage(string stage, string? details = null)
+        {
+            var now = Stopwatch.GetTimestamp();
+            PerformanceLogService.Record($"Startup/splash: {stage}",
+                Stopwatch.GetElapsedTime(startupCheckpoint, now), details);
+            startupCheckpoint = now;
+        }
 
         // Point the journal at the profile now; whether it actually records is decided below from
         // the ConnectionDiagnostics setting (off by default).
@@ -305,6 +316,7 @@ public partial class App : Application
             splash.Show();
             splash.SetStatus("Opening the local mail database…");
         }
+        RecordStartupStage("profile, first-run checks and splash creation");
 
         // Left/Right/Home/End through a wrapped tab strip (#528). A class handler so a window
         // with tabs added later cannot be left out.
@@ -340,8 +352,9 @@ public partial class App : Application
             var credentialService = new CredentialService();
             var configService     = new ConfigService(profile);
             var localStore        = new LocalStoreService(profile);
-            if (!onlineMode)
-                localStore.Initialize();
+            using (PerformanceLogService.Measure("Startup/splash: initialize local database"))
+                if (!onlineMode)
+                    localStore.Initialize();
             splash?.SetStatus("Loading accounts and application settings…");
             // Provider presets + settings discovery for the Add Account dialog. The catalog is a
             // pure lookup table; the discovery service owns an HttpClient, so it is disposed in OnExit.
@@ -394,6 +407,7 @@ public partial class App : Application
             // Router registration runs via mainVm.RegisterAccountBackend (set below), which also
             // covers accounts added at runtime through RefreshAccountList.
             var accounts = accountService.LoadAccounts();
+            RecordStartupStage("construct mail backends and load accounts", $"accounts={accounts.Count}");
             splash?.SetStatus("Preparing folders, messages and search services…");
             if (!probeMode) ScheduledSender = new ScheduledSendService(profile, effectiveSmtp, accountService, credentialService, localStore);
 
@@ -575,6 +589,7 @@ public partial class App : Application
             // ConnectionJournal.Enabled — so nothing records until the user opts in.
             mainVm.ApplyConnectionDiagnosticsSetting(startupCfg.ConnectionDiagnostics);
             mainVm.LoadAccountList(accounts);
+            RecordStartupStage("construct services and main view model", $"accounts={accounts.Count}");
 
             if (_pop3Receiver is not null)
             {
@@ -593,6 +608,7 @@ public partial class App : Application
             }
 
             var mainWindow = new MainWindow(mainVm, effectiveSmtp, accountService, credentialService, effectiveMail, effectiveOAuth, commandRegistry, contactService, configService, localStore, viewService, ruleService, templateService, featureGate, flagService, customDictionary, themeService, _bugReportService, _notificationService, contactSyncService, graphCalendarSync, serverRuleService, providerCatalog, _autoDiscoverService, _truthProbe, rowLayoutService, watchService, profile);
+            RecordStartupStage("construct main window");
 
             if (_pop3Receiver is not null)
                 _pop3Receiver.Failed += (account, error, manual) =>
@@ -615,7 +631,11 @@ public partial class App : Application
                 splash.SetStatus("Loading the folder tree and startup mailbox…");
                 mainWindow.StartupReady += () =>
                 {
+                    var closeStarted = Stopwatch.GetTimestamp();
                     splash.Close();
+                    PerformanceLogService.Record("Startup/splash: close splash window",
+                        Stopwatch.GetElapsedTime(closeStarted));
+                    mainWindow.NotifySplashClosed();
                     mainWindow.Activate();
                 };
             }
@@ -626,6 +646,7 @@ public partial class App : Application
                 mainWindow.Dispatcher.BeginInvoke(() => mainWindow.HandleNotificationActivation(act));
 
             mainWindow.Show();
+            RecordStartupStage("show main window and enter Loaded handler");
 
             if (openAccountCreationAfterStartup)
                 mainWindow.Dispatcher.BeginInvoke(mainWindow.ShowFirstRunAccountCreation);
