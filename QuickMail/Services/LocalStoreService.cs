@@ -1008,8 +1008,11 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
     //   5 → 6   persist message direction. The one-time path backfill recognises Out/Sent (including
     //           historical Eudora _Out trees) before the user starts filing sent mail elsewhere.
     //           Future writes carry direction explicitly; this scan must never repeat at startup.
-    // Add new migrations as: if (version < 7) { ...; }
-    private const int CurrentSchemaVersion = 6;
+    //   6 → 7   add FTS rows for cached IMAP/Graph summaries. Those backends cache headers and
+    //           preview text before a body is opened; older builds only indexed authoritative
+    //           POP3/local messages, so textual searches silently omitted remote Inbox mail.
+    // Add new migrations as: if (version < 8) { ...; }
+    private const int CurrentSchemaVersion = 7;
 
     private static void RunDataMigrations(SqliteConnection conn)
     {
@@ -1159,6 +1162,42 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
             directionCmd.ExecuteNonQuery();
         }
 
+        if (version < 7)
+        {
+            using var tx = conn.BeginTransaction();
+            using var ftsCmd = conn.CreateCommand();
+            ftsCmd.Transaction = tx;
+            ftsCmd.CommandText = """
+                CREATE TEMP TABLE qm_fts_backfill_start(rowid INTEGER NOT NULL);
+                INSERT INTO qm_fts_backfill_start
+                    SELECT COALESCE(MAX(rowid), 0) FROM LocalMessageFts;
+
+                INSERT INTO LocalMessageFts
+                    (account_id,unique_id,folder_name,from_addr,to_addr,cc_addr,subject,body_text)
+                SELECT s.account_id,s.unique_id,s.folder_name,s.from_disp,s.to_addr,
+                       COALESCE(d.cc,''),s.subject,
+                       CASE WHEN trim(COALESCE(d.plain_body,'')) <> '' THEN d.plain_body
+                            WHEN trim(COALESCE(d.html_body,'')) <> '' THEN d.html_body
+                            ELSE s.preview_text END
+                  FROM MessageSummary s
+                  LEFT JOIN MessageDetail d
+                    ON d.account_id=s.account_id AND d.unique_id=s.unique_id
+                   AND d.folder_name=s.folder_name
+                 WHERE NOT EXISTS (
+                       SELECT 1 FROM LocalMessageFtsKey k
+                        WHERE k.account_id=s.account_id AND k.unique_id=s.unique_id
+                          AND k.folder_name=s.folder_name);
+
+                INSERT OR IGNORE INTO LocalMessageFtsKey(account_id,unique_id,folder_name,fts_rowid)
+                    SELECT account_id,unique_id,folder_name,rowid
+                      FROM LocalMessageFts
+                     WHERE rowid > (SELECT rowid FROM qm_fts_backfill_start);
+                DROP TABLE qm_fts_backfill_start;
+                """;
+            ftsCmd.ExecuteNonQuery();
+            tx.Commit();
+        }
+
         SetUserVersion(conn, CurrentSchemaVersion);
     }
 
@@ -1231,6 +1270,38 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
         var pImid      = cmd.Parameters.Add("$imid",      SqliteType.Text);
         var pDirection = cmd.Parameters.Add("$direction", SqliteType.Integer);
 
+        // IMAP/Graph synchronization initially has only headers and PREVIEW text. Keep those rows
+        // searchable immediately instead of waiting for the user to open every message body. If a
+        // full detail is already cached, retain its richer body while refreshing the header fields.
+        await using var fts = conn.CreateCommand();
+        fts.CommandText = """
+            UPDATE LocalMessageFts
+               SET from_addr=$from,to_addr=$to,subject=$subj,
+                   body_text=CASE WHEN EXISTS(
+                       SELECT 1 FROM MessageDetail d
+                        WHERE d.account_id=$aid AND d.unique_id=$uid AND d.folder_name=$fn
+                          AND (trim(d.plain_body)<>'' OR trim(d.html_body)<>''))
+                       THEN body_text ELSE $preview END
+             WHERE rowid IN (SELECT fts_rowid FROM LocalMessageFtsKey
+                              WHERE account_id=$aid AND unique_id=$uid AND folder_name=$fn);
+            INSERT INTO LocalMessageFts
+                (account_id,unique_id,folder_name,from_addr,to_addr,cc_addr,subject,body_text)
+                SELECT $aid,$uid,$fn,$from,$to,'',$subj,$preview
+                 WHERE NOT EXISTS (SELECT 1 FROM LocalMessageFtsKey
+                                    WHERE account_id=$aid AND unique_id=$uid AND folder_name=$fn);
+            INSERT INTO LocalMessageFtsKey(account_id,unique_id,folder_name,fts_rowid)
+                SELECT $aid,$uid,$fn,last_insert_rowid()
+                 WHERE changes()=1 AND NOT EXISTS (SELECT 1 FROM LocalMessageFtsKey
+                                                   WHERE account_id=$aid AND unique_id=$uid AND folder_name=$fn);
+            """;
+        var fUid     = fts.Parameters.Add("$uid",     SqliteType.Text);
+        var fAid     = fts.Parameters.Add("$aid",     SqliteType.Text);
+        var fFn      = fts.Parameters.Add("$fn",      SqliteType.Text);
+        var fFrom    = fts.Parameters.Add("$from",    SqliteType.Text);
+        var fTo      = fts.Parameters.Add("$to",      SqliteType.Text);
+        var fSubject = fts.Parameters.Add("$subj",    SqliteType.Text);
+        var fPreview = fts.Parameters.Add("$preview", SqliteType.Text);
+
         foreach (var s in summaries)
         {
             pUid.Value       = s.MessageId;
@@ -1251,6 +1322,15 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
             pImid.Value      = s.InternetMessageId ?? string.Empty;
             pDirection.Value = (int)s.Direction;
             await cmd.ExecuteNonQueryAsync();
+
+            fUid.Value     = s.MessageId;
+            fAid.Value     = s.AccountId.ToString();
+            fFn.Value      = s.FolderName;
+            fFrom.Value    = s.From ?? string.Empty;
+            fTo.Value      = s.To ?? string.Empty;
+            fSubject.Value = s.Subject ?? string.Empty;
+            fPreview.Value = s.Preview ?? string.Empty;
+            await fts.ExecuteNonQueryAsync();
         }
         await tx.CommitAsync();
     }
@@ -2276,6 +2356,35 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
         cmd2.Parameters.AddWithValue("$aid", detail.AccountId.ToString());
         cmd2.Parameters.AddWithValue("$fn",  detail.FolderName);
         await cmd2.ExecuteNonQueryAsync();
+
+        // Replace the summary-only preview in FTS with the complete cached body. The INSERT path
+        // also repairs legacy IMAP rows that predate incremental summary indexing.
+        await using var cmd3 = conn.CreateCommand();
+        cmd3.CommandText = """
+            UPDATE LocalMessageFts
+               SET to_addr=$to,cc_addr=$cc,body_text=$body
+             WHERE rowid IN (SELECT fts_rowid FROM LocalMessageFtsKey
+                              WHERE account_id=$aid AND unique_id=$uid AND folder_name=$fn);
+            INSERT INTO LocalMessageFts
+                (account_id,unique_id,folder_name,from_addr,to_addr,cc_addr,subject,body_text)
+                SELECT s.account_id,s.unique_id,s.folder_name,s.from_disp,$to,$cc,s.subject,$body
+                  FROM MessageSummary s
+                 WHERE s.account_id=$aid AND s.unique_id=$uid AND s.folder_name=$fn
+                   AND NOT EXISTS (SELECT 1 FROM LocalMessageFtsKey
+                                    WHERE account_id=$aid AND unique_id=$uid AND folder_name=$fn);
+            INSERT INTO LocalMessageFtsKey(account_id,unique_id,folder_name,fts_rowid)
+                SELECT $aid,$uid,$fn,last_insert_rowid()
+                 WHERE changes()=1 AND NOT EXISTS (SELECT 1 FROM LocalMessageFtsKey
+                                                   WHERE account_id=$aid AND unique_id=$uid AND folder_name=$fn);
+            """;
+        cmd3.Parameters.AddWithValue("$uid", detail.MessageId);
+        cmd3.Parameters.AddWithValue("$aid", detail.AccountId.ToString());
+        cmd3.Parameters.AddWithValue("$fn", detail.FolderName);
+        cmd3.Parameters.AddWithValue("$to", detail.To ?? string.Empty);
+        cmd3.Parameters.AddWithValue("$cc", detail.Cc ?? string.Empty);
+        cmd3.Parameters.AddWithValue("$body", string.IsNullOrWhiteSpace(detail.PlainTextBody)
+            ? detail.HtmlBody ?? string.Empty : detail.PlainTextBody);
+        await cmd3.ExecuteNonQueryAsync();
 
         await tx.CommitAsync();
     }

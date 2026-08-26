@@ -126,6 +126,68 @@ public class AttachmentExtractorTests
 public class QuickSearchStoreTests
 {
     [Fact]
+    public async Task ImapSummaryIsSearchableBeforeBodyIsOpened()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "QuickMail-imap-search-test-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var store = new LocalStoreService(new ProfileContext(directory)); store.Initialize();
+            var account = Guid.NewGuid();
+            await store.UpsertSummariesAsync([new MailMessageSummary
+            {
+                AccountId = account, FolderName = "INBOX", MessageId = "imap-1",
+                From = "sender@example.com", To = "ronaldvg00@gmail.com",
+                Subject = "Fork release", Preview = "Summary-only remote message",
+                Date = DateTimeOffset.UtcNow,
+            }]);
+
+            var result = await store.SearchLocalMessagesAsync(new LocalSearchQuery("fork",
+                FolderScopes: [new LocalFolderScope(account, "INBOX")]), TestContext.Current.CancellationToken);
+
+            Assert.Equal(1, result.TotalMatches);
+            Assert.Equal("imap-1", Assert.Single(result.Messages).MessageId);
+        }
+        finally
+        {
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            Directory.Delete(directory, true);
+        }
+    }
+
+    [Fact]
+    public async Task OpeningImapMessageReplacesPreviewWithSearchableFullBody()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "QuickMail-imap-body-search-test-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var store = new LocalStoreService(new ProfileContext(directory)); store.Initialize();
+            var account = Guid.NewGuid();
+            await store.UpsertSummariesAsync([new MailMessageSummary
+            {
+                AccountId = account, FolderName = "INBOX", MessageId = "imap-2",
+                Subject = "Remote message", Preview = "Short preview", Date = DateTimeOffset.UtcNow,
+            }]);
+            await store.UpsertDetailAsync(new MailMessageDetail
+            {
+                AccountId = account, FolderName = "INBOX", MessageId = "imap-2",
+                PlainTextBody = "The complete message contains deepforktoken.",
+            });
+
+            var result = await store.SearchLocalMessagesAsync(new LocalSearchQuery("deepforktoken",
+                FolderScopes: [new LocalFolderScope(account, "INBOX")]), TestContext.Current.CancellationToken);
+
+            Assert.Equal(1, result.TotalMatches);
+        }
+        finally
+        {
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            Directory.Delete(directory, true);
+        }
+    }
+
+    [Fact]
     public async Task SearchesStructuredFieldsAndAttachmentIndex()
     {
         var directory = Path.Combine(Path.GetTempPath(), "QuickMail-search-test-" + Guid.NewGuid().ToString("N"));

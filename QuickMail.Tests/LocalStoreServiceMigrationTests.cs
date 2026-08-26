@@ -203,7 +203,7 @@ public class LocalStoreServiceMigrationTests
         store.Initialize();
 
         Assert.True(File.Exists(dbPath + ".pre-v2"), "pre-v2 backup should be created");
-        Assert.Equal(6, ReadUserVersion(dbPath));
+        Assert.Equal(7, ReadUserVersion(dbPath));
         Assert.True(TableExists(dbPath, "DeltaToken"), "DeltaToken table should exist after migration");
         Assert.True(TableExists(dbPath, "CalendarEvent"), "CalendarEvent table should exist after migration");
     }
@@ -239,7 +239,7 @@ public class LocalStoreServiceMigrationTests
         store.Initialize();
 
         Assert.False(File.Exists(dbPath + ".pre-v2"), "fresh DB must not produce a backup");
-        Assert.Equal(6, ReadUserVersion(dbPath));
+        Assert.Equal(7, ReadUserVersion(dbPath));
         Assert.True(TableExists(dbPath, "DeltaToken"));
         Assert.True(TableExists(dbPath, "CalendarEvent"));
         Assert.Equal("TEXT", ColumnType(dbPath, "MessageSummary", "unique_id"));
@@ -280,13 +280,47 @@ public class LocalStoreServiceMigrationTests
         Assert.Equal(MessageDirection.Incoming, migrated.Single(message => message.MessageId == "in").Direction);
         Assert.Equal(MessageDirection.Incoming, migrated.Single(message => message.MessageId == "custom").Direction);
 
-        // Once the schema is v6, an unknown value in a mixed custom folder must not be repeatedly
+        // Once the schema is current, an unknown value in a mixed custom folder must not be repeatedly
         // overwritten during startup. Live sync can then preserve a direction learned elsewhere.
         await store.UpsertSummariesAsync([Row("later", "Ocio/Pintura")]);
         store.Initialize();
         var afterRestart = await store.LoadAllSummariesAsync();
         Assert.Equal(MessageDirection.Unknown,
             afterRestart.Single(message => message.MessageId == "later").Direction);
+    }
+
+    [Fact]
+    public async Task V7BackfillsMissingSearchRowsForExistingImapSummaries()
+    {
+        var dir = NewTempDir();
+        var dbPath = Path.Combine(dir, "mail.db");
+        var accountId = Guid.NewGuid();
+        var store = new LocalStoreService(new ProfileContext(dir));
+        store.Initialize();
+        await store.UpsertSummariesAsync([new MailMessageSummary
+        {
+            MessageId = "imap-existing", AccountId = accountId, FolderName = "INBOX",
+            Subject = "Existing fork message", Preview = "Remote preview", Date = DateTimeOffset.UtcNow,
+        }]);
+
+        using (var conn = new SqliteConnection($"Data Source={dbPath}"))
+        {
+            conn.Open();
+            using var simulateOldBuild = conn.CreateCommand();
+            simulateOldBuild.CommandText = """
+                DELETE FROM LocalMessageFts;
+                DELETE FROM LocalMessageFtsKey;
+                PRAGMA user_version = 6;
+                """;
+            simulateOldBuild.ExecuteNonQuery();
+        }
+
+        store.Initialize();
+        var result = await store.SearchLocalMessagesAsync(new LocalSearchQuery("fork",
+            FolderScopes: [new LocalFolderScope(accountId, "INBOX")]), TestContext.Current.CancellationToken);
+
+        Assert.Equal(7, ReadUserVersion(dbPath));
+        Assert.Equal("imap-existing", Assert.Single(result.Messages).MessageId);
     }
 
     [Fact]
