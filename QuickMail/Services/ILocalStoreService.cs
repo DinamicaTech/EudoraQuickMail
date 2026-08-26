@@ -77,6 +77,11 @@ public interface ILocalStoreService
     Task PurgeFoldersForUnknownAccountsAsync(IReadOnlyCollection<Guid> knownAccountIds);
     Task UpdateIsReadAsync(Guid accountId, string folderName, string messageId, bool isRead);
     Task UpdateIsReadBatchAsync(IEnumerable<(Guid AccountId, string FolderName, string MessageId)> items, bool isRead);
+    /// <summary>Updates only the cached sender text for an existing summary. This deliberately
+    /// never inserts a row: notification activation may use a key-only temporary summary, and
+    /// persisting that object would overwrite the real recipient, subject and date with defaults.</summary>
+    Task UpdateSenderAsync(Guid accountId, string folderName, string messageId, string sender) =>
+        Task.CompletedTask;
     /// <summary>Records that the user successfully sent a reply to the original local message.</summary>
     Task UpdateIsRepliedAsync(Guid accountId, string folderName, string messageId, string? internetMessageId = null) =>
         Task.CompletedTask;

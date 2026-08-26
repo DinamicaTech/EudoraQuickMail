@@ -2222,6 +2222,40 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
     public Task UpdateIsReadAsync(Guid accountId, string folderName, string messageId, bool isRead) =>
         UpdateIsReadBatchAsync([(accountId, folderName, messageId)], isRead);
 
+    public async Task UpdateSenderAsync(Guid accountId, string folderName, string messageId, string sender)
+    {
+        await using var conn = await OpenAsync();
+        await using var tx = (SqliteTransaction)await conn.BeginTransactionAsync();
+        await using (var summary = conn.CreateCommand())
+        {
+            summary.Transaction = tx;
+            summary.CommandText = """
+                UPDATE MessageSummary SET from_disp=$from
+                 WHERE account_id=$aid AND folder_name=$fn AND unique_id=$uid;
+                """;
+            summary.Parameters.AddWithValue("$from", sender ?? string.Empty);
+            summary.Parameters.AddWithValue("$aid", accountId.ToString());
+            summary.Parameters.AddWithValue("$fn", folderName);
+            summary.Parameters.AddWithValue("$uid", messageId);
+            await summary.ExecuteNonQueryAsync();
+        }
+        await using (var fts = conn.CreateCommand())
+        {
+            fts.Transaction = tx;
+            fts.CommandText = """
+                UPDATE LocalMessageFts SET from_addr=$from
+                 WHERE rowid IN (SELECT fts_rowid FROM LocalMessageFtsKey
+                                  WHERE account_id=$aid AND folder_name=$fn AND unique_id=$uid);
+                """;
+            fts.Parameters.AddWithValue("$from", sender ?? string.Empty);
+            fts.Parameters.AddWithValue("$aid", accountId.ToString());
+            fts.Parameters.AddWithValue("$fn", folderName);
+            fts.Parameters.AddWithValue("$uid", messageId);
+            await fts.ExecuteNonQueryAsync();
+        }
+        await tx.CommitAsync();
+    }
+
     public async Task UpdateIsRepliedAsync(Guid accountId, string folderName, string messageId,
         string? internetMessageId = null)
     {

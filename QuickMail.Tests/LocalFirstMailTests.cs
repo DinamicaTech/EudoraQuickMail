@@ -54,6 +54,25 @@ public sealed class LocalFirstMailTests : IDisposable
     }
 
     [Fact]
+    public async Task LocalStore_SenderRepairPreservesRecipientSubjectAndDate()
+    {
+        var accountId = Guid.NewGuid();
+        var store = CreateStore();
+        var original = Message(accountId, "In", "sender-repair", "body");
+        var originalDate = original.Date;
+        await store.SaveLocalMessageAsync(original);
+
+        await store.UpdateSenderAsync(accountId, "In", original.MessageId,
+            "Support <support@example.test>");
+
+        var repaired = Assert.Single(await store.LoadFolderSummariesAsync(accountId, "In"));
+        Assert.Equal("Support <support@example.test>", repaired.From);
+        Assert.Equal(original.To, repaired.To);
+        Assert.Equal(original.Subject, repaired.Subject);
+        Assert.Equal(originalDate, repaired.Date);
+    }
+
+    [Fact]
     public async Task LocalStore_EnforcesRenderedMessageCap()
     {
         var accountId = Guid.NewGuid();
@@ -572,6 +591,28 @@ public sealed class LocalFirstMailTests : IDisposable
         Assert.True(events.IndexOf("save:new-uid") < events.IndexOf("delete:0"));
         Assert.Equal("disconnect:commit", events[^1]);
         Assert.Equal("In", store.SavedMessages.Single().FolderName);
+    }
+
+    [Fact]
+    public void Pop3Mapping_PreservesHeadersAndNormalizesMissingEnvelopeFields()
+    {
+        var message = new MimeMessage();
+        message.From.Add(MailboxAddress.Parse("support@example.test"));
+        message.Headers.Add("Delivered-To", "delivered@example.test");
+        message.Subject = string.Empty;
+        message.Date = new DateTimeOffset(1, 1, 1, 1, 0, 0, TimeSpan.FromHours(1));
+        message.Body = new TextPart("plain") { Text = "body" };
+        var before = DateTimeOffset.UtcNow;
+
+        var mapped = Pop3ReceiveService.MapMessage(
+            Guid.NewGuid(), "missing-envelope-fields", message, "account@example.test");
+
+        Assert.Equal("delivered@example.test", mapped.To);
+        Assert.Equal("(no subject)", mapped.Subject);
+        Assert.InRange(mapped.Date, before, DateTimeOffset.UtcNow.AddSeconds(1));
+        Assert.Contains("From: support@example.test", mapped.RawHeaders);
+        Assert.Contains("Delivered-To: delivered@example.test", mapped.RawHeaders);
+        Assert.NotEqual("MimeKit.HeaderList", mapped.RawHeaders);
     }
 
     [Fact]

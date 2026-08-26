@@ -6042,7 +6042,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
             {
                 summary.From = detail.From;
                 if (!OnlineMode)
-                    _localStore.UpsertSummariesAsync([summary]).LogFaults("local store: repair sender address");
+                    // A notification opened while the message is outside the current grid uses a
+                    // key-only summary. Never upsert that temporary object: doing so replaces the
+                    // authoritative To/Subject/Date columns with their empty/default values.
+                    await _localStore.UpdateSenderAsync(summary.AccountId, summary.FolderName,
+                        summary.MessageId, detail.From);
             }
             else if (!SenderMailbox(summary.From).Contains('@'))
             {

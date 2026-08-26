@@ -84,7 +84,7 @@ public sealed class Pop3ReceiveService : IPop3ReceiveService
                 phase = Stopwatch.GetTimestamp();
                 var mime = await transport.GetMessageAsync(index, ct);
                 fetchTicks += Stopwatch.GetElapsedTime(phase).Ticks;
-                var local = MapMessage(account.Id, uidl, mime);
+                var local = MapMessage(account.Id, uidl, mime, account.Username);
                 phase = Stopwatch.GetTimestamp();
                 await _store.SavePop3MessageAsync(uidl, local, ct); // durable before DELE
                 saveTicks += Stopwatch.GetElapsedTime(phase).Ticks;
@@ -123,11 +123,20 @@ public sealed class Pop3ReceiveService : IPop3ReceiveService
         }
     }
 
-    internal static MailMessageDetail MapMessage(Guid accountId, string uidl, MimeMessage message)
+    internal static MailMessageDetail MapMessage(Guid accountId, string uidl, MimeMessage message,
+        string? fallbackRecipient = null)
     {
         var plain = message.TextBody ?? string.Empty;
         var html = message.HtmlBody ?? string.Empty;
         var previewSource = string.IsNullOrWhiteSpace(plain) ? StripHtml(html) : plain;
+        var receivedDate = message.Date.UtcDateTime.Year < 1900
+            ? DateTimeOffset.UtcNow
+            : message.Date;
+        var recipients = message.To.ToString();
+        if (string.IsNullOrWhiteSpace(recipients))
+            recipients = FirstNonEmptyHeader(message, "Delivered-To", "X-Original-To", "Envelope-To")
+                         ?? fallbackRecipient
+                         ?? string.Empty;
         return new MailMessageDetail
         {
             MessageId = StableMessageId(accountId, uidl),
@@ -135,20 +144,37 @@ public sealed class Pop3ReceiveService : IPop3ReceiveService
             FolderName = InboxFolderName,
             InternetMessageId = message.MessageId ?? string.Empty,
             From = message.From.ToString(),
-            To = message.To.ToString(),
+            To = recipients,
             Cc = message.Cc.ToString(),
             Bcc = message.Bcc.ToString(),
             ReplyTo = message.ReplyTo.ToString(),
-            Subject = message.Subject ?? "(no subject)",
-            Date = message.Date == DateTimeOffset.MinValue ? DateTimeOffset.UtcNow : message.Date,
+            Subject = string.IsNullOrWhiteSpace(message.Subject) ? "(no subject)" : message.Subject,
+            Date = receivedDate,
             IsRead = false,
             Direction = MessageDirection.Incoming,
             Preview = CollapseWhitespace(previewSource, 240),
             PlainTextBody = plain,
             HtmlBody = html,
-            RawHeaders = message.Headers.ToString() ?? string.Empty,
+            RawHeaders = SerializeHeaders(message.Headers),
             Attachments = ExtractMimeResources(message),
         };
+    }
+
+    private static string? FirstNonEmptyHeader(MimeMessage message, params string[] names)
+    {
+        foreach (var name in names)
+        {
+            var value = message.Headers[name];
+            if (!string.IsNullOrWhiteSpace(value)) return value.Trim();
+        }
+        return null;
+    }
+
+    private static string SerializeHeaders(HeaderList headers)
+    {
+        using var stream = new MemoryStream();
+        headers.WriteTo(stream, CancellationToken.None);
+        return Encoding.UTF8.GetString(stream.ToArray());
     }
 
     private static List<AttachmentModel> ExtractMimeResources(MimeMessage message)
