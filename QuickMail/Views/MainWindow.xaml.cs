@@ -3412,8 +3412,11 @@ public partial class MainWindow : Window
             await _vm.EnsureSenderAddressAsync(messages[0]);
         // Old/imported trees can carry a stale is_container=0 even though the node visibly owns
         // children. The visible hierarchy is authoritative: a node with children cannot receive
-        // messages directly and must take the create-subfolder drop path.
-        var isContainer = folder.IsContainer || node.Children.Count > 0;
+        // messages directly and must take the create-subfolder drop path. Older builds also created
+        // manually-added child folders as leaves immediately. For Ctrl+Shift+Drop, an empty such
+        // folder is still an organizational destination: ask for the leaf name and run the quick
+        // filter. A plain drag remains able to move a message directly into an empty physical leaf.
+        var isContainer = IsContainerDropTarget(folder, node.Children.Count, controlShiftDrop);
         if (isContainer)
         {
             if (shiftDrop)
@@ -3428,6 +3431,10 @@ public partial class MainWindow : Window
         await _vm.MoveSelectedMessagesToFolderAsync(messages, folder);
         if (shiftDrop) OpenRulesManager(CreateMoveRuleTemplate(messages[0], folder));
     }
+
+    internal static bool IsContainerDropTarget(MailFolderModel folder, int childCount,
+        bool controlShiftDrop) =>
+        folder.IsContainer || childCount > 0 || (controlShiftDrop && folder.MessageCount == 0);
 
     private async Task ShiftDropOnContainerAsync(List<MailMessageSummary> messages, FolderTreeNode node,
         MailFolderModel container, bool createAndApplyFilter)

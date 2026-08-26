@@ -469,9 +469,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
         IsBusy = true;
         try
         {
-            // A first-level node is organizational by default; a child created below it is a real
-            // mail folder unless the caller explicitly asks for another container.
-            var createAsContainer = isContainer ?? canonicalParent.CanonicalPath.Length == 0;
+            // A folder created explicitly from the tree is organizational by default, regardless
+            // of its depth. The Shift/Ctrl+Shift drop workflow passes false explicitly when it
+            // creates the leaf that will actually receive messages.
+            var createAsContainer = isContainer ?? true;
             var createdId = await _localStore.CreateCanonicalFolderAsync(
                 parentId, name, owner.Id, createAsContainer);
             await ReloadCanonicalLocalTreeAsync(rebuildTree: true, refreshPhysicalCache: true);
