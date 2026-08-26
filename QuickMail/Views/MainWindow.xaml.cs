@@ -4087,19 +4087,74 @@ public partial class MainWindow : Window
         .fc .fc-button{border-radius:3px;box-shadow:none}.fc .fc-event{border-radius:3px;padding:1px 3px;cursor:pointer}
         .fc .fc-col-header-cell-cushion,.fc .fc-daygrid-day-number{color:CanvasText;text-decoration:none}
         .fc .fc-daygrid-day.fc-day-today{background:rgba(15,108,189,.10)}
+        #calendar-menu{position:fixed;display:none;z-index:10000;min-width:150px;padding:4px;
+        border:1px solid #a9b1bc;border-radius:4px;background:Canvas;color:CanvasText;box-shadow:0 3px 12px #0004}
+        #calendar-menu button{width:100%;padding:6px 10px;border:0;border-radius:3px;text-align:left;
+        background:transparent;color:inherit;font:inherit;cursor:pointer}
+        #calendar-menu button:hover,#calendar-menu button:focus{background:rgba(15,108,189,.14);outline:none}
+        #calendar-menu .separator{height:1px;margin:4px;background:#a9b1bc}
         @media(prefers-color-scheme:dark){:root{--fc-border-color:#454545}.fc-theme-standard td,.fc-theme-standard th{border-color:#454545}}
-        </style><script>{{{bundle}}}</script></head><body><div id="calendar"></div><script>
+        </style><script>{{{bundle}}}</script></head><body><div id="calendar"></div>
+        <div id="calendar-menu">
+          <button type="button" data-action="edit">Edit appointment</button>
+          <button type="button" data-action="delete">Delete appointment</button>
+          <div class="separator"></div>
+          <button type="button" data-action="new">New appointment</button>
+        </div><script>
+        let dateClickTimer=0;
+        const postNewAppointment=(date,allDay)=>chrome.webview.postMessage({type:'new',date,allDay});
         const calendar=new FullCalendar.Calendar(document.getElementById('calendar'),{
           initialView:'dayGridMonth',height:'100%',nowIndicator:true,navLinks:true,selectable:true,
           firstDay:1,dayMaxEvents:true,eventDisplay:'block',
           headerToolbar:{left:'prev,next today',center:'title',right:'timeGridDay,timeGridWeek,dayGridMonth'},
           buttonText:{today:'Today',day:'Day',week:'Week',month:'Month'},
           eventClick:i=>chrome.webview.postMessage({type:'select',id:i.event.id}),
-          eventDidMount:i=>i.el.addEventListener('dblclick',()=>chrome.webview.postMessage({type:'open',id:i.event.id})),
-          dateClick:i=>chrome.webview.postMessage({type:'date',date:i.dateStr}),
+          eventDidMount:i=>{
+            i.el.dataset.calendarEventId=i.event.id;
+            i.el.dataset.calendarEventDate=i.event.startStr;
+            i.el.dataset.calendarEventAllDay=i.event.allDay?'true':'false';
+            i.el.addEventListener('dblclick',()=>chrome.webview.postMessage({type:'open',id:i.event.id}));
+          },
+          dateClick:i=>{
+            clearTimeout(dateClickTimer);
+            if(i.jsEvent.detail>1)postNewAppointment(i.dateStr,i.allDay);
+            else dateClickTimer=setTimeout(()=>chrome.webview.postMessage({type:'date',date:i.dateStr}),240);
+          },
           datesSet:i=>{if(!window.hostUpdating)chrome.webview.postMessage({type:'navigate',view:i.view.type,date:calendar.getDate().toISOString()})}
         });
         calendar.render();
+        const menu=document.getElementById('calendar-menu');
+        let menuDate='';
+        let menuAllDay=true;
+        let menuEventId='';
+        document.getElementById('calendar').addEventListener('contextmenu',e=>{
+          const eventElement=e.target.closest('[data-calendar-event-id]');
+          const cell=e.target.closest('[data-date]');
+          if(!eventElement&&!cell)return;
+          e.preventDefault();
+          menuEventId=eventElement?.dataset.calendarEventId||'';
+          menuDate=eventElement?.dataset.calendarEventDate||cell?.dataset.date||'';
+          menuAllDay=eventElement?eventElement.dataset.calendarEventAllDay==='true':true;
+          menu.querySelectorAll('[data-action="edit"],[data-action="delete"]').forEach(
+            button=>button.style.display=menuEventId?'block':'none');
+          menu.querySelector('.separator').style.display=menuEventId?'block':'none';
+          menu.style.left=e.clientX+'px';menu.style.top=e.clientY+'px';
+          menu.style.display='block';
+          const firstAction=menu.querySelector(`[data-action="${menuEventId?'edit':'new'}"]`);
+          firstAction.focus();
+          menu.style.left=Math.max(4,Math.min(e.clientX,innerWidth-menu.offsetWidth-4))+'px';
+          menu.style.top=Math.max(4,Math.min(e.clientY,innerHeight-menu.offsetHeight-4))+'px';
+        });
+        menu.addEventListener('click',e=>{
+          const action=e.target.closest('[data-action]')?.dataset.action;
+          if(!action)return;
+          menu.style.display='none';
+          if(action==='new'&&menuDate)postNewAppointment(menuDate,menuAllDay);
+          else if((action==='edit'||action==='delete')&&menuEventId)
+            chrome.webview.postMessage({type:action,id:menuEventId});
+        });
+        document.addEventListener('pointerdown',e=>{if(!menu.contains(e.target))menu.style.display='none'});
+        document.addEventListener('keydown',e=>{if(e.key==='Escape')menu.style.display='none'});
         window.setCalendarData=p=>{window.hostUpdating=true;calendar.changeView(p.view,p.date);calendar.removeAllEvents();calendar.addEventSource(p.events);window.hostUpdating=false};
         </script></body></html>
         """;
@@ -4166,6 +4221,17 @@ public partial class MainWindow : Window
                 await SyncSelectedCalendarDayAsync(date.Date);
                 return;
             }
+            if (type == "new" && DateTime.TryParse(root.GetProperty("date").GetString(), out var start))
+            {
+                // A month cell carries only a date. Seed it with the current local time so a new
+                // appointment does not unexpectedly start at midnight; a day/week time slot keeps
+                // the exact time supplied by FullCalendar.
+                var allDayCell = root.TryGetProperty("allDay", out var allDayElement)
+                                 && allDayElement.ValueKind == JsonValueKind.True;
+                if (allDayCell) start = start.Date.Add(DateTime.Now.TimeOfDay);
+                _vm.CalendarVm.NewEventAt(start);
+                return;
+            }
 
             if (!root.TryGetProperty("id", out var idElement)
                 || !int.TryParse(idElement.GetString(), out var index)
@@ -4175,6 +4241,8 @@ public partial class MainWindow : Window
             var calendarEvent = _vm.CalendarVm.VisibleEvents[index];
             _vm.CalendarVm.SelectedEvent = calendarEvent;
             if (type == "open") ActivateSelectedCalendarEvent();
+            else if (type == "edit") _vm.CalendarVm.EditEventCommand.Execute(calendarEvent);
+            else if (type == "delete") _vm.CalendarVm.DeleteEventCommand.Execute(calendarEvent);
         }
         catch (Exception ex) { LogService.Log("FullCalendar message handling failed", ex); }
     }

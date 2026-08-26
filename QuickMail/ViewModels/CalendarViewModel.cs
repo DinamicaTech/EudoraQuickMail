@@ -453,6 +453,14 @@ public partial class CalendarViewModel : ObservableObject
     /// <summary>Opens the appointment editor to create a new local event. Bound to N / Ctrl+Shift+N.</summary>
     [RelayCommand]
     private void NewEvent()
+        => NewEventAt(DateTime.Now);
+
+    /// <summary>
+    /// Opens the appointment editor with a date/time selected directly in the visual calendar.
+    /// The toolbar command delegates here with the current time; FullCalendar supplies the cell or
+    /// time-slot that the user double-clicked.
+    /// </summary>
+    public void NewEventAt(DateTime defaultStart)
     {
         if (_onlineMode) { Announce("Calendar is unavailable in online mode.", AnnouncementCategory.Result); return; }
 
@@ -476,7 +484,7 @@ public partial class CalendarViewModel : ObservableObject
                 accountTargets.Add(new CalendarSaveTarget(a.AccountLabel, a.Id));
             }
         }
-        var editor = new EventEditorViewModel(DateTime.Now, accountTargets);
+        var editor = new EventEditorViewModel(defaultStart, accountTargets);
         // An explicit user default wins. Otherwise prefer a Google account whose calendar sync is
         // enabled: silently creating a local-only reservation while a cloud calendar is available
         // is a much more dangerous default than choosing the first synced Google calendar.

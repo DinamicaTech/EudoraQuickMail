@@ -161,6 +161,20 @@ public class CalendarViewModelTests
     }
 
     [Fact]
+    public void NewEventAt_SeedsEditorFromSelectedCalendarSlot()
+    {
+        var vm = MakeVm([]);
+        EventEditorViewModel? editor = null;
+        vm.EditorRequested += requested => editor = requested;
+
+        vm.NewEventAt(new DateTime(2026, 8, 29, 10, 7, 0));
+
+        Assert.NotNull(editor);
+        Assert.Equal(new DateTime(2026, 8, 29, 10, 15, 0), editor!.Start);
+        Assert.Equal(new DateTime(2026, 8, 29, 10, 45, 0), editor.End);
+    }
+
+    [Fact]
     public void EditEvent_OnInviteSourcedEvent_AnnouncesAndDoesNotOpenEditor()
     {
         var invite = MakeEvent("inv1", DateTime.Today.AddHours(9)); // has a real AccountId
