@@ -771,6 +771,31 @@ public partial class MainWindow : Window
         _trayIcon?.ClearNewMailIndicator();
     }
 
+    /// <summary>
+    /// Opens a Windows <c>mailto:</c> activation in the normal compose surface. Returns false
+    /// when this command line is not a mail protocol activation.
+    /// </summary>
+    public bool TryOpenMailtoFromCommandLine(IEnumerable<string> args)
+    {
+        var compose = MailtoUriParser.ParseArguments(args);
+        if (compose is null) return false;
+
+        var accounts = _accountService.LoadAccounts();
+        var account = accounts.FirstOrDefault(a => a.IsActive && a.IsDefault)
+                      ?? accounts.FirstOrDefault(a => a.IsActive);
+        if (account is null)
+        {
+            MessageBox.Show(
+                "Create and activate an email account before composing a message from a mail link.",
+                "Eudora QuickMail", MessageBoxButton.OK, MessageBoxImage.Information);
+            return true;
+        }
+
+        compose.AccountId = account.Id;
+        OpenComposeWindow(compose);
+        return true;
+    }
+
     private void EnsureTrayIcon()
     {
         _trayIcon ??= new TrayIconManager(onOpen: RestoreFromTray, onExit: RequestExit);

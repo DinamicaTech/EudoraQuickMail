@@ -13,6 +13,7 @@
 #define MyAppSupportURL MyAppURL + "/issues"
 #define MyAppExeName "QuickMail.exe"
 #define MyAppDescription "Keyboard-first, accessible desktop email client for Windows"
+#define MailtoProgId "EudoraQuickMail.Url.Mailto"
 
 ; Source path (relative to this script). Matches the output of `build.bat publish`
 ; and the GitHub Actions release step (`dotnet publish ... -o publish/`).
@@ -89,7 +90,21 @@ Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Parameters: "--
 Name: "{group}\{cm:UninstallProgram,{#MyAppName}}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Parameters: "--profileDir ""{code:GetDataDir}"""; Comment: "{cm:AppDescription}"; Tasks: desktopicon
 
+[Registry]
+; Register as a per-user candidate for the mailto protocol. Windows intentionally does not let
+; installers force a default app: the user makes the final association in Default Apps.
+Root: HKCU; Subkey: "Software\Classes\{#MailtoProgId}"; ValueType: string; ValueName: ""; ValueData: "URL:Eudora QuickMail MailTo Protocol"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\{#MailtoProgId}"; ValueType: string; ValueName: "URL Protocol"; ValueData: ""
+Root: HKCU; Subkey: "Software\Classes\{#MailtoProgId}\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\{#MyAppExeName},0"
+Root: HKCU; Subkey: "Software\Classes\{#MailtoProgId}\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#MyAppExeName}"" --profileDir ""{code:GetDataDir}"" --mailto ""%1"""
+Root: HKCU; Subkey: "Software\EudoraQuickMail\Capabilities"; ValueType: string; ValueName: "ApplicationName"; ValueData: "{#MyAppName}"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\EudoraQuickMail\Capabilities"; ValueType: string; ValueName: "ApplicationDescription"; ValueData: "{#MyAppDescription}"
+Root: HKCU; Subkey: "Software\EudoraQuickMail\Capabilities"; ValueType: string; ValueName: "ApplicationIcon"; ValueData: "{app}\{#MyAppExeName},0"
+Root: HKCU; Subkey: "Software\EudoraQuickMail\Capabilities\UrlAssociations"; ValueType: string; ValueName: "mailto"; ValueData: "{#MailtoProgId}"
+Root: HKCU; Subkey: "Software\RegisteredApplications"; ValueType: string; ValueName: "{#MyAppName}"; ValueData: "Software\EudoraQuickMail\Capabilities"; Flags: uninsdeletevalue
+
 [Run]
+Filename: "ms-settings:defaultapps?registeredAppUser=Eudora%20QuickMail"; Description: "Open Windows Default Apps to make Eudora QuickMail my default email app"; Flags: shellexec postinstall skipifsilent unchecked
 Filename: "{app}\{#MyAppExeName}"; Parameters: "--profileDir ""{code:GetDataDir}"""; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
 
 #include "CodeDependencies.iss"

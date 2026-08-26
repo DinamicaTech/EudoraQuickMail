@@ -725,14 +725,23 @@ public partial class App : Application
             mainWindow.Show();
             RecordStartupStage("show main window and enter Loaded handler");
 
+            // Windows starts the registered mail client with a mailto URI. Handle an initial
+            // activation after the main window exists; composing does not require a live receive
+            // connection, so it need not wait for the startup synchronization pass.
+            mainWindow.TryOpenMailtoFromCommandLine(e.Args);
+
             if (openAccountCreationAfterStartup)
                 mainWindow.Dispatcher.BeginInvoke(mainWindow.ShowFirstRunAccountCreation);
 
             // A second launch of the same profile signals this handle instead of starting
             // another process; restore the window (and drop the tray icon) exactly as the
             // tray icon's Open action would. The signal arrives on a thread-pool thread.
-            _singleInstance?.ListenForActivation(() =>
-                mainWindow.Dispatcher.Invoke(() => mainWindow.RestoreFromTray()));
+            _singleInstance?.ListenForActivation(activationArgs =>
+                mainWindow.Dispatcher.Invoke(() =>
+                {
+                    mainWindow.RestoreFromTray();
+                    mainWindow.TryOpenMailtoFromCommandLine(activationArgs);
+                }));
         }
         catch (Exception ex)
         {

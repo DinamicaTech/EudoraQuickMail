@@ -103,4 +103,28 @@ public class SingleInstanceServiceTests
         Assert.True(activated.Wait(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken),
             "the running instance was not signaled by the second launch");
     }
+
+    [Fact]
+    public void SecondLaunch_ForwardsCommandLineToFirstInstance()
+    {
+        var profileArgs = UniqueProfileArgs();
+        var activationArgs = profileArgs.Concat(
+            new[] { "--mailto", "mailto:user@example.com?subject=Hello%20there" }).ToArray();
+
+        using var first = SingleInstanceService.TryAcquire(profileArgs)!;
+        Assert.NotNull(first);
+
+        string[]? received = null;
+        using var activated = new ManualResetEventSlim(false);
+        first.ListenForActivation(args =>
+        {
+            received = args;
+            activated.Set();
+        });
+
+        Assert.Null(SingleInstanceService.TryAcquire(activationArgs));
+        Assert.True(activated.Wait(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken),
+            "the running instance did not receive the second launch payload");
+        Assert.Equal(activationArgs, received);
+    }
 }

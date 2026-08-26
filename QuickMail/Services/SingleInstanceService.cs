@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using System.Threading;
 
 namespace QuickMail.Services;
@@ -19,18 +20,20 @@ public sealed class SingleInstanceService : IDisposable
     private readonly EventWaitHandle _activateRequested;
     private readonly EventWaitHandle _activationAcknowledged;
     private readonly string _ownerFile;
+    private readonly string _activationFile;
     private RegisteredWaitHandle? _waitRegistration;
     private bool _disposed;
 
     public sealed record ExistingInstanceInfo(int ProcessId, long StartTimeUtcTicks);
 
     private SingleInstanceService(Mutex mutex, EventWaitHandle activateRequested,
-        EventWaitHandle activationAcknowledged, string ownerFile)
+        EventWaitHandle activationAcknowledged, string ownerFile, string activationFile)
     {
         _mutex = mutex;
         _activateRequested = activateRequested;
         _activationAcknowledged = activationAcknowledged;
         _ownerFile = ownerFile;
+        _activationFile = activationFile;
     }
 
     /// <summary>
@@ -60,6 +63,7 @@ public sealed class SingleInstanceService : IDisposable
         if (!createdNew)
         {
             mutex.Dispose();
+            WriteActivationRequest(ActivationFileName(key), args);
             if (timeout is null)
             {
                 SignalExistingInstance(key);
@@ -74,8 +78,11 @@ public sealed class SingleInstanceService : IDisposable
         var activateRequested = new EventWaitHandle(false, EventResetMode.AutoReset, ActivateEventName(key));
         var activationAcknowledged = new EventWaitHandle(false, EventResetMode.AutoReset, AcknowledgeEventName(key));
         var ownerFile = OwnerFileName(key);
+        var activationFile = ActivationFileName(key);
+        TryDelete(activationFile); // discard payload left by a process which no longer owns the mutex
         WriteOwner(ownerFile);
-        return new SingleInstanceService(mutex, activateRequested, activationAcknowledged, ownerFile);
+        return new SingleInstanceService(mutex, activateRequested, activationAcknowledged,
+            ownerFile, activationFile);
     }
 
     /// <summary>
@@ -83,6 +90,14 @@ public sealed class SingleInstanceService : IDisposable
     /// thread-pool thread; the caller is responsible for marshaling to the UI thread.
     /// </summary>
     public void ListenForActivation(Action onActivateRequested)
+        => ListenForActivation(_ => onActivateRequested());
+
+    /// <summary>
+    /// Starts listening for activation signals and supplies the command line from the later
+    /// launch. This lets protocol activations such as <c>mailto:</c> reach the already-running
+    /// instance instead of merely bringing its window to the foreground.
+    /// </summary>
+    public void ListenForActivation(Action<string[]> onActivateRequested)
     {
         _waitRegistration ??= ThreadPool.RegisterWaitForSingleObject(
             _activateRequested,
@@ -92,7 +107,7 @@ public sealed class SingleInstanceService : IDisposable
                 {
                     // The caller must synchronously marshal to the UI thread. Only acknowledge
                     // after that work returns, otherwise a frozen dispatcher would look healthy.
-                    onActivateRequested();
+                    onActivateRequested(ReadActivationRequest(_activationFile));
                     _activationAcknowledged.Set();
                 }
                 catch
@@ -105,17 +120,6 @@ public sealed class SingleInstanceService : IDisposable
             executeOnlyOnce: false);
     }
 
-    // Design note (issue #253): the activation signal is a bare auto-reset event that carries no
-    // payload — it tells the running instance "come to the foreground", nothing more. A second
-    // launch that arrives with toast-activation arguments (open a specific message) therefore
-    // brings the window forward but drops the account/folder/message deep-link. This is a
-    // deliberately accepted trade-off, not a bug: the case only occurs when the running instance's
-    // in-process toast COM registration has failed AND a stale toast survives to COM-launch a
-    // second exe — otherwise activation is delivered in-process and never reaches this path.
-    // Forwarding the payload would require real inter-process data transfer (e.g. a named pipe
-    // carrying the command line) on the single-instance/startup path, which this app has a history
-    // of hangs and zombie processes on; the low likelihood does not justify that added surface.
-    // If this is ever revisited, this method (and ActivateEventName) is the seam to extend.
     private static void SignalExistingInstance(string key)
     {
         try
@@ -153,6 +157,46 @@ public sealed class SingleInstanceService : IDisposable
     private static string AcknowledgeEventName(string key) => $@"Local\QuickMail-{key}-acknowledge";
     private static string OwnerFileName(string key) =>
         Path.Combine(Path.GetTempPath(), $"EudoraQuickMail-{key}.owner");
+    private static string ActivationFileName(string key) =>
+        Path.Combine(Path.GetTempPath(), $"EudoraQuickMail-{key}.activation.json");
+
+    private static void WriteActivationRequest(string path, string[] args)
+    {
+        // A same-directory replace is atomic, so the owner never observes half-written JSON.
+        var temporary = path + "." + Environment.ProcessId + ".tmp";
+        try
+        {
+            File.WriteAllText(temporary, JsonSerializer.Serialize(args));
+            File.Move(temporary, path, overwrite: true);
+        }
+        catch
+        {
+            TryDelete(temporary);
+            // The activation event still restores the existing window; only the optional
+            // command payload is lost if the temporary directory cannot be written.
+        }
+    }
+
+    private static string[] ReadActivationRequest(string path)
+    {
+        try
+        {
+            var args = JsonSerializer.Deserialize<string[]>(File.ReadAllText(path)) ?? [];
+            TryDelete(path);
+            return args;
+        }
+        catch
+        {
+            TryDelete(path);
+            return [];
+        }
+    }
+
+    private static void TryDelete(string path)
+    {
+        try { File.Delete(path); }
+        catch { }
+    }
 
     private static void WriteOwner(string path)
     {
@@ -266,5 +310,6 @@ public sealed class SingleInstanceService : IDisposable
             if (owner?.ProcessId == Environment.ProcessId) File.Delete(_ownerFile);
         }
         catch { }
+        TryDelete(_activationFile);
     }
 }
