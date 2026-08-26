@@ -231,7 +231,7 @@ public class GraphMailService : IMailService, IConnectionProbe
         // and any path that yields a slightly different folder/id representation shows the SAME message
         // twice. Omitting it here is what caused duplicate rows in All Mail (#366).
         var path = $"/me/mailFolders/{folderName}/messages?$top={top}&$orderby=receivedDateTime desc" +
-                   "&$select=id,internetMessageId,subject,from,toRecipients,receivedDateTime,isRead,bodyPreview,hasAttachments,flag";
+                   "&$select=id,internetMessageId,subject,from,toRecipients,ccRecipients,bccRecipients,receivedDateTime,isRead,bodyPreview,hasAttachments,flag";
         if (since.HasValue)
             path += $"&$filter=receivedDateTime ge {since.Value.ToUniversalTime():yyyy-MM-ddTHH:mm:ssZ}";
 
@@ -246,7 +246,7 @@ public class GraphMailService : IMailService, IConnectionProbe
         Guid accountId, string folderName, string messageId, CancellationToken ct = default)
     {
         var path = $"/me/messages/{messageId}" +
-                   "?$select=id,subject,body,from,toRecipients,ccRecipients,replyTo,internetMessageId,receivedDateTime,isRead,hasAttachments" +
+                   "?$select=id,subject,body,from,toRecipients,ccRecipients,bccRecipients,replyTo,internetMessageId,receivedDateTime,isRead,hasAttachments" +
                    "&$expand=attachments($select=id,name,contentType,size,isInline)";
         var m = await _client.GetAsync<GraphMessage>(Account(accountId), path, GraphHeaders.ImmutableId, ct)
             ?? throw new InvalidOperationException($"Graph message {messageId} not found.");
@@ -501,6 +501,8 @@ public class GraphMailService : IMailService, IConnectionProbe
         InternetMessageId = m.InternetMessageId ?? string.Empty,
         From = m.From?.EmailAddress?.AsHeaderString() ?? string.Empty,
         To = JoinRecipients(m.ToRecipients),
+        Cc = JoinRecipients(m.CcRecipients),
+        Bcc = JoinRecipients(m.BccRecipients),
         Subject = m.Subject ?? "(no subject)",
         Date = m.ReceivedDateTime,
         IsRead          = m.IsRead ?? false,
@@ -530,6 +532,7 @@ public class GraphMailService : IMailService, IConnectionProbe
             From = m.From?.EmailAddress?.AsHeaderString() ?? string.Empty,
             To = JoinRecipients(m.ToRecipients),
             Cc = JoinRecipients(m.CcRecipients),
+            Bcc = JoinRecipients(m.BccRecipients),
             ReplyTo = JoinRecipients(m.ReplyTo),
             Subject = m.Subject ?? "(no subject)",
             Date = m.ReceivedDateTime,

@@ -438,6 +438,7 @@ public class ImapMailService : IMailService, IChangeNotifier, IConnectionProbe
                 From          = FormatAddressList(s.Envelope?.From),
                 To            = FormatAddressList(s.Envelope?.To),
                 Cc            = FormatAddressList(s.Envelope?.Cc),
+                Bcc           = FormatAddressList(s.Envelope?.Bcc),
                 ReplyTo       = FormatAddressList(s.Envelope?.ReplyTo),
                 Subject       = s.Envelope?.Subject ?? "(no subject)",
                 Date          = s.Envelope?.Date ?? DateTimeOffset.MinValue,
@@ -1767,6 +1768,8 @@ public class ImapMailService : IMailService, IChangeNotifier, IConnectionProbe
             // Gmail rows ambiguous and, more importantly, produced unusable FROM rule templates.
             From        = FormatAddressList(s.Envelope?.From),
             To          = FormatAddressList(s.Envelope?.To),
+            Cc          = FormatAddressList(s.Envelope?.Cc),
+            Bcc         = FormatAddressList(s.Envelope?.Bcc),
             Subject     = s.Envelope?.Subject ?? "(no subject)",
             Date        = s.Envelope?.Date ?? DateTimeOffset.MinValue,
             IsRead         = (s.Flags & MessageFlags.Seen)     != 0,

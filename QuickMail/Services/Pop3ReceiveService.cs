@@ -137,6 +137,7 @@ public sealed class Pop3ReceiveService : IPop3ReceiveService
             From = message.From.ToString(),
             To = message.To.ToString(),
             Cc = message.Cc.ToString(),
+            Bcc = message.Bcc.ToString(),
             ReplyTo = message.ReplyTo.ToString(),
             Subject = message.Subject ?? "(no subject)",
             Date = message.Date == DateTimeOffset.MinValue ? DateTimeOffset.UtcNow : message.Date,

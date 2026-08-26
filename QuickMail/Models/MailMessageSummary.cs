@@ -38,6 +38,11 @@ public partial class MailMessageSummary : ObservableObject
     [ObservableProperty]
     private string _from = string.Empty;
     public string To { get; set; } = string.Empty;
+    /// <summary>Carbon-copy recipients. Populated on message details and on live server summaries
+    /// when the backend supplies the envelope; cached summary-only rows may leave it empty.</summary>
+    public string Cc { get; set; } = string.Empty;
+    /// <summary>Blind-carbon-copy recipients when the source exposes them (normally sent mail).</summary>
+    public string Bcc { get; set; } = string.Empty;
     public string Subject { get; set; } = string.Empty;
     public DateTimeOffset Date { get; set; }
 

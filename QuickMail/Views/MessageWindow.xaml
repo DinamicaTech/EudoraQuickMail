@@ -136,46 +136,55 @@
                 BorderBrush="{DynamicResource Theme.Border}"
                 Padding="8,6,8,6">
             <StackPanel>
-                <TextBox x:Name="SubjectField"
-                         Text="{Binding MessageDetail.Subject, FallbackValue='', Mode=OneWay}"
-                         IsReadOnly="True" IsReadOnlyCaretVisible="True"
-                         BorderThickness="0" Background="Transparent"
-                         FontWeight="SemiBold" TextWrapping="Wrap"
-                         AutomationProperties.Name="Subject"/>
-                <TextBox x:Name="FromField"
-                         Text="{Binding MessageDetail.From, FallbackValue='', Mode=OneWay}"
-                         IsReadOnly="True" IsReadOnlyCaretVisible="True"
-                         BorderThickness="0" Background="Transparent"
-                         Margin="0,2,0,0"
-                         AutomationProperties.Name="From"/>
-                <TextBox x:Name="ToField"
-                         Text="{Binding MessageDetail.To, FallbackValue='', Mode=OneWay}"
-                         IsReadOnly="True" IsReadOnlyCaretVisible="True"
-                         BorderThickness="0" Background="Transparent"
-                         AutomationProperties.Name="To"/>
-                <TextBox x:Name="CcField"
-                         Text="{Binding MessageDetail.Cc, FallbackValue='', Mode=OneWay}"
-                         IsReadOnly="True" IsReadOnlyCaretVisible="True"
-                         BorderThickness="0" Background="Transparent"
-                         AutomationProperties.Name="Cc">
-                    <TextBox.Style>
-                        <Style TargetType="TextBox">
-                            <Style.Triggers>
-                                <DataTrigger Binding="{Binding MessageDetail.Cc}" Value="">
-                                    <Setter Property="Visibility" Value="Collapsed"/>
-                                </DataTrigger>
-                                <DataTrigger Binding="{Binding MessageDetail.Cc}" Value="{x:Null}">
-                                    <Setter Property="Visibility" Value="Collapsed"/>
-                                </DataTrigger>
-                            </Style.Triggers>
-                        </Style>
-                    </TextBox.Style>
-                </TextBox>
-                <TextBox x:Name="DateField"
-                         Text="{Binding MessageDetail.Date, StringFormat='{}{0:f}', FallbackValue='', Mode=OneWay}"
-                         IsReadOnly="True" IsReadOnlyCaretVisible="True"
-                         BorderThickness="0" Background="Transparent"
-                         AutomationProperties.Name="Date"/>
+                <DockPanel>
+                    <TextBlock Text="Subject:" Width="58" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                    <TextBox x:Name="SubjectField" Text="{Binding MessageDetail.Subject, FallbackValue='', Mode=OneWay}"
+                             IsReadOnly="True" IsReadOnlyCaretVisible="True" BorderThickness="0"
+                             Background="Transparent" FontWeight="SemiBold" TextWrapping="Wrap"
+                             AutomationProperties.Name="Subject"/>
+                </DockPanel>
+                <DockPanel Margin="0,2,0,0">
+                    <TextBlock Text="From:" Width="58" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                    <TextBox x:Name="FromField" Text="{Binding MessageDetail.From, FallbackValue='', Mode=OneWay}"
+                             IsReadOnly="True" IsReadOnlyCaretVisible="True" TextWrapping="Wrap"
+                             BorderThickness="0" Background="Transparent" AutomationProperties.Name="From"/>
+                </DockPanel>
+                <DockPanel>
+                    <TextBlock Text="To:" Width="58" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                    <TextBox x:Name="ToField" Text="{Binding MessageDetail.To, FallbackValue='', Mode=OneWay}"
+                             IsReadOnly="True" IsReadOnlyCaretVisible="True" TextWrapping="Wrap"
+                             BorderThickness="0" Background="Transparent" AutomationProperties.Name="To"/>
+                </DockPanel>
+                <DockPanel>
+                    <DockPanel.Style>
+                        <Style TargetType="DockPanel"><Style.Triggers>
+                            <DataTrigger Binding="{Binding MessageDetail.Cc}" Value=""><Setter Property="Visibility" Value="Collapsed"/></DataTrigger>
+                            <DataTrigger Binding="{Binding MessageDetail.Cc}" Value="{x:Null}"><Setter Property="Visibility" Value="Collapsed"/></DataTrigger>
+                        </Style.Triggers></Style>
+                    </DockPanel.Style>
+                    <TextBlock Text="CC:" Width="58" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                    <TextBox x:Name="CcField" Text="{Binding MessageDetail.Cc, FallbackValue='', Mode=OneWay}"
+                             IsReadOnly="True" IsReadOnlyCaretVisible="True" TextWrapping="Wrap"
+                             BorderThickness="0" Background="Transparent" AutomationProperties.Name="Cc"/>
+                </DockPanel>
+                <DockPanel>
+                    <DockPanel.Style>
+                        <Style TargetType="DockPanel"><Style.Triggers>
+                            <DataTrigger Binding="{Binding MessageDetail.Bcc}" Value=""><Setter Property="Visibility" Value="Collapsed"/></DataTrigger>
+                            <DataTrigger Binding="{Binding MessageDetail.Bcc}" Value="{x:Null}"><Setter Property="Visibility" Value="Collapsed"/></DataTrigger>
+                        </Style.Triggers></Style>
+                    </DockPanel.Style>
+                    <TextBlock Text="BCC:" Width="58" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                    <TextBox Text="{Binding MessageDetail.Bcc, FallbackValue='', Mode=OneWay}"
+                             IsReadOnly="True" IsReadOnlyCaretVisible="True" TextWrapping="Wrap"
+                             BorderThickness="0" Background="Transparent" AutomationProperties.Name="Bcc"/>
+                </DockPanel>
+                <DockPanel>
+                    <TextBlock Text="Date:" Width="58" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                    <TextBox x:Name="DateField" Text="{Binding MessageDetail.Date, StringFormat='{}{0:f}', FallbackValue='', Mode=OneWay}"
+                             IsReadOnly="True" IsReadOnlyCaretVisible="True" BorderThickness="0"
+                             Background="Transparent" AutomationProperties.Name="Date"/>
+                </DockPanel>
 
                 <!-- Attachments -->
                 <ListBox x:Name="AttachmentList"

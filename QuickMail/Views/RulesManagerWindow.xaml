@@ -198,10 +198,18 @@
                              AutomationProperties.HelpText="e.g., manager@company.com or just company.com"/>
 
                     <!-- To condition -->
-                    <CheckBox Content="To"
-                              IsChecked="{Binding IsToEnabled}"
-                              Style="{StaticResource RuleCheckBox}"
-                              AutomationProperties.Name="Use To condition"/>
+                    <StackPanel Orientation="Horizontal">
+                        <CheckBox Content="To"
+                                  IsChecked="{Binding IsToEnabled}"
+                                  Style="{StaticResource RuleCheckBox}"
+                                  AutomationProperties.Name="Use To condition"/>
+                        <CheckBox Content="Also CC/BCC"
+                                  Margin="18,0,0,0"
+                                  VerticalAlignment="Center"
+                                  IsEnabled="{Binding IsToEnabled}"
+                                  IsChecked="{Binding SelectedRule.AlsoCcBcc, Mode=TwoWay}"
+                                  AutomationProperties.Name="Also search CC and BCC recipients"/>
+                    </StackPanel>
                     <TextBox Text="{Binding SelectedRule.ToContains, UpdateSourceTrigger=PropertyChanged}"
                              Style="{StaticResource RuleTextBox}"
                              IsReadOnly="{Binding IsToEnabled, Converter={StaticResource InverseBoolConverter}, FallbackValue=True}"

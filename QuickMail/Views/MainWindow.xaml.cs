@@ -4696,7 +4696,7 @@ public partial class MainWindow : Window
         var (title, sections) = MessagePropertiesBuilder.Build(summary, detail,
             _vm.Accounts.FirstOrDefault(a => a.Id == summary.AccountId)?.AccountLabel ?? "(unknown)");
         var headers = string.IsNullOrWhiteSpace(detail.RawHeaders)
-            ? $"From: {detail.From}\r\nTo: {detail.To}\r\nCc: {detail.Cc}\r\nReply-To: {detail.ReplyTo}\r\nDate: {detail.Date:R}\r\nSubject: {detail.Subject}\r\nMessage-ID: {detail.InternetMessageId}"
+            ? $"From: {detail.From}\r\nTo: {detail.To}\r\nCc: {detail.Cc}\r\nBcc: {detail.Bcc}\r\nReply-To: {detail.ReplyTo}\r\nDate: {detail.Date:R}\r\nSubject: {detail.Subject}\r\nMessage-ID: {detail.InternetMessageId}"
             : detail.RawHeaders.TrimEnd();
         var complete = headers + "\r\n\r\n" +
             (!string.IsNullOrWhiteSpace(detail.HtmlBody) ? detail.HtmlBody : detail.PlainTextBody);
@@ -4718,6 +4718,11 @@ public partial class MainWindow : Window
             var sender = await _vm.EnsureSenderAddressAsync(message);
             var detail = await _localStore.LoadDetailAsync(
                 message.AccountId, message.FolderName, message.MessageId);
+            if (detail != null)
+            {
+                message.Cc = detail.Cc;
+                message.Bcc = detail.Bcc;
+            }
             var body = !string.IsNullOrWhiteSpace(detail?.PlainTextBody)
                 ? detail.PlainTextBody
                 : detail?.HtmlBody;
@@ -4746,6 +4751,11 @@ public partial class MainWindow : Window
     {
         var detail = await _localStore.LoadDetailAsync(
             message.AccountId, message.FolderName, message.MessageId);
+        if (detail != null)
+        {
+            message.Cc = detail.Cc;
+            message.Bcc = detail.Bcc;
+        }
         return !string.IsNullOrWhiteSpace(detail?.PlainTextBody)
             ? detail.PlainTextBody
             : detail?.HtmlBody;

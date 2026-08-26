@@ -1,5 +1,5 @@
-// Deviation from spec: MailMessageSummary does not carry Cc, ReplyTo, MessageId, or Size.
-// Those fields are on MailMessageDetail only. When detail is null the rows show "(not loaded)".
+// ReplyTo and full content fields are available only on MailMessageDetail. When detail is null the
+// corresponding rows show "(not loaded)".
 // RawHeaders does not exist on MailMessageDetail so the raw-headers expander is never shown.
 
 using System.Collections.Generic;
@@ -17,6 +17,7 @@ public static class MessagePropertiesBuilder
             new("From",       NoneIfBlank(summary.From)),
             new("To",         NoneIfBlank(summary.To)),
             new("Cc",         detail is not null ? NoneIfBlank(detail.Cc) : "(not loaded)"),
+            new("Bcc",        detail is not null ? NoneIfBlank(detail.Bcc) : "(not loaded)"),
             new("Reply-To",   detail is not null ? NoneIfBlank(detail.ReplyTo) : "(not loaded)"),
             new("Subject",    NoneIfBlank(summary.Subject)),
             new("Date",       summary.Date.ToLocalTime().ToString("f")),

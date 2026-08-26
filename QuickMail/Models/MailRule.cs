@@ -65,6 +65,9 @@ public class MailRule
     /// <summary>Case-insensitive substring match against MailMessageSummary.To.</summary>
     public string? ToContains { get; set; }
 
+    /// <summary>When true, the active To condition also searches CC and BCC recipients.</summary>
+    public bool AlsoCcBcc { get; set; }
+
     /// <summary>When true, the SubjectContains condition is active.</summary>
     public bool UseSubjectCondition { get; set; }
 

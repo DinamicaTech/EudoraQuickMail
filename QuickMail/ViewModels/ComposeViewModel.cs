@@ -1158,6 +1158,7 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
         AccountId = accountId,
         To = detail.To,
         Cc = detail.Cc,
+        Bcc = detail.Bcc,
         Subject = detail.Subject,
         Body = string.IsNullOrEmpty(detail.PlainTextBody) && !string.IsNullOrEmpty(detail.HtmlBody)
             ? HtmlStripper.ToPlainText(detail.HtmlBody)

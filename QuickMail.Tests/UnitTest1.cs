@@ -674,6 +674,36 @@ public class LocalStoreServiceTests
     }
 
     [Fact]
+    public async Task MessageDetail_PersistsCcAndBcc_ForPreviewAndRules()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), $"QuickMailTests-{Guid.NewGuid():N}");
+        var store = new LocalStoreService(new ProfileContext(tempDir));
+        store.Initialize();
+        var accountId = Guid.NewGuid();
+        await store.UpsertSummariesAsync([new MailMessageSummary
+        {
+            MessageId = "recipients", AccountId = accountId, FolderName = "In",
+            From = "sender@example.com", To = "primary@example.com", Subject = "Test",
+            Date = DateTimeOffset.UtcNow,
+        }]);
+        await store.UpsertDetailAsync(new MailMessageDetail
+        {
+            MessageId = "recipients", AccountId = accountId, FolderName = "In",
+            To = "primary@example.com", Cc = "copy@t-innova.com", Bcc = "blind@t-innova.com",
+            PlainTextBody = "Body",
+        });
+
+        var detail = await store.LoadDetailAsync(accountId, "In", "recipients");
+        Assert.NotNull(detail);
+        Assert.Equal("copy@t-innova.com", detail.Cc);
+        Assert.Equal("blind@t-innova.com", detail.Bcc);
+        var matchData = await store.LoadRuleMatchDataAsync(
+            accountId, "In", ["recipients"], TestContext.Current.CancellationToken);
+        Assert.Equal("copy@t-innova.com", matchData["recipients"].Cc);
+        Assert.Equal("blind@t-innova.com", matchData["recipients"].Bcc);
+    }
+
+    [Fact]
     public async Task DeleteSummariesAsync_RemovesAllRequestedIds()
     {
         // Covers §2.11: the chunked IN-list delete must remove every requested UID,

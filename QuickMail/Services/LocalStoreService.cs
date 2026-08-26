@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Text.RegularExpressions;
 using System.Text.Json;
 using System.Threading.Tasks;
 using Microsoft.Data.Sqlite;
@@ -717,6 +718,7 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
                 folder_name TEXT    NOT NULL,
                 to_addr     TEXT    NOT NULL DEFAULT '',
                 cc          TEXT    NOT NULL DEFAULT '',
+                bcc         TEXT    NOT NULL DEFAULT '',
                 reply_to    TEXT    NOT NULL DEFAULT '',
                 plain_body  TEXT    NOT NULL DEFAULT '',
                 html_body   TEXT    NOT NULL DEFAULT '',
@@ -747,6 +749,7 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
         cmd.ExecuteNonQuery();
         RunMigration(conn, "ALTER TABLE MessageDetail ADD COLUMN calendar_ics TEXT DEFAULT NULL;");
         RunMigration(conn, "ALTER TABLE MessageDetail ADD COLUMN raw_headers TEXT NOT NULL DEFAULT '';");
+        RunMigration(conn, "ALTER TABLE MessageDetail ADD COLUMN bcc TEXT NOT NULL DEFAULT '';");
         RunMigration(conn, "ALTER TABLE MessageDetail ADD COLUMN draft_compose_mode INTEGER NOT NULL DEFAULT 0;");
         RunMigration(conn, "ALTER TABLE MessageDetail ADD COLUMN draft_spell_language TEXT NOT NULL DEFAULT '';");
         // Stable RFC 5322 Message-ID for collapsing duplicate copies across folders (issue #220).
@@ -1082,6 +1085,7 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
                     folder_name TEXT NOT NULL,
                     to_addr     TEXT NOT NULL DEFAULT '',
                     cc          TEXT NOT NULL DEFAULT '',
+                    bcc         TEXT NOT NULL DEFAULT '',
                     reply_to    TEXT NOT NULL DEFAULT '',
                     plain_body  TEXT NOT NULL DEFAULT '',
                     html_body   TEXT NOT NULL DEFAULT '',
@@ -1093,7 +1097,7 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
                     PRIMARY KEY (unique_id, account_id, folder_name)
                 );
                 INSERT INTO MessageDetail_v2
-                SELECT CAST(unique_id AS TEXT), account_id, folder_name, to_addr, cc,
+                SELECT CAST(unique_id AS TEXT), account_id, folder_name, to_addr, cc, bcc,
                        reply_to, plain_body, html_body, attachments_json, calendar_ics, raw_headers,
                        draft_compose_mode, draft_spell_language
                 FROM MessageDetail;
@@ -2309,6 +2313,8 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
 
     public async Task UpsertDetailAsync(MailMessageDetail detail)
     {
+        if (string.IsNullOrWhiteSpace(detail.Bcc))
+            detail.Bcc = ExtractHeaderValue(detail.RawHeaders, "Bcc");
         var attJson = detail.Attachments.Count > 0
             ? JsonSerializer.Serialize(detail.Attachments.Select(a => new { a.FileName, a.ContentType, a.FileSize, a.PartSpecifier, a.ContentId, a.IsInline }))
             : null;
@@ -2317,11 +2323,12 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
         await using var tx = await conn.BeginTransactionAsync();
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = """
-            INSERT INTO MessageDetail(unique_id, account_id, folder_name, to_addr, cc, reply_to, plain_body, html_body, attachments_json, calendar_ics, raw_headers, draft_compose_mode, draft_spell_language)
-            VALUES($uid, $aid, $fn, $to, $cc, $rt, $plain, $html, $attjson, $ics, $headers, $mode, $language)
+            INSERT INTO MessageDetail(unique_id, account_id, folder_name, to_addr, cc, bcc, reply_to, plain_body, html_body, attachments_json, calendar_ics, raw_headers, draft_compose_mode, draft_spell_language)
+            VALUES($uid, $aid, $fn, $to, $cc, $bcc, $rt, $plain, $html, $attjson, $ics, $headers, $mode, $language)
             ON CONFLICT(unique_id, account_id, folder_name) DO UPDATE SET
                 to_addr          = excluded.to_addr,
                 cc               = excluded.cc,
+                bcc              = excluded.bcc,
                 reply_to         = excluded.reply_to,
                 plain_body       = excluded.plain_body,
                 html_body        = excluded.html_body,
@@ -2336,6 +2343,7 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
         cmd.Parameters.AddWithValue("$fn",     detail.FolderName);
         cmd.Parameters.AddWithValue("$to",     detail.To);
         cmd.Parameters.AddWithValue("$cc",     detail.Cc);
+        cmd.Parameters.AddWithValue("$bcc",    detail.Bcc);
         cmd.Parameters.AddWithValue("$rt",     detail.ReplyTo);
         cmd.Parameters.AddWithValue("$plain",  detail.PlainTextBody);
         cmd.Parameters.AddWithValue("$html",   detail.HtmlBody);
@@ -2399,7 +2407,7 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
         // calendar event's source invite fails with "message not found" because the
         // INNER JOIN returns nothing.
         cmd.CommandText = """
-            SELECT d.to_addr, d.cc, d.reply_to, d.plain_body, d.html_body,
+            SELECT d.to_addr, d.cc, d.bcc, d.reply_to, d.plain_body, d.html_body,
                    s.from_disp, s.subject, s.date_ticks, s.is_read, d.attachments_json, d.calendar_ics, d.raw_headers,
                    d.draft_compose_mode, d.draft_spell_language, s.message_direction
             FROM MessageDetail d
@@ -2414,9 +2422,9 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
         if (!await r.ReadAsync()) return null;
 
         List<AttachmentModel> attachments = [];
-        if (!r.IsDBNull(9))
+        if (!r.IsDBNull(10))
         {
-            var json = r.GetString(9);
+            var json = r.GetString(10);
             try
             {
                 var metas = JsonSerializer.Deserialize<List<AttachmentMeta>>(json);
@@ -2434,14 +2442,18 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
             catch { /* corrupt json — ignore */ }
         }
 
-        var calendarIcs = r.IsDBNull(10) ? string.Empty : r.GetString(10);
-        var storedComposeMode = !r.IsDBNull(12) && Enum.IsDefined(typeof(ComposeMode), r.GetInt32(12))
-            ? (ComposeMode)r.GetInt32(12)
+        var calendarIcs = r.IsDBNull(11) ? string.Empty : r.GetString(11);
+        var storedComposeMode = !r.IsDBNull(13) && Enum.IsDefined(typeof(ComposeMode), r.GetInt32(13))
+            ? (ComposeMode)r.GetInt32(13)
             : ComposeMode.PlainText;
         // Drafts saved by builds predating draft_compose_mode have the default zero even when
         // html_body contains the authoritative editor document. Recover those existing drafts.
-        if (storedComposeMode == ComposeMode.PlainText && !string.IsNullOrWhiteSpace(r.GetString(4)))
+        if (storedComposeMode == ComposeMode.PlainText && !string.IsNullOrWhiteSpace(r.GetString(5)))
             storedComposeMode = ComposeMode.Html;
+
+        var rawHeaders = r.IsDBNull(12) ? string.Empty : r.GetString(12);
+        var bcc = r.IsDBNull(2) ? string.Empty : r.GetString(2);
+        if (string.IsNullOrWhiteSpace(bcc)) bcc = ExtractHeaderValue(rawHeaders, "Bcc");
 
         return new MailMessageDetail
         {
@@ -2450,21 +2462,71 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
             FolderName    = folderName,
             To            = r.GetString(0),
             Cc            = r.GetString(1),
-            ReplyTo       = r.GetString(2),
-            PlainTextBody = r.GetString(3),
-            HtmlBody      = r.GetString(4),
-            From          = r.IsDBNull(5) ? string.Empty : r.GetString(5),
-            Subject       = r.IsDBNull(6) ? "(no subject)" : r.GetString(6),
-            Date          = r.IsDBNull(7) ? DateTimeOffset.MinValue : new DateTimeOffset(r.GetInt64(7), TimeSpan.Zero),
-            IsRead        = !r.IsDBNull(8) && r.GetInt64(8) != 0,
+            Bcc           = bcc,
+            ReplyTo       = r.GetString(3),
+            PlainTextBody = r.GetString(4),
+            HtmlBody      = r.GetString(5),
+            From          = r.IsDBNull(6) ? string.Empty : r.GetString(6),
+            Subject       = r.IsDBNull(7) ? "(no subject)" : r.GetString(7),
+            Date          = r.IsDBNull(8) ? DateTimeOffset.MinValue : new DateTimeOffset(r.GetInt64(8), TimeSpan.Zero),
+            IsRead        = !r.IsDBNull(9) && r.GetInt64(9) != 0,
             Attachments   = attachments,
             CalendarIcs   = calendarIcs,
-            RawHeaders    = r.IsDBNull(11) ? string.Empty : r.GetString(11),
+            RawHeaders    = rawHeaders,
             DraftComposeMode = storedComposeMode,
-            DraftSpellLanguage = r.IsDBNull(13) ? string.Empty : r.GetString(13),
-            Direction      = r.IsDBNull(14) ? MessageDirection.Unknown : (MessageDirection)r.GetInt64(14),
+            DraftSpellLanguage = r.IsDBNull(14) ? string.Empty : r.GetString(14),
+            Direction      = r.IsDBNull(15) ? MessageDirection.Unknown : (MessageDirection)r.GetInt64(15),
             CalendarInvite = string.IsNullOrWhiteSpace(calendarIcs) ? null : IcsModel.Parse(calendarIcs),
         };
+    }
+
+    public async Task<IReadOnlyDictionary<string, RuleMatchData>> LoadRuleMatchDataAsync(
+        Guid accountId, string folderName, IReadOnlyCollection<string> messageIds,
+        CancellationToken ct = default)
+    {
+        if (messageIds.Count == 0)
+            return new Dictionary<string, RuleMatchData>(StringComparer.Ordinal);
+
+        var wanted = messageIds.ToHashSet(StringComparer.Ordinal);
+        var result = new Dictionary<string, RuleMatchData>(wanted.Count, StringComparer.Ordinal);
+        await using var conn = await OpenAsync();
+        await using var cmd = conn.CreateCommand();
+        // Reading the folder slice once is substantially cheaper than issuing one SELECT for every
+        // row when a rule includes BODY or "Also CC/BCC". Filtering the bounded result in memory
+        // also avoids SQLite's parameter-count limit for large folders.
+        cmd.CommandText = """
+            SELECT unique_id, cc, bcc, plain_body, html_body, raw_headers
+              FROM MessageDetail
+             WHERE account_id=$aid AND folder_name=$fn;
+            """;
+        cmd.Parameters.AddWithValue("$aid", accountId.ToString());
+        cmd.Parameters.AddWithValue("$fn", folderName);
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            var messageId = reader.GetString(0);
+            if (!wanted.Contains(messageId)) continue;
+            var plain = reader.IsDBNull(3) ? string.Empty : reader.GetString(3);
+            var html = reader.IsDBNull(4) ? string.Empty : reader.GetString(4);
+            var bcc = reader.IsDBNull(2) ? string.Empty : reader.GetString(2);
+            if (string.IsNullOrWhiteSpace(bcc))
+                bcc = ExtractHeaderValue(reader.IsDBNull(5) ? string.Empty : reader.GetString(5), "Bcc");
+            result[messageId] = new RuleMatchData(
+                string.IsNullOrWhiteSpace(plain) ? html : plain,
+                reader.IsDBNull(1) ? string.Empty : reader.GetString(1),
+                bcc);
+        }
+        return result;
+    }
+
+    private static string ExtractHeaderValue(string? rawHeaders, string headerName)
+    {
+        if (string.IsNullOrWhiteSpace(rawHeaders)) return string.Empty;
+        var match = Regex.Match(rawHeaders,
+            $@"(?im)^{Regex.Escape(headerName)}[ \t]*:[ \t]*(?<value>[^\r\n]*(?:\r?\n[ \t]+[^\r\n]*)*)",
+            RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(250));
+        return !match.Success ? string.Empty : Regex.Replace(match.Groups["value"].Value,
+            @"\r?\n[ \t]+", " ").Trim();
     }
 
     public async Task<HashSet<string>> GetAllMessageIdsAsync(Guid accountId, string folderName)

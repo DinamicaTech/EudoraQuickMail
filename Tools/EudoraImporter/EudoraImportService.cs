@@ -48,9 +48,9 @@ internal static class EudoraImportService
         insert.CommandText = """
             INSERT INTO messages
                 (source_mailbox, source_ordinal, mailbox, message_id, date_utc, from_addr,
-                 to_addr, cc_addr, subject, raw_headers, body_text, body_html, attachments_json, is_read)
+                 to_addr, cc_addr, bcc_addr, subject, raw_headers, body_text, body_html, attachments_json, is_read)
             VALUES ($source, $ordinal, $mailbox, $message_id, $date, $from,
-                    $to, $cc, $subject, $headers, $body, $html, $attachments, $read);
+                    $to, $cc, $bcc, $subject, $headers, $body, $html, $attachments, $read);
             """;
         var source = insert.Parameters.Add("$source", SqliteType.Text);
         var ordinal = insert.Parameters.Add("$ordinal", SqliteType.Integer);
@@ -60,6 +60,7 @@ internal static class EudoraImportService
         var from = insert.Parameters.Add("$from", SqliteType.Text);
         var to = insert.Parameters.Add("$to", SqliteType.Text);
         var cc = insert.Parameters.Add("$cc", SqliteType.Text);
+        var bcc = insert.Parameters.Add("$bcc", SqliteType.Text);
         var subject = insert.Parameters.Add("$subject", SqliteType.Text);
         var headers = insert.Parameters.Add("$headers", SqliteType.Text);
         var body = insert.Parameters.Add("$body", SqliteType.Text);
@@ -118,6 +119,7 @@ internal static class EudoraImportService
                 to.Value = ParsedOrRawAddress(message.To.ToString(), rawMessage,
                     "To", "Delivered-To", "X-Rcpt-To", "X-MDRcpt-To", "X-MDaemon-Deliver-To", "Apparently-To");
                 cc.Value = ParsedOrRawAddress(message.Cc.ToString(), rawMessage, "Cc");
+                bcc.Value = ParsedOrRawAddress(message.Bcc.ToString(), rawMessage, "Bcc");
                 headers.Value = ExtractRawHeaders(rawMessage);
                 if (string.IsNullOrWhiteSpace(extracted.PlainText) && string.IsNullOrWhiteSpace(extracted.Html))
                 {
@@ -325,7 +327,7 @@ internal static class EudoraImportService
                 id INTEGER PRIMARY KEY, source_mailbox TEXT NOT NULL, source_ordinal INTEGER NOT NULL,
                 mailbox TEXT NOT NULL, message_id TEXT NOT NULL DEFAULT '', date_utc TEXT,
                 from_addr TEXT NOT NULL DEFAULT '', to_addr TEXT NOT NULL DEFAULT '',
-                cc_addr TEXT NOT NULL DEFAULT '', subject TEXT NOT NULL DEFAULT '', raw_headers TEXT NOT NULL DEFAULT '',
+                cc_addr TEXT NOT NULL DEFAULT '', bcc_addr TEXT NOT NULL DEFAULT '', subject TEXT NOT NULL DEFAULT '', raw_headers TEXT NOT NULL DEFAULT '',
                 body_text TEXT NOT NULL DEFAULT '', body_html TEXT NOT NULL DEFAULT '',
                 attachments_json TEXT, is_read INTEGER NOT NULL DEFAULT 0,
                 UNIQUE(source_mailbox, source_ordinal)

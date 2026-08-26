@@ -200,7 +200,7 @@ public sealed class LocalMailService : IMailService
         return new MailMessageDetail
         {
             AccountId = accountId, FolderName = folder, MessageId = id, From = account.Username,
-            To = compose.To, Cc = compose.Cc, Subject = compose.Subject, Date = DateTimeOffset.UtcNow,
+            To = compose.To, Cc = compose.Cc, Bcc = compose.Bcc, Subject = compose.Subject, Date = DateTimeOffset.UtcNow,
             PlainTextBody = compose.Body, Preview = compose.Body.Length <= 240 ? compose.Body : compose.Body[..240],
             HtmlBody = compose.HtmlBody ?? string.Empty, DraftComposeMode = compose.Mode,
             DraftSpellLanguage = compose.SpellLanguage, IsRead = true,

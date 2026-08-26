@@ -106,7 +106,7 @@ public class RuleService : IRuleService
     private static string SemanticKey(MailRule r) => string.Join('\u001f',
         r.Name, r.IsEnabled, r.ApplyAutomatically, r.AlsoFilterOutMailbox,
         r.UseFromCondition, r.FromContains,
-        r.UseToCondition, r.ToContains,
+        r.UseToCondition, r.ToContains, r.AlsoCcBcc,
         r.UseSubjectCondition, r.SubjectContains,
         r.UseBodyCondition, r.BodyContains,
         r.MustHaveAttachments, r.Action, r.AlsoMarkAsRead, r.TargetFolder);
@@ -186,21 +186,16 @@ public class RuleService : IRuleService
             return (0, []);
         }
 
-        var bodies = new Dictionary<(Guid, string, string), string>();
-        if (enabledRules.Any(r => r.UseBodyCondition && !string.IsNullOrEmpty(r.BodyContains)))
-        {
-            foreach (var message in incoming)
-            {
-                var detail = await _store.LoadDetailAsync(message.AccountId, message.FolderName, message.MessageId);
-                bodies[(message.AccountId, message.FolderName, message.MessageId)] = detail is null
-                    ? message.Preview ?? string.Empty
-                    : string.IsNullOrWhiteSpace(detail.PlainTextBody) ? detail.HtmlBody ?? string.Empty : detail.PlainTextBody;
-            }
-        }
+        var needsMatchData = enabledRules.Any(r =>
+            (r.UseBodyCondition && !string.IsNullOrEmpty(r.BodyContains)) ||
+            (r.UseToCondition && r.AlsoCcBcc && !string.IsNullOrEmpty(r.ToContains)));
+        var matchData = needsMatchData
+            ? await LoadRuleMatchDataAsync(_store, incoming, ct)
+            : [];
         var bodiesDone = System.Diagnostics.Stopwatch.GetTimestamp();
         PerformanceLogService.Record("Rules: apply batch/load bodies",
             System.Diagnostics.Stopwatch.GetElapsedTime(started, bodiesDone),
-            perf + $"; enabled={enabledRules.Count}; bodies={bodies.Count}");
+            perf + $"; enabled={enabledRules.Count}; details={matchData.Count}");
 
         var affectedKeys = new HashSet<(string MessageId, Guid AccountId, string FolderName)>();
         var removedMessages = new List<MailMessageSummary>();
@@ -216,8 +211,11 @@ public class RuleService : IRuleService
                 continue;
             }
 
-            var matched = incoming.Where(m => MatchesRule(rule, m,
-                bodies.GetValueOrDefault((m.AccountId, m.FolderName, m.MessageId)))).ToList();
+            var matched = incoming.Where(m =>
+            {
+                matchData.TryGetValue((m.AccountId, m.FolderName, m.MessageId), out var data);
+                return MatchesRule(rule, m, data?.Body, data?.Cc, data?.Bcc);
+            }).ToList();
             LogService.Debug($"  Rule '{rule.Name}': {matched.Count} matched (action={rule.Action}, from='{rule.FromContains}', subject='{rule.SubjectContains}')");
             if (matched.Count > 0)
             {
@@ -278,27 +276,21 @@ public class RuleService : IRuleService
         var candidates = rule.AccountId is { } accountId
             ? messages.Where(m => m.AccountId == accountId).ToList()
             : messages;
-        var bodies = new Dictionary<(Guid, string, string), string>();
-        if (rule.UseBodyCondition && !string.IsNullOrWhiteSpace(rule.BodyContains))
-        {
-            foreach (var message in candidates)
-            {
-                ct.ThrowIfCancellationRequested();
-                var detail = await store.LoadDetailAsync(message.AccountId, message.FolderName, message.MessageId);
-                bodies[(message.AccountId, message.FolderName, message.MessageId)] = detail is null
-                    ? message.Preview ?? string.Empty
-                    : string.IsNullOrWhiteSpace(detail.PlainTextBody)
-                        ? detail.HtmlBody ?? string.Empty
-                        : detail.PlainTextBody;
-            }
-        }
+        var needsMatchData = (rule.UseBodyCondition && !string.IsNullOrWhiteSpace(rule.BodyContains)) ||
+                             (rule.UseToCondition && rule.AlsoCcBcc && !string.IsNullOrWhiteSpace(rule.ToContains));
+        var matchData = needsMatchData
+            ? await LoadRuleMatchDataAsync(store, candidates, ct)
+            : [];
 
-        var matched = candidates.Where(m => MatchesRule(rule, m,
-            bodies.GetValueOrDefault((m.AccountId, m.FolderName, m.MessageId)))).ToList();
+        var matched = candidates.Where(m =>
+        {
+            matchData.TryGetValue((m.AccountId, m.FolderName, m.MessageId), out var data);
+            return MatchesRule(rule, m, data?.Body, data?.Cc, data?.Bcc);
+        }).ToList();
         var matchDone = System.Diagnostics.Stopwatch.GetTimestamp();
         PerformanceLogService.Record("Rules: apply one/evaluate",
             System.Diagnostics.Stopwatch.GetElapsedTime(started, matchDone),
-            perf + $"; candidates={candidates.Count}; bodies={bodies.Count}; matched={matched.Count}");
+            perf + $"; candidates={candidates.Count}; details={matchData.Count}; matched={matched.Count}");
         if (matched.Count == 0)
         {
             PerformanceLogService.Record("Rules: apply one END",
@@ -324,7 +316,8 @@ public class RuleService : IRuleService
 
     // ── Condition Matching ──────────────────────────────────────────────────
 
-    private static bool MatchesRule(MailRule rule, MailMessageSummary msg, string? completeBody = null)
+    private static bool MatchesRule(MailRule rule, MailMessageSummary msg, string? completeBody = null,
+        string? storedCc = null, string? storedBcc = null)
     {
         var fromCandidate = msg.Direction == MessageDirection.Outgoing ? msg.To : msg.From;
         if (rule.UseFromCondition
@@ -332,10 +325,14 @@ public class RuleService : IRuleService
             && !MatchesText(fromCandidate, rule.FromContains))
             return false;
 
-        if (rule.UseToCondition
-            && !string.IsNullOrEmpty(rule.ToContains)
-            && !MatchesText(msg.To, rule.ToContains))
-            return false;
+        if (rule.UseToCondition && !string.IsNullOrEmpty(rule.ToContains))
+        {
+            var recipientCandidate = rule.AlsoCcBcc
+                ? string.Join(", ", new[] { msg.To, storedCc ?? msg.Cc, storedBcc ?? msg.Bcc }
+                    .Where(value => !string.IsNullOrWhiteSpace(value)))
+                : msg.To;
+            if (!MatchesText(recipientCandidate, rule.ToContains)) return false;
+        }
 
         if (rule.UseSubjectCondition
             && !string.IsNullOrEmpty(rule.SubjectContains)
@@ -351,6 +348,23 @@ public class RuleService : IRuleService
             return false;
 
         return true;
+    }
+
+    private static async Task<Dictionary<(Guid AccountId, string FolderName, string MessageId), RuleMatchData>>
+        LoadRuleMatchDataAsync(ILocalStoreService store, IEnumerable<MailMessageSummary> messages,
+            CancellationToken ct)
+    {
+        var result = new Dictionary<(Guid, string, string), RuleMatchData>();
+        foreach (var group in messages.GroupBy(message => (message.AccountId, message.FolderName)))
+        {
+            ct.ThrowIfCancellationRequested();
+            var ids = group.Select(message => message.MessageId).Distinct(StringComparer.Ordinal).ToArray();
+            var folderData = await store.LoadRuleMatchDataAsync(
+                group.Key.AccountId, group.Key.FolderName, ids, ct);
+            foreach (var pair in folderData)
+                result[(group.Key.AccountId, group.Key.FolderName, pair.Key)] = pair.Value;
+        }
+        return result;
     }
 
     private static bool MatchesText(string value, string criterion)

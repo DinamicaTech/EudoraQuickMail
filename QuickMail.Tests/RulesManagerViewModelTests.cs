@@ -83,6 +83,30 @@ public class RulesManagerViewModelTests
     }
 
     [Fact]
+    public void CompatibleRules_ToWithAlsoCcBcc_MatchesMessageCc()
+    {
+        var matching = new MailRule
+        {
+            Name = "T-Innova", UseFromCondition = false, UseToCondition = true,
+            ToContains = "t-innova.com", AlsoCcBcc = true,
+        };
+        var unrelated = new MailRule
+        {
+            Name = "Other", UseFromCondition = false, UseToCondition = true,
+            ToContains = "other.example",
+        };
+        var message = MakeMsg();
+        message.Cc = "Info T-Innova <info@t-innova.com>";
+        var vm = new RulesManagerViewModel(
+            new StubRuleService { LoadedRules = [matching, unrelated] }, accounts: [],
+            selectedMessagesForTest: [message]);
+
+        Assert.False(vm.SeeAllFilters);
+        Assert.Equal(1, vm.VisibleRuleCount);
+        Assert.Same(matching, vm.SelectedRule);
+    }
+
+    [Fact]
     public void Constructor_WithPrefillTemplate_AddsAndSelectsTemplate()
     {
         var template = new MailRule { Name = "From Message", FromContains = "sender@example.com" };

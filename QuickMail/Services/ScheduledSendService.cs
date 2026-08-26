@@ -47,7 +47,7 @@ public sealed class ScheduledSendService : IDisposable
             await _store.SaveLocalMessageAsync(new MailMessageDetail
             {
                 AccountId = message.AccountId, FolderName = "Scheduled", MessageId = localId,
-                From = account.Username, To = message.To, Cc = message.Cc, Subject = message.Subject,
+                From = account.Username, To = message.To, Cc = message.Cc, Bcc = message.Bcc, Subject = message.Subject,
                 Date = sendAtUtc, PlainTextBody = message.Body, HtmlBody = message.HtmlBody ?? string.Empty,
                 DraftComposeMode = message.Mode, DraftSpellLanguage = message.SpellLanguage,
                 Preview = message.Body.Length <= 240 ? message.Body : message.Body[..240], IsRead = true,
@@ -90,7 +90,7 @@ public sealed class ScheduledSendService : IDisposable
             await _store.SaveLocalMessageAsync(new MailMessageDetail
             {
                 AccountId = message.AccountId, FolderName = "Scheduled", MessageId = localMessageId,
-                From = account.Username, To = message.To, Cc = message.Cc, Subject = message.Subject,
+                From = account.Username, To = message.To, Cc = message.Cc, Bcc = message.Bcc, Subject = message.Subject,
                 Date = sendAtUtc, PlainTextBody = message.Body, HtmlBody = message.HtmlBody ?? string.Empty,
                 DraftComposeMode = message.Mode, DraftSpellLanguage = message.SpellLanguage,
                 Preview = message.Body.Length <= 240 ? message.Body : message.Body[..240], IsRead = true,

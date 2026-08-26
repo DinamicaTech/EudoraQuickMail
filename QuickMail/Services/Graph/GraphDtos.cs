@@ -113,6 +113,7 @@ internal sealed class GraphMessage
     [JsonPropertyName("from")] public GraphRecipient? From { get; set; }
     [JsonPropertyName("toRecipients")] public List<GraphRecipient>? ToRecipients { get; set; }
     [JsonPropertyName("ccRecipients")] public List<GraphRecipient>? CcRecipients { get; set; }
+    [JsonPropertyName("bccRecipients")] public List<GraphRecipient>? BccRecipients { get; set; }
     [JsonPropertyName("replyTo")] public List<GraphRecipient>? ReplyTo { get; set; }
     [JsonPropertyName("internetMessageId")] public string? InternetMessageId { get; set; }
     [JsonPropertyName("receivedDateTime")] public DateTimeOffset ReceivedDateTime { get; set; }

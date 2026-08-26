@@ -94,6 +94,7 @@ public class RuleServiceTests
                     IsEnabled = true,
                     FromContains = "boss@company.com",
                     ToContains = null,
+                    AlsoCcBcc = true,
                     SubjectContains = "URGENT",
                     BodyContains = "deadline",
                     MustHaveAttachments = true,
@@ -118,6 +119,7 @@ public class RuleServiceTests
             Assert.Equal(original[0].IsEnabled, loaded[0].IsEnabled);
             Assert.Equal(original[0].FromContains, loaded[0].FromContains);
             Assert.Null(loaded[0].ToContains);
+            Assert.True(loaded[0].AlsoCcBcc);
             Assert.Equal(original[0].SubjectContains, loaded[0].SubjectContains);
             Assert.Equal(original[0].BodyContains, loaded[0].BodyContains);
             Assert.Equal(original[0].MustHaveAttachments, loaded[0].MustHaveAttachments);
@@ -293,6 +295,71 @@ public class RuleServiceTests
 
         var result = svc.TestRule(rule, new[] { msg });
         Assert.Single(result);
+    }
+
+    [Theory]
+    [InlineData("CC")]
+    [InlineData("BCC")]
+    public void TestRule_ToWithAlsoCcBcc_MatchesSecondaryRecipient(string field)
+    {
+        var svc = CreateService(Path.GetTempPath());
+        var rule = new MailRule
+        {
+            UseToCondition = true,
+            ToContains = "t-innova.com",
+            AlsoCcBcc = true,
+        };
+        var msg = MakeMsg(to: "Moritz <moritz@egym.com>");
+        if (field == "CC") msg.Cc = "Info T-Innova <info@t-innova.com>";
+        else msg.Bcc = "Info T-Innova <info@t-innova.com>";
+
+        Assert.Single(svc.TestRule(rule, [msg]));
+    }
+
+    [Fact]
+    public void TestRule_ToWithoutAlsoCcBcc_DoesNotMatchCc()
+    {
+        var svc = CreateService(Path.GetTempPath());
+        var rule = new MailRule { UseToCondition = true, ToContains = "t-innova.com" };
+        var msg = MakeMsg(to: "Moritz <moritz@egym.com>");
+        msg.Cc = "Info T-Innova <info@t-innova.com>";
+
+        Assert.Empty(svc.TestRule(rule, [msg]));
+    }
+
+    [Fact]
+    public async Task ApplyRuleToMessages_ToWithAlsoCcBcc_UsesStoredCc()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), $"QuickMailRuleCc-{Guid.NewGuid():N}");
+        try
+        {
+            var store = new LocalStoreService(new ProfileContext(dir));
+            store.Initialize();
+            var accountId = Guid.NewGuid();
+            var message = MakeMsg(to: "Moritz <moritz@egym.com>", accountId: accountId, folderName: "In");
+            await store.UpsertSummariesAsync([message]);
+            await store.UpsertDetailAsync(new MailMessageDetail
+            {
+                MessageId = message.MessageId, AccountId = accountId, FolderName = "In",
+                To = message.To, Cc = "Info T-Innova <info@t-innova.com>", PlainTextBody = "Body",
+            });
+            var svc = new RuleService(new StubImapMailService(), store, dir);
+            var rule = new MailRule
+            {
+                UseToCondition = true, ToContains = "t-innova.com", AlsoCcBcc = true,
+                Action = RuleAction.MarkAsRead,
+            };
+
+            var result = await svc.ApplyRuleToMessagesAsync(
+                rule, [message], store, TestContext.Current.CancellationToken);
+
+            Assert.Equal(1, result.MatchedCount);
+        }
+        finally
+        {
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            if (Directory.Exists(dir)) Directory.Delete(dir, true);
+        }
     }
 
     [Fact]

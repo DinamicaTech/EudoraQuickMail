@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Threading;
 using System.Threading.Tasks;
 using QuickMail.Models;
 
@@ -90,6 +91,24 @@ public interface ILocalStoreService
 
     Task UpsertDetailAsync(MailMessageDetail detail);
     Task<MailMessageDetail?> LoadDetailAsync(Guid accountId, string folderName, string messageId);
+
+    /// <summary>Loads the body and secondary recipients needed while evaluating rules. The default
+    /// implementation keeps test/probe stores source-compatible; SQLite overrides it with one
+    /// folder-level query so a rule does not perform one database round-trip per message.</summary>
+    async Task<IReadOnlyDictionary<string, RuleMatchData>> LoadRuleMatchDataAsync(
+        Guid accountId, string folderName, IReadOnlyCollection<string> messageIds,
+        CancellationToken ct = default)
+    {
+        var result = new Dictionary<string, RuleMatchData>(StringComparer.Ordinal);
+        foreach (var messageId in messageIds)
+        {
+            ct.ThrowIfCancellationRequested();
+            var detail = await LoadDetailAsync(accountId, folderName, messageId);
+            if (detail is null) continue;
+            result[messageId] = RuleMatchData.From(detail);
+        }
+        return result;
+    }
 
     /// <summary>
     /// Returns the highest message key stored for this folder, or "0" if none. For the IMAP
@@ -200,4 +219,12 @@ public interface ILocalStoreService
 
     /// <summary>Persists the Graph delta cursor for an account+folder, replacing any existing value.</summary>
     Task SetDeltaTokenAsync(Guid accountId, string folderId, string deltaToken);
+}
+
+public sealed record RuleMatchData(string Body, string Cc, string Bcc)
+{
+    public static RuleMatchData From(MailMessageDetail detail) => new(
+        string.IsNullOrWhiteSpace(detail.PlainTextBody) ? detail.HtmlBody ?? string.Empty : detail.PlainTextBody,
+        detail.Cc ?? string.Empty,
+        detail.Bcc ?? string.Empty);
 }

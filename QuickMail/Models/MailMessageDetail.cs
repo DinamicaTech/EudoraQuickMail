@@ -4,7 +4,6 @@ namespace QuickMail.Models;
 
 public partial class MailMessageDetail : MailMessageSummary
 {
-    public string Cc { get; set; } = string.Empty;
     public string ReplyTo { get; set; } = string.Empty;
     // InternetMessageId (the RFC 5322 Message-ID, used for reply threading) is inherited from
     // MailMessageSummary, which now carries it for cross-folder duplicate collapse (issue #220).

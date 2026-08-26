@@ -264,7 +264,14 @@ public partial class RulesManagerViewModel : ObservableObject
     {
         if (rule.AccountId is { } accountId && accountId != message.AccountId) return false;
         if (rule.UseFromCondition && !Contains(message.From, rule.FromContains)) return false;
-        if (rule.UseToCondition && !Contains(message.To, rule.ToContains)) return false;
+        if (rule.UseToCondition)
+        {
+            var recipients = rule.AlsoCcBcc
+                ? string.Join(", ", new[] { message.To, message.Cc, message.Bcc }
+                    .Where(value => !string.IsNullOrWhiteSpace(value)))
+                : message.To;
+            if (!Contains(recipients, rule.ToContains)) return false;
+        }
         if (rule.UseSubjectCondition && !Contains(message.Subject, rule.SubjectContains)) return false;
         if (rule.UseBodyCondition && !Contains(completeBody ?? message.Preview, rule.BodyContains)) return false;
         return !rule.MustHaveAttachments || message.HasAttachments;

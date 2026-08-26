@@ -297,8 +297,8 @@ internal static class NativeProfileImportCommand
             FROM eudora.messages m JOIN FolderMap f ON f.original=m.mailbox;
 
             INSERT INTO MessageDetail
-                (unique_id,account_id,folder_name,to_addr,cc,reply_to,plain_body,html_body,attachments_json,calendar_ics,raw_headers)
-            SELECT {{importedId}},$aid,f.target,import_recipient(m.to_addr,m.mailbox,$recipient),m.cc_addr,'',m.body_text,m.body_html,m.attachments_json,NULL,m.raw_headers
+                (unique_id,account_id,folder_name,to_addr,cc,bcc,reply_to,plain_body,html_body,attachments_json,calendar_ics,raw_headers)
+            SELECT {{importedId}},$aid,f.target,import_recipient(m.to_addr,m.mailbox,$recipient),m.cc_addr,m.bcc_addr,'',m.body_text,m.body_html,m.attachments_json,NULL,m.raw_headers
             FROM eudora.messages m JOIN FolderMap f ON f.original=m.mailbox;
 
             INSERT INTO LocalMessageFts
