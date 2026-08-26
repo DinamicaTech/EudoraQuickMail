@@ -475,6 +475,14 @@ public partial class MainWindow : Window
                 {
                     LogService.Debug("[FOCUS]   → skipped (menu/toolbar has focus)");
                 }
+                else if (FolderList.IsKeyboardFocusWithin)
+                {
+                    // A mouse or keyboard folder selection rebuilds Messages asynchronously.
+                    // Keep focus in the tree so its incremental letter search remains available;
+                    // moving focus to the rebuilt grid here made the first typed letter operate on
+                    // messages instead of selecting the next matching folder.
+                    LogService.Debug("[FOCUS]   → skipped (folder tree has focus)");
+                }
                 else if (_vm.IsMessageOpen || _vm.IsMessageOpenInWindow)
                 {
                     // Reading pane is open (or a message window is open) — the message
@@ -1836,6 +1844,16 @@ public partial class MainWindow : Window
             : e.Key == Key.ImeProcessed
                 ? e.ImeProcessedKey
                 : e.Key;
+
+        // WPF reports AltGr as Ctrl+Alt on many European keyboard layouts. Do not let a
+        // character such as @ (AltGr+2 on Spanish keyboards) trigger the global pane shortcut
+        // and move focus away from the editor. Checking RightAlt preserves intentional
+        // Ctrl+Alt shortcuts made with the left Alt key; the text-entry guard also covers
+        // layouts/drivers that do not expose the synthetic RightAlt state reliably.
+        var isCtrlAlt = (modifiers & (ModifierKeys.Control | ModifierKeys.Alt))
+                        == (ModifierKeys.Control | ModifierKeys.Alt);
+        if (isCtrlAlt && (e.KeyboardDevice.IsKeyDown(Key.RightAlt) || IsTextEntryContext()))
+            return;
 
         // ── Tutorial interception (must run before all other handling) ────────────
         if (_tutorialVm?.IsActive == true)
@@ -5316,6 +5334,15 @@ public partial class MainWindow : Window
         _ => false
     };
 
+    /// <summary>
+    /// True when a Ctrl+Alt sequence belongs to a text editor rather than to MainWindow's
+    /// pane-navigation shortcuts. The compose tab includes a WebView2 editor, whose native child
+    /// window does not always expose its inner text control as WPF's FocusedElement.
+    /// </summary>
+    private bool IsTextEntryContext() =>
+        _vm.IsComposeTabActive ||
+        Keyboard.FocusedElement is TextBoxBase or PasswordBox or ComboBox { IsEditable: true };
+
     // Returns the index of the pane that currently holds keyboard focus:
     //   0 = Toolbar, 1 = Account list, 2 = Folder list,
     //   3 = Message list / Conversation tree, 4 = Reading pane (WebView2),
@@ -6663,7 +6690,7 @@ public partial class MainWindow : Window
                 await _vm.SelectFolderCommand.ExecuteAsync(listTab.Folder);
             if (closeInProgress)
                 await Dispatcher.InvokeAsync(FocusActiveTabStripItem, DispatcherPriority.Input);
-            else
+            else if (!FolderList.IsKeyboardFocusWithin)
                 FocusActiveMessagePanel();
             return;
         }
