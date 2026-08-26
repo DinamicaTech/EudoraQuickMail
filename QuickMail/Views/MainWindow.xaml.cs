@@ -3308,6 +3308,10 @@ public partial class MainWindow : Window
 
     private void MessageList_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
+        // A previous Ctrl/Shift click may have extended the selection without ever starting a
+        // drag.  Do not let that selection gesture leak into the next, otherwise an ordinary
+        // multi-message move can be mistaken for Shift+Drop and open the rules editor.
+        _messageDragModifiers = ModifierKeys.None;
         // Arm message dragging only when the press actually starts on a realized message row.
         // Header grippers and scrollbar thumbs are descendants of the ListView too; arming from
         // any arbitrary child is what stole their native drag gestures.
@@ -3316,12 +3320,14 @@ public partial class MainWindow : Window
         if (_messageDragArmed)
         {
             _messageDragStart = e.GetPosition(MessageList);
-            _messageDragModifiers = Keyboard.Modifiers;
         }
     }
 
-    private void MessageList_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e) =>
+    private void MessageList_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
         _messageDragArmed = false;
+        _messageDragModifiers = ModifierKeys.None;
+    }
 
     private void MessageList_PreviewMouseMove(object sender, MouseEventArgs e)
     {
@@ -3330,6 +3336,10 @@ public partial class MainWindow : Window
         if (Math.Abs(current.X - _messageDragStart.X) < SystemParameters.MinimumHorizontalDragDistance
             && Math.Abs(current.Y - _messageDragStart.Y) < SystemParameters.MinimumVerticalDragDistance) return;
         _messageDragArmed = false;
+        // Capture modifiers when the pointer has actually crossed the drag threshold, not on the
+        // preceding mouse-down.  The latter may merely be the Ctrl/Shift click used to build a
+        // multi-selection.
+        _messageDragModifiers = Keyboard.Modifiers & (ModifierKeys.Control | ModifierKeys.Shift);
         var selected = MessageList.SelectedItems.OfType<MailMessageSummary>().ToList();
         try { DragDrop.DoDragDrop(MessageList, selected, DragDropEffects.Move); }
         finally { _messageDragModifiers = ModifierKeys.None; }
