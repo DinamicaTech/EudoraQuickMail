@@ -149,6 +149,65 @@ public class RuleServiceTests
         finally { if (Directory.Exists(dir)) Directory.Delete(dir, true); }
     }
 
+    [Fact]
+    public void SaveOrUpdateQuickMoveRule_ReusesEquivalentFromRuleAndChangesDestination()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
+        try
+        {
+            var svc = CreateService(dir);
+            var id = Guid.NewGuid();
+            svc.SaveRules([new MailRule
+            {
+                Id = id, Name = "Existing", AccountId = null,
+                UseFromCondition = true, FromContains = "@example.com",
+                Action = RuleAction.MoveToFolder, TargetFolder = "Old", AlsoMarkAsRead = false,
+            }]);
+
+            var (rule, created) = svc.SaveOrUpdateQuickMoveRule(new MailRule
+            {
+                Name = "Replacement", AccountId = null,
+                UseFromCondition = true, FromContains = " @EXAMPLE.COM ",
+                Action = RuleAction.MoveToFolder, TargetFolder = "New", AlsoMarkAsRead = false,
+            });
+
+            Assert.False(created);
+            Assert.Equal(id, rule.Id);
+            Assert.Equal("New", rule.TargetFolder);
+            Assert.True(rule.AlsoMarkAsRead);
+            Assert.Single(svc.LoadRules());
+        }
+        finally { if (Directory.Exists(dir)) Directory.Delete(dir, true); }
+    }
+
+    [Fact]
+    public void SaveOrUpdateQuickMoveRule_DoesNotOverwriteRuleWithAdditionalConditions()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
+        try
+        {
+            var svc = CreateService(dir);
+            svc.SaveRules([new MailRule
+            {
+                Name = "Narrow rule", AccountId = null,
+                UseFromCondition = true, FromContains = "@example.com",
+                UseSubjectCondition = true, SubjectContains = "Invoice",
+                Action = RuleAction.MoveToFolder, TargetFolder = "Invoices",
+            }]);
+
+            var (_, created) = svc.SaveOrUpdateQuickMoveRule(new MailRule
+            {
+                Name = "Quick rule", AccountId = null,
+                UseFromCondition = true, FromContains = "@example.com",
+                Action = RuleAction.MoveToFolder, TargetFolder = "General",
+            });
+
+            Assert.True(created);
+            Assert.Equal(2, svc.LoadRules().Count);
+        }
+        finally { if (Directory.Exists(dir)) Directory.Delete(dir, true); }
+    }
+
     // ── TestRule — condition matching ───────────────────────────────────────
 
     [Fact]
@@ -160,6 +219,58 @@ public class RuleServiceTests
 
         var result = svc.TestRule(rule, new[] { msg });
         Assert.Single(result);
+    }
+
+    [Fact]
+    public void TestRule_FromConditionOnOutgoingMessageMatchesRecipient()
+    {
+        var svc = CreateService(Path.GetTempPath());
+        var rule = new MailRule { UseFromCondition = true, FromContains = "@customer.test" };
+        var msg = MakeMsg(from: "me@example.com", to: "Buyer <sales@customer.test>");
+        msg.Direction = MessageDirection.Outgoing;
+
+        var result = svc.TestRule(rule, new[] { msg });
+
+        Assert.Single(result);
+    }
+
+    [Fact]
+    public async Task AlsoFilterOut_DoesNotMakeManualRuleAutomatic()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
+        try
+        {
+            var svc = CreateService(dir);
+            svc.SaveRules([new MailRule
+            {
+                Name = "Manual both directions",
+                ApplyAutomatically = false,
+                AlsoFilterOutMailbox = true,
+                UseFromCondition = true,
+                FromContains = "alice",
+                Action = RuleAction.MarkAsRead,
+            }]);
+            var message = MakeMsg(from: "alice@example.com", isRead: false);
+
+            var result = await svc.ApplyAutomaticRulesAsync(
+                [message], message.AccountId, CancellationToken.None);
+
+            Assert.Equal(0, result.MatchedCount);
+            Assert.False(message.IsRead);
+        }
+        finally { if (Directory.Exists(dir)) Directory.Delete(dir, true); }
+    }
+
+    [Fact]
+    public void TestRule_FromContains_AcceptsEudoraWildcards()
+    {
+        var svc = CreateService(Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString()));
+        var rule = new MailRule { UseFromCondition = true, FromContains = "*amazon.es" };
+
+        var matched = svc.TestRule(rule,
+            [MakeMsg(from: "Amazon Marketplace <shipment@orders.amazon.es>")]);
+
+        Assert.Single(matched);
     }
 
     [Fact]

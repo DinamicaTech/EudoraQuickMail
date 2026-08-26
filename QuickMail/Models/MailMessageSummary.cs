@@ -3,6 +3,13 @@ using CommunityToolkit.Mvvm.ComponentModel;
 
 namespace QuickMail.Models;
 
+public enum MessageDirection
+{
+    Unknown = 0,
+    Incoming = 1,
+    Outgoing = 2,
+}
+
 public partial class MailMessageSummary : ObservableObject
 {
     public string MessageId { get; set; } = string.Empty;
@@ -28,10 +35,30 @@ public partial class MailMessageSummary : ObservableObject
     /// Message-ID. Empty when the server did not supply one; empty identities are never merged.
     /// </summary>
     public string InternetMessageId { get; set; } = string.Empty;
-    public string From { get; set; } = string.Empty;
+    [ObservableProperty]
+    private string _from = string.Empty;
     public string To { get; set; } = string.Empty;
     public string Subject { get; set; } = string.Empty;
     public DateTimeOffset Date { get; set; }
+
+    /// <summary>
+    /// Persistent direction of the message. Unlike the folder name this survives filing an
+    /// outgoing message from Out/Sent into a subject folder.
+    /// </summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsIncoming))]
+    [NotifyPropertyChangedFor(nameof(IsOutgoing))]
+    [NotifyPropertyChangedFor(nameof(DirectionDisplay))]
+    private MessageDirection _direction;
+
+    public bool IsIncoming => Direction == MessageDirection.Incoming;
+    public bool IsOutgoing => Direction == MessageDirection.Outgoing;
+    public string DirectionDisplay => Direction switch
+    {
+        MessageDirection.Incoming => "In ←",
+        MessageDirection.Outgoing => "Out →",
+        _ => string.Empty,
+    };
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(StatusDisplay))]
@@ -49,7 +76,11 @@ public partial class MailMessageSummary : ObservableObject
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(StatusDisplay))]
     [NotifyPropertyChangedFor(nameof(ReadStatusLabel))]
+    [NotifyPropertyChangedFor(nameof(ReplyIndicator))]
     private bool _isReplied;
+
+    /// <summary>A deliberately compact visual marker for the message-list reply column.</summary>
+    public string ReplyIndicator => IsReplied ? "↩" : string.Empty;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(StatusDisplay))]
@@ -79,6 +110,7 @@ public partial class MailMessageSummary : ObservableObject
     /// <summary>Display name of the applied flag, denormalized for rendering. Null when unflagged.</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(FlagLabel))]
+    [NotifyPropertyChangedFor(nameof(StatusDisplay))]
     private string? _flagName;
 
     /// <summary>Hex color of the applied flag, denormalized for rendering. Null when unflagged.</summary>
@@ -124,7 +156,9 @@ public partial class MailMessageSummary : ObservableObject
 
     /// <summary>
     /// Single-word status shown in the status column.
-    /// Priority: Flag name > Replied > Fwd > New > (blank for read).
+    /// Priority: delivery state > flag name > Fwd > New > (blank for read).
+    /// Reply state has its own compact icon column and deliberately stays out of Status so it
+    /// cannot obscure a named flag or change the textual Status sort.
     /// </summary>
     public string StatusDisplay
     {
@@ -132,7 +166,6 @@ public partial class MailMessageSummary : ObservableObject
         {
             if (!string.IsNullOrWhiteSpace(DeliveryStatus)) return DeliveryStatus;
             if (IsFlagged)   return FlagLabel;
-            if (IsReplied)   return "Replied";
             if (IsForwarded) return "Fwd";
             if (!IsRead)     return "New";
             return string.Empty;

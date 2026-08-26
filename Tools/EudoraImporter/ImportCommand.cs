@@ -25,7 +25,12 @@ internal static class ImportCommand
             if (File.Exists(output) && !replace)
                 throw new CommandLineException($"Ya existe el archivo de salida: {output}{Environment.NewLine}Use --replace para sustituirlo.");
 
-            var mailboxes = EudoraMailboxDiscovery.Find(source).ToList();
+            var selectedSources = ValuesAfter(args, "--selected-source");
+            var targetPath = ValueAfter(args, "--target-path");
+            var mailboxes = selectedSources.Count > 0
+                ? EudoraMailboxDiscovery.FindSelected(source, selectedSources,
+                    targetPath ?? Path.GetFileNameWithoutExtension(selectedSources[0])).ToList()
+                : EudoraMailboxDiscovery.Find(source).ToList();
             var mailboxFilter = ValueAfter(args, "--mailbox");
             if (!string.IsNullOrWhiteSpace(mailboxFilter))
                 mailboxes = mailboxes.Where(m => m.DisplayName.Equals(mailboxFilter, StringComparison.OrdinalIgnoreCase)).ToList();
@@ -100,6 +105,14 @@ internal static class ImportCommand
             return args[i + 1];
         }
         return null;
+    }
+
+    private static List<string> ValuesAfter(string[] args, string option)
+    {
+        var values = new List<string>();
+        for (var i = 0; i + 1 < args.Length; i++)
+            if (args[i].Equals(option, StringComparison.OrdinalIgnoreCase)) values.Add(args[++i]);
+        return values;
     }
 
     private static void PrintUsage() => Console.WriteLine(

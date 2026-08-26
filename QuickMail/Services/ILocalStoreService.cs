@@ -40,11 +40,34 @@ public interface ILocalStoreService
     /// </summary>
     Task SaveFoldersAsync(Guid accountId, IReadOnlyList<MailFolderModel> folders);
 
+    /// <summary>Renames/moves a local folder path and all descendant message/index records.</summary>
+    Task RenameFolderPathAsync(Guid accountId, string oldPath, string newPath) =>
+        throw new NotSupportedException("Local folder moves are not supported by this store.");
+
     /// <summary>
     /// Every stored folder, grouped by account and in the order it was last saved. Shaped to drop
     /// straight into <c>MainViewModel._cachedFolders</c>.
     /// </summary>
     Task<Dictionary<Guid, List<MailFolderModel>>> LoadFoldersAsync();
+
+    /// <summary>Ensures every local account has its physical and canonical system folders even
+    /// when the account cannot connect (for example, before its password has been entered).</summary>
+    Task EnsureLocalSystemFoldersAsync(IReadOnlyCollection<AccountModel> accounts) => Task.CompletedTask;
+
+    /// <summary>Returns the validated account-independent local tree when its shadow migration is
+    /// present. Null keeps older/unmigrated profiles on the legacy per-account tree.</summary>
+    Task<CanonicalLocalFolderTree?> LoadCanonicalLocalFolderTreeAsync() => Task.FromResult<CanonicalLocalFolderTree?>(null);
+    Task<string> EnsureCanonicalFolderBindingAsync(Guid folderId, Guid accountId) =>
+        throw new NotSupportedException("Canonical local folders are not supported by this store.");
+    Task<Guid> CreateCanonicalFolderAsync(Guid parentFolderId, string name, Guid ownerAccountId,
+        bool isContainer = true) =>
+        throw new NotSupportedException("Canonical local folders are not supported by this store.");
+    Task<CanonicalFolderMoveResult> MoveCanonicalFolderAsync(Guid folderId, Guid newParentFolderId) =>
+        throw new NotSupportedException("Canonical local folder moves are not supported by this store.");
+    Task<CanonicalFolderMoveResult> RenameCanonicalFolderAsync(Guid folderId, string newName) =>
+        throw new NotSupportedException("Canonical local folder renaming is not supported by this store.");
+    Task DeleteCanonicalFolderTreeAsync(Guid folderId) =>
+        throw new NotSupportedException("Canonical local folder deletion is not supported by this store.");
 
     /// <summary>
     /// Deletes folders for accounts not in <paramref name="knownAccountIds"/> — orphans left by an
@@ -53,6 +76,9 @@ public interface ILocalStoreService
     Task PurgeFoldersForUnknownAccountsAsync(IReadOnlyCollection<Guid> knownAccountIds);
     Task UpdateIsReadAsync(Guid accountId, string folderName, string messageId, bool isRead);
     Task UpdateIsReadBatchAsync(IEnumerable<(Guid AccountId, string FolderName, string MessageId)> items, bool isRead);
+    /// <summary>Records that the user successfully sent a reply to the original local message.</summary>
+    Task UpdateIsRepliedAsync(Guid accountId, string folderName, string messageId, string? internetMessageId = null) =>
+        Task.CompletedTask;
     Task UpdatePreviewAsync(Guid accountId, string folderName, string messageId, string preview);
 
     /// <summary>

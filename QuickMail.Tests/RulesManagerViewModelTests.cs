@@ -60,6 +60,29 @@ public class RulesManagerViewModelTests
     }
 
     [Fact]
+    public void SelectExistingCompatibleRule_KeepsCompatibleListFilterActive()
+    {
+        var accountId = Guid.NewGuid();
+        var matching = new MailRule
+        {
+            Name = "Alice", UseFromCondition = true, FromContains = "alice@example.com",
+        };
+        var unrelated = new MailRule
+        {
+            Name = "Carol", UseFromCondition = true, FromContains = "carol@example.com",
+        };
+        var vm = new RulesManagerViewModel(
+            new StubRuleService { LoadedRules = [matching, unrelated] }, accounts: [],
+            selectedMessagesForTest: [MakeMsg(accountId: accountId)]);
+
+        vm.SelectRule(matching.Id);
+
+        Assert.False(vm.SeeAllFilters);
+        Assert.Equal(1, vm.VisibleRuleCount);
+        Assert.Same(matching, vm.SelectedRule);
+    }
+
+    [Fact]
     public void Constructor_WithPrefillTemplate_AddsAndSelectsTemplate()
     {
         var template = new MailRule { Name = "From Message", FromContains = "sender@example.com" };
@@ -127,6 +150,35 @@ public class RulesManagerViewModelTests
     }
 
     [Fact]
+    public void DeleteRule_ThenWindowCloses_DoesNotRestoreDeletedRule()
+    {
+        var stub = new StubRuleService { LoadedRules = [new MailRule { Name = "Persisted" }] };
+        var vm = new RulesManagerViewModel(stub, accounts: []);
+        vm.ConfirmDeleteRequested += (_, _) => true;
+
+        vm.DeleteRuleCommand.Execute(null);
+        vm.CancelPendingEdits();
+
+        Assert.Empty(stub.LoadedRules);
+    }
+
+    [Fact]
+    public void DeletePersistedRule_DoesNotSavePendingMessageTemplate()
+    {
+        var persisted = new MailRule { Name = "Persisted", FromContains = "@myminifactory.com" };
+        var pending = new MailRule { Name = "New from message", FromContains = "@myminifactory.com" };
+        var stub = new StubRuleService { LoadedRules = [persisted] };
+        var vm = new RulesManagerViewModel(stub, accounts: [], prefillTemplate: pending);
+        vm.SelectedRule = persisted;
+        vm.ConfirmDeleteRequested += (_, _) => true;
+
+        vm.DeleteRuleCommand.Execute(null);
+
+        Assert.Empty(stub.LoadedRules);
+        Assert.DoesNotContain(stub.LoadedRules, rule => rule.Id == pending.Id);
+    }
+
+    [Fact]
     public void DeleteRule_NotConfirmed_KeepsRule()
     {
         var stub = new StubRuleService { LoadedRules = [new MailRule { Name = "Kept" }] };
@@ -173,6 +225,9 @@ public class RulesManagerViewModelTests
         var vm = new RulesManagerViewModel(stub, accounts: []);
         vm.NewRuleCommand.Execute(null);
         vm.SelectedRule!.Name = "My Rule";
+        vm.SelectedRule.TargetFolder = "Clients";
+        vm.SelectedRule.UseFromCondition = true;
+        vm.SelectedRule.FromContains = "@example.com";
 
         vm.SaveRuleCommand.Execute(null);
 
@@ -186,6 +241,9 @@ public class RulesManagerViewModelTests
         var vm = new RulesManagerViewModel(new StubRuleService(), accounts: []);
         vm.NewRuleCommand.Execute(null);
         vm.SelectedRule!.Name = "Save Me";
+        vm.SelectedRule.TargetFolder = "Clients";
+        vm.SelectedRule.UseFromCondition = true;
+        vm.SelectedRule.FromContains = "@example.com";
 
         string? announced = null;
         AnnouncementCategory? category = null;
@@ -469,22 +527,44 @@ public class RulesManagerViewModelTests
     }
 
     [Fact]
-    public void NewRule_DefaultsToFirstAccount()
+    public void NewRule_UsesConfiguredAlsoFilterOutDefault()
     {
-        // With "All accounts" retired (#333 D1), a new rule is scoped to an account immediately
-        // rather than left unscoped.
+        var cfg = new StubConfigService();
+        cfg.Save(new ConfigModel { MarkAlsoFilterOutMailboxByDefault = true });
+        var vm = new RulesManagerViewModel(new StubRuleService(), accounts: [], configService: cfg);
+
+        vm.NewRuleCommand.Execute(null);
+
+        Assert.True(vm.SelectedRule!.AlsoFilterOutMailbox);
+    }
+
+    [Fact]
+    public void ExistingRule_IsNotChangedByAlsoFilterOutDefault()
+    {
+        var cfg = new StubConfigService();
+        cfg.Save(new ConfigModel { MarkAlsoFilterOutMailboxByDefault = true });
+        var existing = new MailRule { Name = "Existing", AlsoFilterOutMailbox = false };
+        var vm = new RulesManagerViewModel(
+            new StubRuleService { LoadedRules = [existing] }, accounts: [], configService: cfg);
+
+        Assert.False(vm.Rules.Single().AlsoFilterOutMailbox);
+    }
+
+    [Fact]
+    public void NewRule_DefaultsToAllAccounts()
+    {
         var account = new AccountModel { Id = Guid.NewGuid(), AccountName = "IdeaPlace" };
         var vm = new RulesManagerViewModel(new StubRuleService(), accounts: [account]);
 
         vm.NewRuleCommand.Execute(null);
 
-        Assert.Equal(account.Id, vm.SelectedRule!.AccountId);
-        Assert.Equal("IdeaPlace", vm.SelectedRule.AccountDisplay);
-        Assert.Contains("IdeaPlace", vm.SelectedRule.AccessibleName);
+        Assert.Null(vm.SelectedRule!.AccountId);
+        Assert.Equal("All accounts", vm.SelectedRule.AccountDisplay);
+        Assert.Contains("All accounts", vm.SelectedRule.AccessibleName);
     }
 
     [Fact]
-    public void NewRule_PrefersTheDefaultAccount_OverTheFirst()
+    public void NewRule_RemainsAllAccounts_EvenWhenAnAccountIsDefault()
     {
         var first = new AccountModel { Id = Guid.NewGuid(), AccountName = "First", IsDefault = false };
         var preferred = new AccountModel { Id = Guid.NewGuid(), AccountName = "Preferred", IsDefault = true };
@@ -492,7 +572,7 @@ public class RulesManagerViewModelTests
 
         vm.NewRuleCommand.Execute(null);
 
-        Assert.Equal(preferred.Id, vm.SelectedRule!.AccountId);   // default account, not the first
+        Assert.Null(vm.SelectedRule!.AccountId);
     }
 
     [Fact]

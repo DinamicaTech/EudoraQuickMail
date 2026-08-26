@@ -19,6 +19,7 @@ public sealed class ScheduledSendService : IDisposable
     private readonly Timer _timer;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly CancellationTokenSource _stop = new();
+    private int _disposed;
 
     public ScheduledSendService(ProfileContext profile, ISendMailService sender, IAccountService accounts,
         ICredentialService credentials, LocalStoreService store)
@@ -42,6 +43,7 @@ public sealed class ScheduledSendService : IDisposable
             var localId = "scheduled-" + id.ToString("N");
             var account = _accounts.LoadAccounts().FirstOrDefault(a => a.Id == message.AccountId)
                 ?? throw new InvalidOperationException("Sender account not found.");
+            await _store.EnsureLocalSystemFoldersAsync([account]);
             await _store.SaveLocalMessageAsync(new MailMessageDetail
             {
                 AccountId = message.AccountId, FolderName = "Scheduled", MessageId = localId,
@@ -49,6 +51,7 @@ public sealed class ScheduledSendService : IDisposable
                 Date = sendAtUtc, PlainTextBody = message.Body, HtmlBody = message.HtmlBody ?? string.Empty,
                 DraftComposeMode = message.Mode, DraftSpellLanguage = message.SpellLanguage,
                 Preview = message.Body.Length <= 240 ? message.Body : message.Body[..240], IsRead = true,
+                Direction = MessageDirection.Outgoing,
             });
             queue.Add(new ScheduledMail(id, sendAtUtc.ToUniversalTime(), message, LocalMessageId: localId));
             await SaveAsync(queue);
@@ -83,6 +86,7 @@ public sealed class ScheduledSendService : IDisposable
             var old = queue[index];
             var localMessageId = old.LocalMessageId ?? "scheduled-" + old.Id.ToString("N");
             var account = _accounts.LoadAccounts().First(a => a.Id == message.AccountId);
+            await _store.EnsureLocalSystemFoldersAsync([account]);
             await _store.SaveLocalMessageAsync(new MailMessageDetail
             {
                 AccountId = message.AccountId, FolderName = "Scheduled", MessageId = localMessageId,
@@ -90,6 +94,7 @@ public sealed class ScheduledSendService : IDisposable
                 Date = sendAtUtc, PlainTextBody = message.Body, HtmlBody = message.HtmlBody ?? string.Empty,
                 DraftComposeMode = message.Mode, DraftSpellLanguage = message.SpellLanguage,
                 Preview = message.Body.Length <= 240 ? message.Body : message.Body[..240], IsRead = true,
+                Direction = MessageDirection.Outgoing,
             });
             queue[index] = old with { SendAtUtc = sendAtUtc.ToUniversalTime(), Message = message,
                 Attempts = 0, LastError = null, LocalMessageId = localMessageId };
@@ -130,6 +135,23 @@ public sealed class ScheduledSendService : IDisposable
                 {
                     var password = account.BackendKind == BackendKind.Pop3Smtp ? null : _credentials.GetPassword(account.Id);
                     await _sender.SendAsync(item.Message, account, password, _stop.Token);
+                    if (item.Message.ReplySourceAccountId is { } sourceAccountId
+                        && !string.IsNullOrWhiteSpace(item.Message.ReplySourceFolderName)
+                        && !string.IsNullOrWhiteSpace(item.Message.ReplySourceMessageId))
+                    {
+                        try
+                        {
+                            await _store.UpdateIsRepliedAsync(sourceAccountId,
+                                item.Message.ReplySourceFolderName, item.Message.ReplySourceMessageId,
+                                item.Message.InReplyToMessageId);
+                        }
+                        catch (Exception ex)
+                        {
+                            // Delivery succeeded: a local marker failure must not leave the item
+                            // queued and cause a duplicate SMTP send on the next pass.
+                            LogService.Log($"Scheduled send {item.Id}: original reply marker failed", ex);
+                        }
+                    }
                     if (item.LocalMessageId is not null)
                         await _store.DeleteLocalMessagesAsync(item.Message.AccountId, "Scheduled", [item.LocalMessageId], _stop.Token);
                     queue.Remove(item);
@@ -167,5 +189,13 @@ public sealed class ScheduledSendService : IDisposable
         File.Move(temp, _path, true);
     }
 
-    public void Dispose() { _stop.Cancel(); _timer.Dispose(); _stop.Dispose(); _gate.Dispose(); }
+    public void Dispose()
+    {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+        _timer.Dispose();
+        // DispatchDueAsync may still resume through its finally block. Cancelling is sufficient at
+        // application exit; disposing the CTS/gate underneath that continuation causes shutdown
+        // ObjectDisposedException dialogs.
+        try { _stop.Cancel(); } catch { /* best effort at shutdown */ }
+    }
 }

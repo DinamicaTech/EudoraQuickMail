@@ -9,7 +9,8 @@ public sealed record EudoraImportOptions(
     string RootDisplayName,
     string AttachmentMode,
     bool ImportFilters,
-    bool RespectCheckMailSettings);
+    bool RespectCheckMailSettings,
+    IReadOnlyList<string>? SelectedSources = null);
 
 /// <summary>Starts the external Eudora migration with one argument-safe code path.</summary>
 public static class EudoraImportLauncher
@@ -41,6 +42,17 @@ public static class EudoraImportLauncher
                 "--filters", options.ImportFilters ? "true" : "false",
                 "--respect-check-mail", options.RespectCheckMailSettings ? "true" : "false",
             }) start.ArgumentList.Add(argument);
+            if (options.SelectedSources is { Count: > 0 } selected &&
+                !selected[0].EndsWith("Eudora.exe", StringComparison.OrdinalIgnoreCase))
+            {
+                start.ArgumentList.Add("--selective");
+                start.ArgumentList.Add("true");
+                foreach (var path in selected)
+                {
+                    start.ArgumentList.Add("--selected-source");
+                    start.ArgumentList.Add(Path.GetFullPath(path));
+                }
+            }
             Process.Start(start);
             error = null;
             return true;

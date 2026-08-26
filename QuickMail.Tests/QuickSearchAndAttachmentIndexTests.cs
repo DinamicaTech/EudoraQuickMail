@@ -39,6 +39,16 @@ public class QuickSearchParserTests
     }
 
     [Fact]
+    public void BareIAndOMeanPersistentMessageDirection()
+    {
+        var parsed = QuickSearchParser.Parse("I;O;S:invoice");
+
+        Assert.Equal(QuickSearchField.Incoming, parsed.Groups[0].Alternatives[0].Field);
+        Assert.Equal(QuickSearchField.Outgoing, parsed.Groups[1].Alternatives[0].Field);
+        Assert.Equal(QuickSearchField.Subject, parsed.Groups[2].Alternatives[0].Field);
+    }
+
+    [Fact]
     public void QuotedSemicolonIsPlainText()
     {
         var parsed = QuickSearchParser.Parse("\"B:not a command;still text\"");
@@ -129,6 +139,7 @@ public class QuickSearchStoreTests
                 AccountId = account, FolderName = "Inbox", MessageId = "m1",
                 From = "sender@example.com", To = "ronald@dinamica.tech", Cc = "team@example.com",
                 Subject = "Annual report", Date = new DateTimeOffset(2026, 5, 3, 12, 0, 0, TimeSpan.Zero),
+                Direction = MessageDirection.Outgoing,
                 PlainTextBody = "This body contains choxolate for wildcard testing.",
             };
             await store.SaveLocalMessageAsync(message, TestContext.Current.CancellationToken);
@@ -141,6 +152,8 @@ public class QuickSearchStoreTests
             Assert.Equal(1, (await store.SearchLocalMessagesAsync(new("B:cho?olate"), TestContext.Current.CancellationToken)).TotalMatches);
             Assert.Equal(1, (await store.SearchLocalMessagesAsync(new("AN:report"), TestContext.Current.CancellationToken)).TotalMatches);
             Assert.Equal(1, (await store.SearchLocalMessagesAsync(new("AC:Chocolate"), TestContext.Current.CancellationToken)).TotalMatches);
+            Assert.Equal(1, (await store.SearchLocalMessagesAsync(new("O"), TestContext.Current.CancellationToken)).TotalMatches);
+            Assert.Equal(0, (await store.SearchLocalMessagesAsync(new("I"), TestContext.Current.CancellationToken)).TotalMatches);
             Assert.Equal(1, await store.RebuildMessageSearchIndexAsync(TestContext.Current.CancellationToken));
             Assert.Equal(1, (await store.SearchLocalMessagesAsync(new("S:Annual"), TestContext.Current.CancellationToken)).TotalMatches);
         }

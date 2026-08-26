@@ -21,6 +21,8 @@ public partial class QuickSearchHelpWindow : Window
             new Row("AC", "Extracted attachment content", "AC:contract"),
             new Row("D", "Message date", "D=03/2015"),
             new Row("N", "Unread messages (no operator or value)", "N"),
+            new Row("I", "Incoming messages (no operator or value)", "I"),
+            new Row("O", "Outgoing messages (no operator or value)", "O"),
         };
     }
     private sealed record Row(string Prefix, string Description, string Example);

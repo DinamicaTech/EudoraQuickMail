@@ -30,7 +30,7 @@
 | *(unassigned)* | `mail.watchManager` | Watched Conversations… (review, rename, stop watching) |
 | *(unassigned)* | `view.filterWatched` | Show Watched Conversations Only |
 | Ctrl+Shift+V | `view.openViewMenu` | Open View Menu |
-| Ctrl+Shift+F | `view.searchFolders` | Search Folders… |
+| *(unassigned)* | `view.searchFolders` | Search Folders… |
 | Ctrl+Shift+S | `view.search` | Search Messages… |
 | Ctrl+Shift+G | `contacts.grabAddresses` | Grab Addresses from Message |
 | Ctrl+Shift+B | `contacts.openAddressBook` | Address Book |
@@ -39,6 +39,8 @@
 | Ctrl+A | `mail.selectAll` | Select All Messages (message list focus only) |
 | K | `mail.toggleFlag` | Toggle Flag |
 | Ctrl+Shift+K | `mail.pickFlag` | Pick Flag… |
+| Ctrl+Shift+F | `mail.createRuleFromMessage` | Create Rule from Message (selects the first existing matching rule when possible) |
+| Ctrl+Shift+A | `mail.filterAllLikeThis` | Apply every enabled matching rule to the current folder |
 | *(unassigned)* | `mail.openFlagManager` | Manage Flags… |
 | Shift+, | `mail.jumpToFirstInGroup` | First Message in Group |
 | Shift+. | `mail.jumpToLastInGroup` | Last Message in Group |

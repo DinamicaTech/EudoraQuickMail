@@ -131,6 +131,14 @@
                                 <CheckBox Content="Show _Today agenda"
                                           IsChecked="{Binding ShowTodayAgenda, Mode=TwoWay}"
                                           Margin="0,6,0,0"/>
+                                <CheckBox Content="Show filtered destination _tab after applying rules"
+                                          IsChecked="{Binding ShowFilteredDestinationTab, Mode=TwoWay}"
+                                          Margin="0,6,0,0"/>
+                                <TextBlock Text="Keeps the current folder in front and updates one background tab with the latest rule destination."
+                                           TextWrapping="Wrap"
+                                           Foreground="{DynamicResource Theme.TextSecondary}"
+                                           FontSize="{DynamicResource Theme.FontSizeSmall}"
+                                           Margin="20,3,0,0"/>
                             </StackPanel>
                         </GroupBox>
 
@@ -213,10 +221,16 @@
                         <GroupBox Header="_Notifications" Padding="10" Margin="0,10,0,0"
                                   AutomationProperties.Name="Notification settings">
                             <StackPanel>
-                                <CheckBox Content="Show a _notification when new mail arrives"
+                                <CheckBox Content="Show a Windows _notification banner when new mail arrives"
                                           IsChecked="{Binding NotifyOnNewMail, Mode=TwoWay}"
-                                          AutomationProperties.Name="Show a notification when new mail arrives"/>
-                                <TextBlock Text="Windows shows a notification when new mail arrives in an inbox while QuickMail is running."
+                                          AutomationProperties.Name="Show a Windows notification banner when new mail arrives"/>
+                                <TextBlock Text="Windows shows a taskbar notification when new mail arrives in an inbox while QuickMail is running."
+                                           Foreground="{DynamicResource Theme.TextSecondary}" FontSize="{DynamicResource Theme.FontSizeSmall}" Margin="0,3,0,8" TextWrapping="Wrap"/>
+
+                                <CheckBox Content="Change the notification-area _icon when new mail arrives"
+                                          IsChecked="{Binding NotifyTrayIconOnNewMail, Mode=TwoWay}"
+                                          AutomationProperties.Name="Change the notification area icon when new mail arrives"/>
+                                <TextBlock Text="Keeps a quiet new-mail indicator in the system tray until you open Eudora QuickMail from that icon. This is independent of the notification banner."
                                            Foreground="{DynamicResource Theme.TextSecondary}" FontSize="{DynamicResource Theme.FontSizeSmall}" Margin="0,3,0,8" TextWrapping="Wrap"/>
 
                                 <CheckBox Content="Show a notification when a _watched conversation gets a reply"
@@ -447,6 +461,20 @@
                                 <TextBlock Text="Create the credentials in Google Cloud Console as application type Desktop app, with the Google Calendar API enabled. The client secret identifies the installed application; user refresh tokens remain protected in Windows Credential Manager."
                                            Foreground="{DynamicResource Theme.TextSecondary}" FontSize="{DynamicResource Theme.FontSizeSmall}"
                                            Margin="0,6,0,0" TextWrapping="Wrap"/>
+                            </StackPanel>
+                        </GroupBox>
+
+                        <!-- Client Rules Group -->
+                        <GroupBox Header="_Rules" Padding="10" Margin="0,0,0,15"
+                                  AutomationProperties.Name="Rule defaults">
+                            <StackPanel>
+                                <CheckBox Content="Mark _Also filter Out mailbox as default in new filters"
+                                          IsChecked="{Binding MarkAlsoFilterOutMailboxByDefault, Mode=TwoWay}"
+                                          AutomationProperties.Name="Mark Also filter Out mailbox as default in new filters"/>
+                                <TextBlock Text="Preselects the option for newly created QuickMail filters. Existing filters and server-side rules are not changed."
+                                           Foreground="{DynamicResource Theme.TextSecondary}"
+                                           FontSize="{DynamicResource Theme.FontSizeSmall}"
+                                           Margin="0,3,0,0" TextWrapping="Wrap"/>
                             </StackPanel>
                         </GroupBox>
 
@@ -708,14 +736,14 @@
                                            TextWrapping="Wrap" Margin="0,0,0,8"
                                            Foreground="{DynamicResource Theme.TextSecondary}"
                                            FontSize="{DynamicResource Theme.FontSizeSmall}"/>
-                                <RadioButton Content="_Floating window (default)"
+                                <RadioButton Content="_Floating window"
                                              IsChecked="{Binding IsComposeFloatingWindow, Mode=TwoWay}"
                                              GroupName="ComposeOpenMode"/>
                                 <TextBlock Text="Opens each editor in a separate window, suitable for multiple monitors."
                                            TextWrapping="Wrap" Margin="16,2,0,8"
                                            Foreground="{DynamicResource Theme.TextSecondary}"
                                            FontSize="{DynamicResource Theme.FontSizeSmall}"/>
-                                <RadioButton Content="_Docked tab"
+                                <RadioButton Content="_Docked tab (default)"
                                              IsChecked="{Binding IsComposeDockedTab, Mode=TwoWay}"
                                              GroupName="ComposeOpenMode"/>
                                 <TextBlock Text="Opens the editor as a tab inside the main QuickMail window."

@@ -22,6 +22,11 @@ public partial class ServerRuleEditorViewModel : ObservableObject
     private JsonElement? _rawConditions;
     private JsonElement? _rawActions;
     private JsonElement? _rawExceptions;
+    // Client-only execution switches are not represented by Microsoft server rules. Keep them
+    // privately while a client rule is edited in the unified form so Save cannot silently reset
+    // either setting merely because that form exposes the common condition/action subset.
+    private bool _clientApplyAutomatically = true;
+    private bool _clientAlsoFilterOutMailbox;
 
     public bool IsNew { get; private init; }
 
@@ -50,7 +55,12 @@ public partial class ServerRuleEditorViewModel : ObservableObject
 
     // ── Factories ───────────────────────────────────────────────────────────
 
-    public static ServerRuleEditorViewModel ForNew() => new() { IsNew = true, Name = string.Empty };
+    public static ServerRuleEditorViewModel ForNew(bool alsoFilterOutMailboxByDefault = false) => new()
+    {
+        IsNew = true,
+        Name = string.Empty,
+        _clientAlsoFilterOutMailbox = alsoFilterOutMailboxByDefault,
+    };
 
     /// <summary>A new rule prefilled from a message (create-rule-from-message, Ctrl+Shift+T): carries
     /// the message's From and Subject as conditions. It's still a new rule — the user picks the
@@ -61,6 +71,8 @@ public partial class ServerRuleEditorViewModel : ObservableObject
         {
             IsNew = true,
             Name = template.Name ?? string.Empty,
+            _clientApplyAutomatically = template.ApplyAutomatically,
+            _clientAlsoFilterOutMailbox = template.AlsoFilterOutMailbox,
             FromAddresses = template.UseFromCondition ? (template.FromContains ?? string.Empty) : string.Empty,
             SubjectContains = template.UseSubjectCondition ? (template.SubjectContains ?? string.Empty) : string.Empty,
         };
@@ -127,6 +139,8 @@ public partial class ServerRuleEditorViewModel : ObservableObject
             IsNew = false,
             Name = rule.Name,
             IsEnabled = rule.IsEnabled,
+            _clientApplyAutomatically = rule.ApplyAutomatically,
+            _clientAlsoFilterOutMailbox = rule.AlsoFilterOutMailbox,
             FromAddresses = rule.UseFromCondition ? (rule.FromContains ?? string.Empty) : string.Empty,
             SentToAddresses = rule.UseToCondition ? (rule.ToContains ?? string.Empty) : string.Empty,
             SubjectContains = rule.UseSubjectCondition ? (rule.SubjectContains ?? string.Empty) : string.Empty,
@@ -314,6 +328,8 @@ public partial class ServerRuleEditorViewModel : ObservableObject
         {
             Name = Name.Trim(),
             IsEnabled = IsEnabled,
+            ApplyAutomatically = _clientApplyAutomatically,
+            AlsoFilterOutMailbox = _clientAlsoFilterOutMailbox,
             AccountId = accountId,
 
             UseFromCondition = from is not null, FromContains = from,

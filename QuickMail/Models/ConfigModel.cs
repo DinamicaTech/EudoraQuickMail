@@ -51,6 +51,12 @@ public class ConfigModel
     public bool ShowTodayAgenda { get; set; } = true;
 
     /// <summary>
+    /// Keep one background navigation tab pointing at the destination of the latest successful
+    /// move rule. The tab is updated but never brought to the foreground automatically.
+    /// </summary>
+    public bool ShowFilteredDestinationTab { get; set; } = true;
+
+    /// <summary>
     /// How many days of mail to sync. 0 = sync all mail (no date filter).
     /// Supported values: 7, 30, 180, 365, or 0 (all).
     /// </summary>
@@ -293,6 +299,12 @@ public class ConfigModel
     // ── Advanced ──────────────────────────────────────────────────────────────────
 
     /// <summary>
+    /// Preselect "Also filter Out mailbox" when a new client-side mail rule is created.
+    /// Existing rules are not changed by this preference.
+    /// </summary>
+    public bool MarkAlsoFilterOutMailboxByDefault { get; set; } = false;
+
+    /// <summary>
     /// How log lines are formatted.
     /// "actionFirst" (default): message then timestamp — easier to scan with a screen reader.
     /// "timeFirst": timestamp then message — the historical format.
@@ -327,6 +339,10 @@ public class ConfigModel
     /// <summary>Show a Windows toast notification when new mail arrives in an inbox. Default off —
     /// the user opts in from Settings.</summary>
     public bool NotifyOnNewMail { get; set; } = false;
+
+    /// <summary>Change the notification-area icon when new inbox mail arrives. Independent of the
+    /// Windows notification banner so users can keep the quiet persistent indicator only.</summary>
+    public bool NotifyTrayIconOnNewMail { get; set; } = true;
 
     /// <summary>
     /// Show a Windows toast when a message arrives in a watched conversation (Ctrl+Shift+W).
@@ -515,6 +531,8 @@ public class ConfigModel
         "readdesc" => MessageSort.ReadStateDescending,
         "attachmentsfirst" => MessageSort.AttachmentsFirst,
         "attachmentslast" => MessageSort.AttachmentsLast,
+        "directionasc" => MessageSort.DirectionAscending,
+        "directiondesc" => MessageSort.DirectionDescending,
         _              => MessageSort.DateDescending,
     };
 
@@ -533,6 +551,8 @@ public class ConfigModel
         MessageSort.ReadStateDescending => "readDesc",
         MessageSort.AttachmentsFirst => "attachmentsFirst",
         MessageSort.AttachmentsLast => "attachmentsLast",
+        MessageSort.DirectionAscending => "directionAsc",
+        MessageSort.DirectionDescending => "directionDesc",
         _                           => "dateDesc",
     };
 }

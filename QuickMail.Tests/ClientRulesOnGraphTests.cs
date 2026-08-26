@@ -280,6 +280,29 @@ public class ClientRulesOnGraphTests : IDisposable
     }
 
     [Fact]
+    public async Task RunOnExisting_WithAlsoFilterOut_IncludesOnlyPhysicalSentMailbox()
+    {
+        var rule = MoveRule(_graphAccountId);
+        rule.AlsoFilterOutMailbox = true;
+        var h = Build(rule);
+        var inbox = Cached("in-1", "INBOX");
+        inbox.Direction = MessageDirection.Incoming;
+        var sent = Cached("sent-1", "[Gmail]/Sent Mail");
+        sent.Direction = MessageDirection.Outgoing;
+        var filedOutgoing = Cached("filed-1", "Customers/Acme");
+        filedOutgoing.Direction = MessageDirection.Outgoing;
+        await _store.UpsertSummariesAsync([inbox, sent, filedOutgoing]);
+
+        var removed = await h.Rules.ApplyRulesToExistingAsync(
+            _store, new Dictionary<Guid, string> { [_graphAccountId] = "INBOX" }, CancellationToken.None);
+
+        Assert.Equal(2, removed.Count);
+        Assert.Contains(removed, message => message.MessageId == "in-1");
+        Assert.Contains(removed, message => message.MessageId == "sent-1");
+        Assert.DoesNotContain(removed, message => message.MessageId == "filed-1");
+    }
+
+    [Fact]
     public async Task RunOnExisting_AccountMissingFromInboxMap_IsSkipped()
     {
         // Fail-closed: if the caller couldn't resolve an account's Inbox, none of that account's mail

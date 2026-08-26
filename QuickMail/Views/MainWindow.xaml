@@ -199,6 +199,9 @@
             <MenuItem Header="_Forward"
                       AutomationProperties.Name="Forward"
                       Command="{Binding ForwardCommand}"/>
+            <MenuItem Header="Send _Again"
+                      AutomationProperties.Name="Send again"
+                      Command="{Binding SendAgainCommand}"/>
             <Separator/>
             <MenuItem Header="Mark as _Read" Click="MessageContextMenu_MarkRead_Click"/>
             <MenuItem Header="Mark as _Unread" Click="MessageContextMenu_MarkUnread_Click"/>
@@ -223,10 +226,15 @@
                       AutomationProperties.Name="Flags"/>
             <Separator/>
             <MenuItem Header="Create _Rule from Message…"
-                      InputGestureText="Ctrl+Shift+T"
+                      InputGestureText="Ctrl+Shift+F"
                       AutomationProperties.Name="Create Rule from Message"
-                      AutomationProperties.AcceleratorKey="Ctrl+Shift+T"
+                      AutomationProperties.AcceleratorKey="Ctrl+Shift+F"
                       Command="{Binding CreateRuleFromMessageCommand}"/>
+            <MenuItem Header="Filter _All Like This"
+                      InputGestureText="Ctrl+Shift+A"
+                      AutomationProperties.Name="Filter all like this"
+                      AutomationProperties.AcceleratorKey="Ctrl+Shift+A"
+                      Command="{Binding FilterAllLikeThisCommand}"/>
             <Separator/>
             <MenuItem Header="View _Source"
                       AutomationProperties.Name="View message source"
@@ -242,6 +250,17 @@
                       AutomationProperties.Name="New Folder"
                       Click="FolderContextMenu_NewFolder_Click"/>
             <Separator/>
+            <MenuItem Header="Mark as _Read"
+                      AutomationProperties.Name="Mark all messages in this folder and subfolders as read"
+                      Click="FolderContextMenu_MarkRead_Click"/>
+            <MenuItem Header="_Filters…"
+                      AutomationProperties.Name="Show filters that move messages to this folder"
+                      Click="FolderContextMenu_Filters_Click"/>
+            <Separator/>
+            <MenuItem Header="R_ename Folder…"
+                      InputGestureText="F2"
+                      AutomationProperties.Name="Rename Folder"
+                      Click="FolderContextMenu_RenameFolder_Click"/>
             <MenuItem Header="_Move Folder…"
                       AutomationProperties.Name="Move Folder"
                       Click="FolderContextMenu_MoveFolder_Click"/>
@@ -647,8 +666,7 @@
                 <MenuItem Header="Go to _Folder…"
                           Click="MenuFolderPicker_Click"/>
                 <MenuItem Header="_Search Folders…"
-                          Click="MenuSearchFolders_Click"
-                          InputGestureText="Ctrl+Shift+F"/>
+                          Click="MenuSearchFolders_Click"/>
             </MenuItem>
 
             <!-- Tools — always available (mirrors the Compose window's Tools menu).
@@ -825,6 +843,12 @@
                         <Button Content="↻" Width="26" Padding="2,0" ToolTip="Refresh today"
                                 Click="TodayAgendaRefresh_Click" AutomationProperties.Name="Refresh today's agenda"/>
                     </StackPanel>
+                    <ComboBox DockPanel.Dock="Right" Width="145" Margin="4,2"
+                              ItemsSource="{Binding CalendarVm.SourceChoices}"
+                              SelectedItem="{Binding CalendarVm.SelectedSource, Mode=TwoWay}"
+                              DisplayMemberPath="Label"
+                              ToolTip="Choose which calendar is shown"
+                              AutomationProperties.Name="Calendar source"/>
                     <TextBlock Text="{Binding CalendarVm.TodayAgendaTitle}" FontWeight="SemiBold" Padding="6,4"/>
                 </DockPanel>
 
@@ -887,6 +911,7 @@
                           PreviewKeyDown="FolderList_PreviewKeyDown"
                           PreviewMouseLeftButtonDown="FolderList_PreviewMouseLeftButtonDown"
                           PreviewMouseLeftButtonUp="FolderList_PreviewMouseLeftButtonUp"
+                          PreviewMouseMove="FolderList_PreviewMouseMove"
                           SelectedItemChanged="FolderList_SelectedItemChanged">
                     <TreeView.Resources>
                         <HierarchicalDataTemplate DataType="{x:Type models:FolderTreeNode}"
@@ -1131,7 +1156,13 @@
                                 </ListBox.ItemContainerStyle>
                                 <ListBox.ItemTemplate>
                                     <DataTemplate>
-                                        <TextBlock Text="{Binding FileName}" ToolTip="{Binding FileSizeDisplay}"/>
+                                        <Border Background="{DynamicResource Theme.AccentSubtle}"
+                                                BorderBrush="{DynamicResource Theme.Border}"
+                                                BorderThickness="1" CornerRadius="3"
+                                                Padding="7,3" Margin="2,1">
+                                            <TextBlock Text="{Binding FileName}" ToolTip="{Binding FileSizeDisplay}"
+                                                       TextTrimming="CharacterEllipsis"/>
+                                        </Border>
                                     </DataTemplate>
                                 </ListBox.ItemTemplate>
                                 <ListBox.ContextMenu>
@@ -1149,6 +1180,15 @@
                                                             RelativeSource={RelativeSource AncestorType=ContextMenu}}"
                                                   CommandParameter="{Binding PlacementTarget.SelectedItem,
                                                             RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
+                                        <Separator/>
+                                        <MenuItem Header="_Copy attachment"
+                                                  Click="AttachmentContextMenu_CopyPath_Click"
+                                                  Tag="{Binding PlacementTarget.SelectedItem,
+                                                        RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
+                                        <MenuItem Header="_Explore"
+                                                  Click="AttachmentContextMenu_Explore_Click"
+                                                  Tag="{Binding PlacementTarget.SelectedItem,
+                                                        RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
                                     </ContextMenu>
                                 </ListBox.ContextMenu>
                             </ListBox>
@@ -1491,17 +1531,13 @@
                               PreviewMouseLeftButtonUp="MessageList_PreviewMouseLeftButtonUp"
                               PreviewMouseMove="MessageList_PreviewMouseMove"
                               PreviewMouseWheel="MessageList_PreviewMouseWheel"
+                              ScrollViewer.CanContentScroll="True"
+                              VirtualizingPanel.IsVirtualizing="True"
+                              VirtualizingPanel.VirtualizationMode="Recycling"
                               ScrollViewer.VerticalScrollBarVisibility="Hidden"
                               Margin="0,0,16,0"
                               MouseDoubleClick="MessageList_MouseDoubleClick"
                               MouseLeftButtonUp="MessageList_MouseLeftButtonUp">
-                        <ListView.Resources>
-                            <!-- With a bounded 500-row page, pixel scrolling keeps the thumb
-                                 continuously draggable instead of snapping by logical items. -->
-                            <Style TargetType="ScrollViewer" BasedOn="{StaticResource {x:Type ScrollViewer}}">
-                                <Setter Property="CanContentScroll" Value="False"/>
-                            </Style>
-                        </ListView.Resources>
                         <ListView.Style>
                             <Style TargetType="ListView" BasedOn="{StaticResource {x:Type ListView}}">
                                 <Setter Property="Visibility" Value="{Binding IsMessagesView, Converter={StaticResource BoolToVisibilityConverter}}"/>
@@ -1518,6 +1554,35 @@
                              is not shadowed by a local style here. -->
                         <ListView.View>
                             <GridView>
+                                <GridViewColumn Width="66">
+                                    <GridViewColumn.Header>
+                                        <GridViewColumnHeader Content="In/Out" Tag="Direction"
+                                                              AutomationProperties.IsColumnHeader="True"/>
+                                    </GridViewColumn.Header>
+                                    <GridViewColumn.CellTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="{Binding DirectionDisplay}"
+                                                       FontSize="{DynamicResource Theme.FontSizeSmall}"
+                                                       TextAlignment="Center"/>
+                                        </DataTemplate>
+                                    </GridViewColumn.CellTemplate>
+                                </GridViewColumn>
+                                <GridViewColumn Width="30">
+                                    <GridViewColumn.Header>
+                                        <GridViewColumnHeader Content="&#x21A9;" ToolTip="Replied"
+                                                              AutomationProperties.Name="Replied"
+                                                              AutomationProperties.IsColumnHeader="True"/>
+                                    </GridViewColumn.Header>
+                                    <GridViewColumn.CellTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="{Binding ReplyIndicator}"
+                                                       FontFamily="Segoe UI Symbol"
+                                                       FontSize="12"
+                                                       TextAlignment="Center"
+                                                       AutomationProperties.Name="{Binding ReadStatusLabel}"/>
+                                        </DataTemplate>
+                                    </GridViewColumn.CellTemplate>
+                                </GridViewColumn>
                                 <GridViewColumn Width="90">
                                     <GridViewColumn.Header>
                                         <GridViewColumnHeader Content="Status" Tag="Status"
@@ -1660,6 +1725,12 @@
                                                 </Border>
                                             </Border>
                                             <ControlTemplate.Triggers>
+                                                <DataTrigger Binding="{Binding IsIncoming}" Value="True">
+                                                    <Setter TargetName="rowBg" Property="Background" Value="#FCFCFC"/>
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding IsOutgoing}" Value="True">
+                                                    <Setter TargetName="rowBg" Property="Background" Value="#FCF7FF"/>
+                                                </DataTrigger>
                                                 <Trigger Property="IsMouseOver" Value="True">
                                                     <Setter TargetName="rowBg" Property="Background" Value="{DynamicResource Theme.AccentSubtle}"/>
                                                 </Trigger>
@@ -2080,99 +2151,65 @@
             </Grid>
         </Grid>
 
-        <!-- ── Status bar ── -->
-        <!-- Each StatusBarItem is a distinct focus stop within the status bar.
-             Left/Right arrows navigate between regions; Tab exits to the next F6 pane.
-             Informational regions use read-only TextBox (ControlType.Edit + ValuePattern).
-             Clickable regions use Button (ControlType.Button + InvokePattern).
-             The StatusBar UIA control pattern enables screen readers' built-in
-             status-bar read commands. -->
+        <!-- ── Status bar: current activity | selection and last download | local clock ── -->
         <StatusBar x:Name="MainStatusBar"
                    Grid.Row="3"
                    KeyboardNavigation.TabNavigation="None"
                    KeyboardNavigation.DirectionalNavigation="Contained"
+                   HorizontalContentAlignment="Stretch"
                    AutomationProperties.Name="">
+            <StatusBarItem Padding="0" HorizontalContentAlignment="Stretch"
+                           KeyboardNavigation.IsTabStop="False"
+                           Width="{Binding ActualWidth, ElementName=MainStatusBar}">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="7*"/>
+                        <ColumnDefinition Width="3*" MinWidth="260"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
 
-            <!-- Region 1: the operation currently in progress. -->
-            <StatusBarItem x:Name="StatusTextItem"
-                           KeyboardNavigation.IsTabStop="False">
-                <StatusBarItem.Style>
-                    <Style TargetType="StatusBarItem" BasedOn="{StaticResource {x:Type StatusBarItem}}">
-                        <Style.Triggers>
-                            <DataTrigger Binding="{Binding IsStatusHighlighted}" Value="True">
-                                <Setter Property="Background" Value="{DynamicResource Theme.AccentSubtle}"/>
-                            </DataTrigger>
-                        </Style.Triggers>
-                    </Style>
-                </StatusBarItem.Style>
-                <TextBlock x:Name="StatusTextBox"
-                           Style="{StaticResource StatusTextBlockStyle}"
-                           Text="{Binding StatusText, Mode=OneWay}"/>
-            </StatusBarItem>
-
-            <!-- Region 2: secondary mailbox/session information. Grid count is retained because it
-                 explains pagination/search results without competing with current activity. -->
-            <StatusBarItem KeyboardNavigation.IsTabStop="False">
-                <StackPanel Orientation="Horizontal">
-                    <TextBlock Text="{Binding LastSyncText, StringFormat='Last Sync: {0}'}"/>
-                    <TextBlock Text="{Binding Messages.Count, StringFormat=' · Grid: {0:N0}'}"
-                               AutomationProperties.Name="Messages currently shown in grid"/>
-                    <TextBlock Text="{Binding SelectedMessageCount, StringFormat=' · Selected: {0:N0}'}">
-                        <TextBlock.Style>
-                            <Style TargetType="TextBlock"><Setter Property="Visibility" Value="Visible"/>
-                                <Style.Triggers><DataTrigger Binding="{Binding SelectedMessageCount}" Value="0"><Setter Property="Visibility" Value="Collapsed"/></DataTrigger></Style.Triggers>
+                    <!-- About 70% of the bar: only the action currently in progress or its result. -->
+                    <Border x:Name="StatusTextItem" Grid.Column="0" Padding="6,1"
+                            BorderBrush="{DynamicResource {x:Static SystemColors.ControlDarkBrushKey}}"
+                            BorderThickness="0,0,1,0">
+                        <Border.Style>
+                            <Style TargetType="Border">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsStatusHighlighted}" Value="True">
+                                        <Setter Property="Background" Value="{DynamicResource Theme.AccentSubtle}"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
                             </Style>
-                        </TextBlock.Style>
-                    </TextBlock>
-                    <TextBlock x:Name="ConnectionStatusTextBox"
-                               Text="{Binding ConnectionStatusText, StringFormat=' · {0}'}"/>
-                </StackPanel>
-            </StatusBarItem>
+                        </Border.Style>
+                        <Grid>
+                            <TextBlock x:Name="StatusTextBox"
+                                       Style="{StaticResource StatusTextBlockStyle}"
+                                       Focusable="True"
+                                       TextTrimming="CharacterEllipsis"
+                                       Text="{Binding StatusText, Mode=OneWay}"/>
+                            <ProgressBar x:Name="StatusProgressBar"
+                                         Width="80" Height="12" HorizontalAlignment="Right"
+                                         IsIndeterminate="True" Focusable="False"
+                                         Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisibilityConverter}}"
+                                         AutomationProperties.Name="{Binding StatusText, StringFormat='Working — {0}'}"/>
+                        </Grid>
+                    </Border>
 
-            <!-- Spacer: pushes Rules and Progress to the right -->
-            <Separator Style="{StaticResource StatusBarSpacerStyle}"/>
+                    <!-- Selection and the last completed incoming-mail download. -->
+                    <Border Grid.Column="1" Padding="8,1"
+                            BorderBrush="{DynamicResource {x:Static SystemColors.ControlDarkBrushKey}}"
+                            BorderThickness="0,0,1,0">
+                        <TextBlock TextAlignment="Right" TextTrimming="CharacterEllipsis">
+                            <Run Text="{Binding SelectedMessageCount, StringFormat='Selected: {0:N0}'}"/>
+                            <Run Text="{Binding LastSyncText, StringFormat='  ·  Last download: {0}'}"/>
+                        </TextBlock>
+                    </Border>
 
-            <!-- Region 3: Update notification (hidden until a newer release is detected).
-                 Visibility tracks UpdateReleaseUrl (set only when an update exists) rather than the
-                 menu label, which is now always populated ("No updates available" at rest). -->
-            <StatusBarItem x:Name="UpdateStatusItem"
-                           HorizontalAlignment="Right"
-                           KeyboardNavigation.IsTabStop="True"
-                           Visibility="{Binding UpdateReleaseUrl, Converter={StaticResource StringToVisibilityConverter}}">
-                <Button x:Name="UpdateStatusButton"
-                        Style="{StaticResource StatusBarButtonStyle}"
-                        Content="{Binding UpdateAvailableText, Mode=OneWay}"
-                        Command="{Binding OpenUpdatePageCommand}"
-                        ToolTip="Press Enter to open the release page in your browser"/>
-            </StatusBarItem>
-
-            <!-- Region 4: Rules status (clickable — opens Rules Manager) -->
-            <StatusBarItem x:Name="RulesStatusItem"
-                           HorizontalAlignment="Right"
-                           KeyboardNavigation.IsTabStop="True">
-                <Button x:Name="RulesStatusButton"
-                        Style="{StaticResource StatusBarButtonStyle}"
-                        Content="{Binding RulesStatusText, Mode=OneWay}"
-                        Click="RulesStatusButton_Click"
-                        AutomationProperties.Name="{Binding RulesStatusText, StringFormat='Rules — {0}'}"
-                        ToolTip="Open Rules Manager (Ctrl+Shift+L)"/>
-            </StatusBarItem>
-
-            <!-- Region 4: Sync progress (informational, visible only when busy) -->
-            <StatusBarItem x:Name="StatusProgressItem"
-                           HorizontalAlignment="Right"
-                           KeyboardNavigation.IsTabStop="True"
-                           Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisibilityConverter}}">
-                <ProgressBar x:Name="StatusProgressBar"
-                             Width="80" Height="14"
-                             IsIndeterminate="True"
-                             Focusable="True"
-                             AutomationProperties.Name="{Binding StatusText, StringFormat='Syncing — {0}'}"/>
-            </StatusBarItem>
-
-            <!-- Region 3: local date/time, kept at the far right and updated once per second. -->
-            <StatusBarItem HorizontalAlignment="Right" KeyboardNavigation.IsTabStop="False">
-                <TextBlock x:Name="StatusClockTextBlock" MinWidth="128" TextAlignment="Right"/>
+                    <!-- Current local date and time, always pinned to the far right. -->
+                    <Border Grid.Column="2" Padding="8,1">
+                        <TextBlock x:Name="StatusClockTextBlock" MinWidth="128" TextAlignment="Right"/>
+                    </Border>
+                </Grid>
             </StatusBarItem>
         </StatusBar>
 

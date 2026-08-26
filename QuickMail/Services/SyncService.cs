@@ -42,6 +42,8 @@ public class SyncService : ISyncService
     public event Action<IReadOnlyList<MailMessageSummary>>? FolderReadStatesReconciled;
     public event Action<int>? RulesApplied;
     public event Action<int, int>? SyncProgressChanged;
+    /// <summary>Fine-grained progress consumed while the user explicitly runs Check Mail.</summary>
+    public event Action<Guid, string>? FolderSyncStageChanged;
 
     private readonly Dictionary<Guid, DateTimeOffset> _lastSyncedUtc = new();
 
@@ -265,6 +267,14 @@ public class SyncService : ISyncService
         AccountModel account, MailFolderModel folder,
         List<MailMessageSummary> fetched, bool persisted, bool consumeRebuildBaseline, CancellationToken ct)
     {
+        // Only infer direction from folders whose semantics are unambiguous. A custom folder can
+        // contain both received mail and sent mail that the user filed there; treating every
+        // non-Sent folder as incoming would erase the persisted Outgoing marker on the next sync.
+        var direction = DirectionForFolder(folder);
+        if (direction != MessageDirection.Unknown)
+            foreach (var message in fetched.Where(message => message.Direction == MessageDirection.Unknown))
+                message.Direction = direction;
+
         if (fetched.Count == 0)
         {
             // F4: an empty folder at upgrade has no pre-existing mail to baseline, but still consume the
@@ -409,6 +419,15 @@ public class SyncService : ISyncService
         return fetched;
     }
 
+    private static MessageDirection DirectionForFolder(MailFolderModel folder) => folder.Kind switch
+    {
+        SpecialFolderKind.Inbox => MessageDirection.Incoming,
+        SpecialFolderKind.Sent or SpecialFolderKind.Drafts or SpecialFolderKind.Scheduled
+            => MessageDirection.Outgoing,
+        // Trash, Junk and user folders can legitimately contain either direction.
+        _ => MessageDirection.Unknown,
+    };
+
     public async Task<IReadOnlyList<MailMessageSummary>> SyncOneFolderAsync(AccountModel account, MailFolderModel folder, CancellationToken ct)
     {
         // IDLE-triggered sync in non-online (SQLite cache) mode.
@@ -466,6 +485,7 @@ public class SyncService : ISyncService
 
     private async Task<List<MailMessageSummary>> SyncFolderAsync(AccountModel account, MailFolderModel folder, CancellationToken ct)
     {
+        FolderSyncStageChanged?.Invoke(account.Id, "reading the local synchronization marker…");
         // ── New messages ─────────────────────────────────────────────────────────
         var maxKey   = await _store.GetMaxMessageKeyAsync(account.Id, folder.FullName);
         var cfg      = _config.Load();
@@ -479,11 +499,14 @@ public class SyncService : ISyncService
         if (maxKey == "0" && cfg.SyncDays > 0)
             return await SyncFolderByIdDiffAsync(account, folder, cfg, ct);
 
+        FolderSyncStageChanged?.Invoke(account.Id, "asking the server for newer messages and downloading them…");
         var incoming = await _imap.GetMessagesSinceAsync(
             account.Id, folder.FullName, maxKey, cfg.InitialSyncCount, ct);
 
         if (incoming.Count > 0)
         {
+            FolderSyncStageChanged?.Invoke(account.Id,
+                $"{incoming.Count:N0} message{(incoming.Count == 1 ? "" : "s")} downloaded; storing and applying automatic rules…");
             // Upsert + client rules run inside the shared chokepoint (the same path the live IDLE
             // syncs use). It strips rule-moved/deleted messages from the batch and raises
             // RulesApplied / MessagesRemoved; here we just surface the survivors to the UI —
@@ -493,6 +516,7 @@ public class SyncService : ISyncService
         }
 
         // ── Remote deletions ─────────────────────────────────────────────────────
+        FolderSyncStageChanged?.Invoke(account.Id, "reconciling the local cache with the server…");
         await ReconcileFolderAsync(account, folder, ct);
 
         return incoming;
@@ -535,6 +559,7 @@ public class SyncService : ISyncService
         // id → is_read for everything cached in this folder. The key set is the folder's cached-id set
         // (drives the addition/deletion diff), and the values let us reconcile read/unread changed by
         // another client — so this one query replaces a separate GetAllMessageIdsAsync here.
+        FolderSyncStageChanged?.Invoke(account.Id, "loading cached message IDs and read states…");
         var cacheReadStates = await _store.LoadFolderReadStatesAsync(account.Id, folder.FullName);
 
         // Fresh/empty cache: fetch the full initial window and skip the id listing entirely — there is
@@ -542,19 +567,34 @@ public class SyncService : ISyncService
         // would be a wasted round-trip on each folder's first sync.
         if (cacheReadStates.Count == 0)
         {
+            FolderSyncStageChanged?.Invoke(account.Id,
+                $"the local folder is empty; downloading the initial {cfg.SyncDays:N0}-day window…");
             var initial = await _imap.GetMessagesSinceDateAsync(account.Id, folder.FullName, windowStart, ct);
+            FolderSyncStageChanged?.Invoke(account.Id,
+                $"{initial.Count:N0} message{(initial.Count == 1 ? "" : "s")} downloaded; storing and applying automatic rules…");
             return await SurfaceArrivalsAsync(account, folder, initial, ct);
         }
 
+        FolderSyncStageChanged?.Invoke(account.Id, "requesting the server message-ID list…");
         var serverIdDates = await _imap.GetFolderMessageIdDatesAsync(account.Id, folder.FullName, ct);
 
         // Fetch only when the server lists a WITHIN-WINDOW id we don't yet hold — old mail the cache never
         // captured (older than the window) is not a reason to fetch.
         var hasNew = serverIdDates.Any(m => m.ReceivedUtc >= windowStart && !cacheReadStates.ContainsKey(m.Id));
 
-        var fetched = hasNew
-            ? await _imap.GetMessagesSinceDateAsync(account.Id, folder.FullName, windowStart, ct)
-            : new List<MailMessageSummary>();
+        List<MailMessageSummary> fetched;
+        if (hasNew)
+        {
+            FolderSyncStageChanged?.Invoke(account.Id, "new server IDs found; downloading the updated message window…");
+            fetched = await _imap.GetMessagesSinceDateAsync(account.Id, folder.FullName, windowStart, ct);
+            FolderSyncStageChanged?.Invoke(account.Id,
+                $"{fetched.Count:N0} message{(fetched.Count == 1 ? "" : "s")} downloaded; storing and applying automatic rules…");
+        }
+        else
+        {
+            fetched = [];
+            FolderSyncStageChanged?.Invoke(account.Id, "server IDs are unchanged; no message download is required…");
+        }
 
         // Always run the (possibly empty) batch through the chokepoint. An empty batch is a no-op except
         // that it consumes a pending #366 rebuild baseline (F4) — preserving the pre-#462 behavior where

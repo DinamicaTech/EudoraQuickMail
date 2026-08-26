@@ -28,13 +28,16 @@ public sealed class LocalMailService : IMailService
             // shifted Trash/Junk. Folder names are authoritative for these local system folders.
             foreach (var folder in folders)
             {
+                if (folder.FullName.Contains('/') || folder.FullName.Contains('\\')) continue;
                 var leaf = folder.DisplayName.Trim().ToLowerInvariant();
                 folder.Kind = leaf switch
                 {
+                    "in" or "inbox" => SpecialFolderKind.Inbox,
                     "draft" or "drafts" => SpecialFolderKind.Drafts,
                     "scheduled" => SpecialFolderKind.Scheduled,
+                    "out" or "sent" => SpecialFolderKind.Sent,
                     "trash" => SpecialFolderKind.Trash,
-                    "junk" => SpecialFolderKind.Junk,
+                    "junk" or "spam" => SpecialFolderKind.Junk,
                     _ => folder.Kind,
                 };
             }
@@ -43,18 +46,20 @@ public sealed class LocalMailService : IMailService
                 : null;
             if (account.BackendKind == BackendKind.Pop3Smtp && folders.Count == 0)
                 folders.Add(new() { AccountId = account.Id, FullName = root!, DisplayName = root!, IsContainer = true });
-            if (account.BackendKind == BackendKind.Pop3Smtp) AddSpecial(SpecialFolderKind.Inbox, "Inbox");
+            if (account.BackendKind == BackendKind.Pop3Smtp) AddSpecial(SpecialFolderKind.Inbox, "In");
             AddSpecial(SpecialFolderKind.Drafts, "Draft");
             AddSpecial(SpecialFolderKind.Scheduled, "Scheduled");
             if (account.BackendKind == BackendKind.Pop3Smtp) AddSpecial(SpecialFolderKind.Sent, "Sent");
             AddSpecial(SpecialFolderKind.Trash, "Trash");
+            AddSpecial(SpecialFolderKind.Junk, "Junk");
             await _store.SaveFoldersAsync(account.Id, folders);
 
             void AddSpecial(SpecialFolderKind kind, string name)
             {
                 if (folders.Any(f => f.Kind == kind)) return;
                 folders.Add(new() { AccountId = account.Id, FullName = name, DisplayName = name,
-                    ParentId = root, Kind = kind, ExcludeFromAllMail = kind is SpecialFolderKind.Drafts or SpecialFolderKind.Scheduled or SpecialFolderKind.Sent or SpecialFolderKind.Trash });
+                    ParentId = root, Kind = kind,
+                    ExcludeFromAllMail = kind is SpecialFolderKind.Drafts or SpecialFolderKind.Scheduled });
             }
         }
     }
@@ -140,6 +145,11 @@ public sealed class LocalMailService : IMailService
     }
     public async Task<string?> FindDraftsFolderNameAsync(Guid accountId, CancellationToken ct = default)
     {
+        var account = _accounts.GetValueOrDefault(accountId)
+            ?? _accountService?.LoadAccounts().FirstOrDefault(candidate => candidate.Id == accountId);
+        if (account is { BackendKind: BackendKind.Pop3Smtp or BackendKind.LocalArchive })
+            await _store.EnsureLocalSystemFoldersAsync([account]);
+
         var folders = await GetFoldersAsync(accountId, ct);
         var existing = folders.FirstOrDefault(f => f.Kind == SpecialFolderKind.Drafts);
         if (existing != null) return existing.FullName;
@@ -194,6 +204,7 @@ public sealed class LocalMailService : IMailService
             PlainTextBody = compose.Body, Preview = compose.Body.Length <= 240 ? compose.Body : compose.Body[..240],
             HtmlBody = compose.HtmlBody ?? string.Empty, DraftComposeMode = compose.Mode,
             DraftSpellLanguage = compose.SpellLanguage, IsRead = true,
+            Direction = MessageDirection.Outgoing,
             Attachments = compose.Attachments.Select(a => new AttachmentModel
             {
                 FileName = a.FileName,
@@ -238,9 +249,18 @@ public sealed class LocalMailService : IMailService
     }
     public Task DeleteFolderAsync(Guid accountId, string folderName, CancellationToken ct = default) =>
         throw new NotSupportedException("Local folder deletion will be enabled after the empty-folder guard is wired.");
-    public Task RenameFolderAsync(Guid accountId, string folderName, string newName,
-        string? newParentFolderName, CancellationToken ct = default) =>
-        throw new NotSupportedException("Local folder rename is not yet enabled.");
+    public async Task RenameFolderAsync(Guid accountId, string folderName, string newName,
+        string? newParentFolderName, CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        var newPath = string.IsNullOrWhiteSpace(newParentFolderName)
+            ? newName : newParentFolderName.TrimEnd('/', '.') + "/" + newName;
+        var all = await GetFoldersAsync(accountId, ct);
+        if (all.Any(folder => folder.FullName.Equals(newPath, StringComparison.OrdinalIgnoreCase)))
+            await _store.MergeFolderPathAsync(accountId, folderName, newPath, ct);
+        else
+            await _store.RenameFolderPathAsync(accountId, folderName, newPath);
+    }
     public Task CopyFolderAsync(Guid accountId, string folderName, string? destinationParentName,
         CancellationToken ct = default) =>
         throw new NotSupportedException("Local folder copy is not part of the MVP.");

@@ -6,14 +6,17 @@ using QuickMail.Models;
 namespace QuickMail.Services;
 
 /// <summary>
-/// Application-level calendar operations: refresh (harvest), load events with
+/// Application-level calendar operations: load/rebuild events with
 /// filtering/sorting, and update response status. Delegates persistence to
 /// <see cref="ICalendarProvider"/>.
 /// </summary>
 public interface ICalendarService
 {
-    /// <summary>Re-harvests events from the provider and reloads the in-memory list.</summary>
+    /// <summary>Reloads the already-materialized events without scanning cached messages.</summary>
     Task RefreshAsync(CancellationToken ct = default);
+
+    /// <summary>Re-harvests calendar invitations from cached messages and reloads the list.</summary>
+    Task RebuildAsync(CancellationToken ct = default);
 
     /// <summary>All events, sorted by start time ascending (nulls last).</summary>
     IReadOnlyList<CalendarEvent> Events { get; }

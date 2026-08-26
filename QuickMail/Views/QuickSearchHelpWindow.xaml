@@ -14,7 +14,7 @@
           <ItemsControl.ItemTemplate><DataTemplate><Grid Margin="0,3"><Grid.ColumnDefinitions><ColumnDefinition Width="65"/><ColumnDefinition Width="*"/><ColumnDefinition Width="220"/></Grid.ColumnDefinitions><TextBlock Text="{Binding Prefix}" FontWeight="SemiBold"/><TextBlock Grid.Column="1" Text="{Binding Description}"/><TextBlock Grid.Column="2" Text="{Binding Example}" FontFamily="Consolas"/></Grid></DataTemplate></ItemsControl.ItemTemplate>
         </ItemsControl>
         <TextBlock FontWeight="SemiBold" Text="Examples"/>
-        <TextBlock FontFamily="Consolas" TextWrapping="Wrap" Margin="0,5,0,0"><Run Text="chocolate;D&gt;2022"/><LineBreak/><Run Text="N;S:invoice"/><LineBreak/><Run Text="F;D&gt;2025"/><LineBreak/><Run Text="T:(@dinamica;@google);A#=2;D=3/5/2026"/><LineBreak/><Run Text="F:paypal;AN:invoice;D=03/2015"/><LineBreak/><Run Text="AC:cho?olate;D&gt;2025"/><LineBreak/><Run Text="&quot;text containing ; a semicolon&quot;"/></TextBlock>
+        <TextBlock FontFamily="Consolas" TextWrapping="Wrap" Margin="0,5,0,0"><Run Text="chocolate;D&gt;2022"/><LineBreak/><Run Text="N;S:invoice"/><LineBreak/><Run Text="O;D&gt;2025"/><LineBreak/><Run Text="I;S:order"/><LineBreak/><Run Text="F;D&gt;2025"/><LineBreak/><Run Text="T:(@dinamica;@google);A#=2;D=3/5/2026"/><LineBreak/><Run Text="F:paypal;AN:invoice;D=03/2015"/><LineBreak/><Run Text="AC:cho?olate;D&gt;2025"/><LineBreak/><Run Text="&quot;text containing ; a semicolon&quot;"/></TextBlock>
         <TextBlock TextWrapping="Wrap" Margin="0,12,0,0" Text="Text fields use ':'; attachment counts and dates use =, &lt;, &lt;=, &gt; or &gt;=. Date values may be a complete local date, MM/yyyy, or yyyy. '?' matches exactly one character."/>
       </StackPanel>
     </ScrollViewer>

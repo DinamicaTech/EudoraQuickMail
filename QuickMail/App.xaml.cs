@@ -51,6 +51,7 @@ public partial class App : Application
     private AutoDiscoverService? _autoDiscoverService;
     private ConnectionTruthProbe? _truthProbe;
     private PeriodicPop3Receiver? _pop3Receiver;
+    private Views.SplashWindow? _startupSplash;
     public ScheduledSendService? ScheduledSender { get; private set; }
 
     public async Task<IReadOnlyList<MailOperationFailure>> CheckMailNowAsync(Action<string>? progress = null)
@@ -62,7 +63,10 @@ public partial class App : Application
             void OnFailed(AccountModel account, Exception error, bool manual) =>
                 failures.Add(new MailOperationFailure(account, "Receive email (POP3)", error));
             _pop3Receiver.Failed += OnFailed;
-            try { await _pop3Receiver.SweepAsync(includeAccountsWithAutomaticCheckDisabled: true); }
+            // A manual Check Mail run must still honour the per-account "Download incoming mail"
+            // switch. The command is manual, but a disabled account is intentionally excluded from
+            // reception (it may still be used for sending queued mail below).
+            try { await _pop3Receiver.SweepAsync(includeAccountsWithAutomaticCheckDisabled: false); }
             finally { _pop3Receiver.Failed -= OnFailed; }
         }
         progress?.Invoke("Sending queued messages…");
@@ -134,8 +138,26 @@ public partial class App : Application
         {
             var app = new App();
             app.InitializeComponent();
+            app.ShowEarlySplash(args);
             app.Run();
         }
+    }
+
+    /// <summary>
+    /// Shows the first visual as soon as WPF has been initialized, before profile/configuration
+    /// discovery and before <see cref="OnStartup"/> begins its disk work. Velopack hooks and the
+    /// single-instance guard must remain ahead of this point because either may terminate the
+    /// launch without starting the application.
+    /// </summary>
+    private void ShowEarlySplash(string[] args)
+    {
+        if (IsHelpRequest(args) || args.Any(a =>
+                a.Equals("--ui-probe", StringComparison.OrdinalIgnoreCase)))
+            return;
+
+        _startupSplash = new Views.SplashWindow();
+        _startupSplash.Show();
+        _startupSplash.SetStatus("Starting Eudora QuickMail…");
     }
 
     // Uninstall-time offer to remove user data, mirroring the old installer's prompt.
@@ -235,6 +257,8 @@ public partial class App : Application
         var profile = ResolveProfile(e.Args);
         if (profile is null)
         {
+            _startupSplash?.Close();
+            _startupSplash = null;
             Shutdown();
             return;
         }
@@ -282,9 +306,14 @@ public partial class App : Application
         var openAccountCreationAfterStartup = false;
         if (UiProbe is null && IsUnusedProfile(profile))
         {
+            // The welcome wizard needs to own the foreground; the topmost splash would otherwise
+            // obscure it. A normal setup path creates the splash again before database startup.
+            _startupSplash?.Hide();
             var welcome = new Views.FirstRunWelcomeWindow(profile.ProfileDir);
             if (welcome.ShowDialog() != true)
             {
+                _startupSplash?.Close();
+                _startupSplash = null;
                 Shutdown();
                 return;
             }
@@ -298,6 +327,8 @@ public partial class App : Application
 
             ApplyFirstRunDefaults(profile);
             openAccountCreationAfterStartup = true;
+            _startupSplash?.Show();
+            _startupSplash?.SetStatus("Opening the local mail database…");
         }
 
         var onlineMode = e.Args.Contains("--online", StringComparer.OrdinalIgnoreCase);
@@ -309,14 +340,15 @@ public partial class App : Application
         if (onlineMode)
             LogService.Log("Online mode enabled — SQLite cache bypassed.");
 
-        Views.SplashWindow? splash = null;
-        if (UiProbe is null)
+        var splash = _startupSplash;
+        if (UiProbe is null && splash is null)
         {
             splash = new Views.SplashWindow();
             splash.Show();
-            splash.SetStatus("Opening the local mail database…");
+            _startupSplash = splash;
         }
-        RecordStartupStage("profile, first-run checks and splash creation");
+        splash?.SetStatus("Opening the local mail database…");
+        RecordStartupStage("profile and first-run checks; early splash already visible");
 
         // Left/Right/Home/End through a wrapped tab strip (#528). A class handler so a window
         // with tabs added later cannot be left out.
@@ -407,7 +439,42 @@ public partial class App : Application
             // Router registration runs via mainVm.RegisterAccountBackend (set below), which also
             // covers accounts added at runtime through RefreshAccountList.
             var accounts = accountService.LoadAccounts();
+            if (!onlineMode && !probeMode)
+            {
+                var localAccountIds = accounts
+                    .Where(account => account.BackendKind is BackendKind.Pop3Smtp or BackendKind.LocalArchive)
+                    .Select(account => account.Id);
+                splash?.SetStatus("Normalizing local incoming mail…");
+                localStore.NormalizeLocalInboxFolders(localAccountIds);
+            }
             RecordStartupStage("construct mail backends and load accounts", $"accounts={accounts.Count}");
+            if (!onlineMode && !probeMode)
+            {
+                var databasePath = System.IO.Path.Combine(profile.ProfileDir, "mail.db");
+                if (System.IO.File.Exists(databasePath) &&
+                    !LocalFolderTreeMigrationService.HasShadowTree(databasePath) &&
+                    LocalFolderTreeMigrationService.HasLegacyLocalFolderData(databasePath, accounts))
+                {
+                    splash?.SetStatus("Converting the local folder tree…");
+                    using var folderMigrationTiming = PerformanceLogService.Measure(
+                        "Startup/splash: convert canonical local folder tree");
+                    try
+                    {
+                        var conversion = new LocalFolderTreeMigrationService()
+                            .BuildShadowTree(databasePath, accounts);
+                        LogService.Log($"Canonical local folder conversion completed: " +
+                            $"{conversion.LegacyFolders:N0} legacy folders, " +
+                            $"{conversion.CanonicalFolders:N0} canonical folders, " +
+                            $"{conversion.MappedMessages:N0} mapped messages.");
+                    }
+                    catch (Exception ex)
+                    {
+                        // BuildShadowTree is a single transaction. A validation or SQLite failure
+                        // leaves the legacy catalogue untouched and startup can safely continue.
+                        LogService.Log("Automatic canonical local folder conversion failed", ex);
+                    }
+                }
+            }
             splash?.SetStatus("Preparing folders, messages and search services…");
             if (!probeMode) ScheduledSender = new ScheduledSendService(profile, effectiveSmtp, accountService, credentialService, localStore);
 
@@ -597,13 +664,22 @@ public partial class App : Application
                 {
                     mainVm.IsBusy = true;
                     mainVm.IsStatusHighlighted = true;
-                    mainVm.StatusText = $"Downloading mail for {account.AccountLabel} {current}/{total}…";
+                    mainVm.StatusText = $"{account.AccountLabel} (account {current} of {total}): connecting to POP3 and checking the server…";
                 });
                 _pop3Receiver.Completed += (account, result) => Dispatcher.BeginInvoke(() =>
                 {
-                    mainVm.IsBusy = false;
-                    mainVm.IsStatusHighlighted = true;
-                    mainVm.StatusText = $"Mail download complete for {account.AccountLabel}: {result.Downloaded:N0} new.";
+                    // POP3 messages are materialized locally rather than passing through the
+                    // IMAP/Graph sync pipeline that normally raises the tray notification. Feed
+                    // the exact downloaded batch into the same notification/de-duplication path.
+                    if (result.NewMessages is { Count: > 0 } downloaded)
+                        mainVm.MaybeNotifyNewMail(account, downloaded, receivedNow: true);
+
+                    // The POP3 receiver writes straight to SQLite and automatic rules run before
+                    // Completed is raised. Unlike IMAP/Graph, it therefore never raises
+                    // SyncService.FolderSynced. Refresh the currently visible local page from the
+                    // authoritative post-rule state so a newly downloaded message appears without
+                    // requiring the user to click In again.
+                    _ = mainVm.RefreshAfterPop3ReceiveAsync(account, result);
                 });
             }
 
@@ -633,6 +709,7 @@ public partial class App : Application
                 {
                     var closeStarted = Stopwatch.GetTimestamp();
                     splash.Close();
+                    _startupSplash = null;
                     PerformanceLogService.Record("Startup/splash: close splash window",
                         Stopwatch.GetElapsedTime(closeStarted));
                     mainWindow.NotifySplashClosed();
@@ -660,6 +737,7 @@ public partial class App : Application
         catch (Exception ex)
         {
             splash?.Close();
+            _startupSplash = null;
             // Log the exception chain before WER kills the process so the cause
             // survives in %APPDATA%\QuickMail\quickmail.log.
             for (var cur = ex; cur != null; cur = cur.InnerException)
@@ -792,6 +870,7 @@ public partial class App : Application
         config.AutoSaveDrafts = true;
         config.AutoSaveIntervalSeconds = 30;
         config.DefaultComposeMode = Models.ComposeMode.Html;
+        config.Windowing.ComposeOpenMode = Models.ComposeOpenMode.DockedTab;
         config.StartupFolder = "In";
         config.StartupFolderLabel = "In";
         configService.Save(config);
@@ -801,7 +880,7 @@ public partial class App : Application
     {
         var options = new Services.EudoraImportOptions(
             welcome.EudoraRoot, welcome.DataFolder, welcome.RootDisplayName, welcome.AttachmentMode,
-            welcome.ImportFilters, welcome.RespectCheckMailSettings);
+            welcome.ImportFilters, welcome.RespectCheckMailSettings, welcome.SelectedSources);
         if (!Services.EudoraImportLauncher.TryStart(options, out var error))
         {
             MessageBox.Show(error, "Import Eudora", MessageBoxButton.OK, MessageBoxImage.Error);

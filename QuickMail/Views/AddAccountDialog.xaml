@@ -216,8 +216,8 @@
                                           AutomationProperties.Name="POP3 use SSL" Margin="0,6"/>
                                 <CheckBox Content="Accept invalid certificates" IsChecked="{Binding Pop3AcceptInvalidCert}"
                                           AutomationProperties.Name="POP3 accept invalid SSL certificates" Margin="0,0,0,6"/>
-                                <CheckBox Content="Comprobar correo entrante" IsChecked="{Binding CheckIncomingMail}"
-                                          AutomationProperties.Name="Comprobar correo entrante" Margin="0,4,0,6"/>
+                                <CheckBox Content="Check incoming email" IsChecked="{Binding CheckIncomingMail}"
+                                          AutomationProperties.Name="Check incoming email" Margin="0,4,0,6"/>
                             </StackPanel>
                             <CheckBox Content="_Active account" IsChecked="{Binding IsActive}"
                                       AutomationProperties.Name="Active account" Margin="0,4,0,6"/>

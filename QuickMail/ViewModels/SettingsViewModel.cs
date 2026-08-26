@@ -116,6 +116,9 @@ public partial class SettingsViewModel : ObservableObject
     private bool _notifyOnNewMail;
 
     [ObservableProperty]
+    private bool _notifyTrayIconOnNewMail = true;
+
+    [ObservableProperty]
     private bool _notifyOnWatchedConversation;
 
     [ObservableProperty]
@@ -222,7 +225,7 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsComposeFloatingWindow))]
     [NotifyPropertyChangedFor(nameof(IsComposeDockedTab))]
-    private string _composeOpenMode = "floatingWindow";
+    private string _composeOpenMode = "dockedTab";
 
     public bool IsComposeFloatingWindow
     {
@@ -334,6 +337,12 @@ public partial class SettingsViewModel : ObservableObject
     /// </summary>
     [ObservableProperty]
     private bool _connectionDiagnostics;
+
+    [ObservableProperty]
+    private bool _markAlsoFilterOutMailboxByDefault;
+
+    [ObservableProperty]
+    private bool _showFilteredDestinationTab;
 
     public bool IsLogFormatActionFirst
     {
@@ -477,6 +486,7 @@ public partial class SettingsViewModel : ObservableObject
         ShowCalendar = cfg.ShowCalendar;
         ShowAccountsPanel = cfg.ShowAccountsPanel;
         ShowTodayAgenda = cfg.ShowTodayAgenda;
+        ShowFilteredDestinationTab = cfg.ShowFilteredDestinationTab;
         SyncDays = cfg.SyncDays;
         InitialSyncCount = cfg.InitialSyncCount;
         MailSyncPollMinutes = cfg.MailSyncPollMinutes;
@@ -498,6 +508,7 @@ public partial class SettingsViewModel : ObservableObject
         CalendarReminderMinutes          = cfg.CalendarReminderMinutes;
         ConfirmEmptyTrash                = cfg.ConfirmEmptyTrash;
         NotifyOnNewMail                  = cfg.NotifyOnNewMail;
+        NotifyTrayIconOnNewMail          = cfg.NotifyTrayIconOnNewMail;
         NotifyOnWatchedConversation      = cfg.NotifyOnWatchedConversation;
         CloseToTray                      = cfg.CloseToTray;
         DesktopShortcut                  = Helpers.DesktopShortcut.Exists();
@@ -525,6 +536,7 @@ public partial class SettingsViewModel : ObservableObject
         StartupSyncScope                 = ConfigModel.ParseStartupSyncScope(cfg.StartupSyncScope);
         EnableLogging                    = cfg.EnableLogging;
         ConnectionDiagnostics            = cfg.ConnectionDiagnostics;
+        MarkAlsoFilterOutMailboxByDefault = cfg.MarkAlsoFilterOutMailboxByDefault;
         MessageOpenMode = cfg.Windowing.MessageOpenMode switch
         {
             Models.MessageOpenMode.Tab    => "tab",
@@ -571,6 +583,7 @@ public partial class SettingsViewModel : ObservableObject
         cfg.ShowCalendar = ShowCalendar;
         cfg.ShowAccountsPanel = ShowAccountsPanel;
         cfg.ShowTodayAgenda = ShowTodayAgenda;
+        cfg.ShowFilteredDestinationTab = ShowFilteredDestinationTab;
         cfg.SyncDays = SyncDays;
         cfg.InitialSyncCount = InitialSyncCount;
         cfg.MailSyncPollMinutes = MailSyncPollMinutes;
@@ -592,6 +605,7 @@ public partial class SettingsViewModel : ObservableObject
         cfg.CalendarReminderMinutes          = Math.Clamp(CalendarReminderMinutes, 1, 1440);
         cfg.ConfirmEmptyTrash                = ConfirmEmptyTrash;
         cfg.NotifyOnNewMail                  = NotifyOnNewMail;
+        cfg.NotifyTrayIconOnNewMail          = NotifyTrayIconOnNewMail;
         cfg.NotifyOnWatchedConversation      = NotifyOnWatchedConversation;
         cfg.CloseToTray                      = CloseToTray;
         cfg.AutoUpdate                       = AutoUpdate;
@@ -642,6 +656,7 @@ public partial class SettingsViewModel : ObservableObject
         cfg.StartupSyncScope                 = StartupSyncScope;
         cfg.EnableLogging                    = EnableLogging;
         cfg.ConnectionDiagnostics            = ConnectionDiagnostics;
+        cfg.MarkAlsoFilterOutMailboxByDefault = MarkAlsoFilterOutMailboxByDefault;
         cfg.Windowing.MessageOpenMode = MessageOpenMode switch
         {
             "tab"    => Models.MessageOpenMode.Tab,

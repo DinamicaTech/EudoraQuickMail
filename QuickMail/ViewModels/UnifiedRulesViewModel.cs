@@ -35,6 +35,7 @@ public partial class UnifiedRulesViewModel : ObservableObject
     // "Show field labels in the rules list" — read once at open (matches RulesManagerViewModel); a
     // Settings change is picked up next time the manager opens.
     private readonly bool _showFieldLabels;
+    private readonly bool _alsoFilterOutMailboxByDefault;
 
     public UnifiedRulesViewModel(
         IRuleService clientRules,
@@ -48,7 +49,9 @@ public partial class UnifiedRulesViewModel : ObservableObject
         _clientRules = clientRules;
         _serverRules = serverRules;
         _selectedMessagesForTest = selectedMessagesForTest?.ToList();
-        _showFieldLabels = configService?.Load().RuleListShowFieldLabels ?? false;
+        var config = configService?.Load();
+        _showFieldLabels = config?.RuleListShowFieldLabels ?? false;
+        _alsoFilterOutMailboxByDefault = config?.MarkAlsoFilterOutMailboxByDefault ?? false;
         _foldersByAccount = foldersByAccount;
         _allAccounts = accounts.ToList();
 
@@ -134,7 +137,8 @@ public partial class UnifiedRulesViewModel : ObservableObject
     // ── Commands ────────────────────────────────────────────────────────────
 
     [RelayCommand]
-    private void NewRule() => OpenNewEditor(ServerRuleEditorViewModel.ForNew());
+    private void NewRule() => OpenNewEditor(
+        ServerRuleEditorViewModel.ForNew(_alsoFilterOutMailboxByDefault));
 
     /// <summary>Open the New-rule editor prefilled from a message (Ctrl+Shift+T). The prefilled rule
     /// classifies server/client on save exactly like a hand-made New rule.</summary>

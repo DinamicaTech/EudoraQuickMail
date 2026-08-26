@@ -17,4 +17,8 @@ public enum MessageSort
     ReadStateDescending,
     AttachmentsFirst,
     AttachmentsLast,
+    StatusAscending,
+    StatusDescending,
+    DirectionAscending,
+    DirectionDescending,
 }

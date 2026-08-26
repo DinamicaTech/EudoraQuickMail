@@ -39,6 +39,16 @@ public interface IMailService : IDisposable
     /// </summary>
     Task<List<MailMessageSummary>> GetMessagesSinceAsync(
         Guid accountId, string folderName, string sinceMessageId, int initialCount, CancellationToken ct = default);
+
+    /// <summary>
+    /// Fetches the current envelope and flags for one message without downloading its body.
+    /// Used for inexpensive repairs of legacy cached summary fields such as an IMAP sender that
+    /// was previously stored as a friendly alias without its mailbox address.
+    /// </summary>
+    async Task<MailMessageSummary?> GetMessageSummaryAsync(
+        Guid accountId, string folderName, string messageId, CancellationToken ct = default)
+        => await GetMessageDetailAsync(accountId, folderName, messageId, ct);
+
     Task<MailMessageDetail> GetMessageDetailAsync(
         Guid accountId, string folderName, string messageId, CancellationToken ct = default);
 

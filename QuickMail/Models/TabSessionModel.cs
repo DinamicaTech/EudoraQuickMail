@@ -7,6 +7,8 @@ public enum TabKind
 {
     Message,
     MessageList,
+    FilteredFolder,
+    Calendar,
     Compose,
     Unknown,
 }

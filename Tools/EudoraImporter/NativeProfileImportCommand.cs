@@ -25,18 +25,27 @@ internal static class NativeProfileImportCommand
             var filtersPath = ValueAfter(args, "--filters");
             var respectCheckMail = string.Equals(ValueAfter(args, "--respect-check-mail"), "true",
                 StringComparison.OrdinalIgnoreCase);
+            var selective = string.Equals(ValueAfter(args, "--selective"), "true",
+                StringComparison.OrdinalIgnoreCase);
             Console.WriteLine("[1/5] Importing Eudora account configuration…");
             var accountImporter = new AccountService(profile);
-            var importedAccounts = string.IsNullOrWhiteSpace(eudoraRoot)
+            var existingAccounts = accountImporter.LoadAccounts();
+            var selectiveTarget = existingAccounts.FirstOrDefault(account => account.IsDefault && account.IsActive)
+                ?? existingAccounts.FirstOrDefault(account => account.IsActive);
+            var importedAccounts = selective && selectiveTarget != null
+                ? new EudoraAccountImporter.ImportResult(0, selectiveTarget.Id)
+                : string.IsNullOrWhiteSpace(eudoraRoot)
                 ? new EudoraAccountImporter.ImportResult(0, Guid.Empty)
                 : EudoraAccountImporter.ImportAccounts(Path.Combine(eudoraRoot, "Eudora.ini"),
-                    accountImporter, rootName, respectCheckMail);
+                    accountImporter, selective ? "Eudora" : rootName, selective ? false : respectCheckMail);
             var targetAccountId = importedAccounts.DominantAccountId;
             if (targetAccountId == Guid.Empty)
-                throw new ArgumentException("No se pudo localizar la cuenta Dominant en [Settings] de Eudora.ini.");
+                throw new ArgumentException(selective
+                    ? "Selective import requires an existing active QuickMail account."
+                    : "No se pudo localizar la cuenta Dominant en [Settings] de Eudora.ini.");
             var dominantAddress = accountImporter.LoadAccounts()
                 .FirstOrDefault(account => account.Id == targetAccountId)?.Username ?? string.Empty;
-            ApplyImportedDefaults(profile, targetAccountId);
+            if (!selective) ApplyImportedDefaults(profile, targetAccountId);
 
             var stopwatch = Stopwatch.StartNew();
             Console.WriteLine("[2/5] Preparing the local message database…");
@@ -49,7 +58,7 @@ internal static class NativeProfileImportCommand
                 .Where(existing => !folders.Any(imported => imported.FullName.Equals(existing.FullName, StringComparison.OrdinalIgnoreCase)))
                 .Concat(folders).ToList();
             await store.SaveFoldersAsync(targetAccountId, merged);
-            if (targetAccountId != ImportAccountId)
+            if (!selective && targetAccountId != ImportAccountId)
             {
                 await store.DeleteAccountDataAsync(ImportAccountId);
                 RemoveLegacyImportAccount(profile);
@@ -58,7 +67,7 @@ internal static class NativeProfileImportCommand
             Console.WriteLine("      This is the longest stage. Do not close this window.");
             var count = await RunWithHeartbeatAsync(
                 () => BulkCopyMessagesAsync(source, Path.Combine(profile.ProfileDir, "mail.db"), folders,
-                    targetAccountId, dominantAddress),
+                    targetAccountId, dominantAddress, selective),
                 "Still importing messages and building the search index");
             stopwatch.Stop();
             Console.WriteLine("[4/5] Message import and search indexing completed.");
@@ -191,7 +200,7 @@ internal static class NativeProfileImportCommand
     };
 
     private static async Task<long> BulkCopyMessagesAsync(string source, string target,
-        IReadOnlyList<MailFolderModel> folders, Guid accountId, string dominantAddress)
+        IReadOnlyList<MailFolderModel> folders, Guid accountId, string dominantAddress, bool selective)
     {
         await using var connection = new SqliteConnection($"Data Source={target};Mode=ReadWrite;Pooling=False;");
         await connection.OpenAsync();
@@ -205,6 +214,16 @@ internal static class NativeProfileImportCommand
             // A missing recipient on received/archived mail generally means BCC or a stripped To
             // header. Never invent the sender's own address for an outgoing message.
             return leaf is "out" or "sent" ? string.Empty : fallback ?? string.Empty;
+        });
+        connection.CreateFunction<string?, long>("import_direction", mailbox =>
+        {
+            var segments = (mailbox ?? string.Empty).Replace('\\', '/')
+                .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            return segments.Any(segment => segment.TrimStart('_').Equals("out", StringComparison.OrdinalIgnoreCase)
+                                           || segment.Equals("sent", StringComparison.OrdinalIgnoreCase)
+                                           || segment.Equals("sent items", StringComparison.OrdinalIgnoreCase))
+                ? (long)MessageDirection.Outgoing
+                : (long)MessageDirection.Incoming;
         });
         await using var attach = connection.CreateCommand();
         attach.CommandText = "ATTACH DATABASE $source AS eudora;";
@@ -239,32 +258,57 @@ internal static class NativeProfileImportCommand
 
         await using var copy = connection.CreateCommand();
         copy.Transaction = (SqliteTransaction)tx;
-        copy.CommandText = """
+        var importedId = selective
+            ? "'eudora-selective-'||lower(hex(m.source_mailbox))||'-'||m.source_ordinal"
+            : "'eudora-'||m.id";
+        var cleanup = selective ? """
+            CREATE TEMP TABLE IncomingEudoraIds(unique_id TEXT PRIMARY KEY) WITHOUT ROWID;
+            INSERT INTO IncomingEudoraIds
+                SELECT 'eudora-selective-'||lower(hex(source_mailbox))||'-'||source_ordinal FROM eudora.messages;
+            DELETE FROM LocalMessageFts WHERE rowid IN (
+                SELECT fts_rowid FROM LocalMessageFtsKey WHERE account_id=$aid
+                AND unique_id IN (SELECT unique_id FROM IncomingEudoraIds));
+            DELETE FROM LocalMessageFtsKey WHERE account_id=$aid
+                AND unique_id IN (SELECT unique_id FROM IncomingEudoraIds);
+            DELETE FROM MessageDetail WHERE account_id=$aid
+                AND unique_id IN (SELECT unique_id FROM IncomingEudoraIds);
+            DELETE FROM AttachmentContent WHERE account_id=$aid
+                AND unique_id IN (SELECT unique_id FROM IncomingEudoraIds);
+            DELETE FROM MessageSummary WHERE account_id=$aid
+                AND unique_id IN (SELECT unique_id FROM IncomingEudoraIds);
+            """ : """
             DELETE FROM LocalMessageFts WHERE account_id=$aid AND unique_id LIKE 'eudora-%';
             DELETE FROM LocalMessageFtsKey WHERE account_id=$aid AND unique_id LIKE 'eudora-%';
             DELETE FROM MessageDetail WHERE account_id=$aid AND unique_id LIKE 'eudora-%';
+            DELETE FROM AttachmentContent WHERE account_id=$aid AND unique_id LIKE 'eudora-%';
             DELETE FROM MessageSummary WHERE account_id=$aid AND unique_id LIKE 'eudora-%';
+            """;
+        var keyScope = selective
+            ? "AND unique_id IN (SELECT unique_id FROM IncomingEudoraIds)"
+            : string.Empty;
+        copy.CommandText = cleanup + $$"""
 
             INSERT INTO MessageSummary
                 (unique_id,account_id,folder_name,from_disp,to_addr,subject,date_ticks,is_read,
-                 preview_text,is_replied,is_forwarded,has_attachments,is_mailing_list,flag_id,internet_message_id)
-            SELECT 'eudora-'||m.id,$aid,f.target,m.from_addr,import_recipient(m.to_addr,m.mailbox,$recipient),m.subject,dotnet_ticks(m.date_utc),m.is_read,
+                 preview_text,is_replied,is_forwarded,has_attachments,is_mailing_list,flag_id,internet_message_id,message_direction)
+            SELECT {{importedId}},$aid,f.target,m.from_addr,import_recipient(m.to_addr,m.mailbox,$recipient),m.subject,dotnet_ticks(m.date_utc),m.is_read,
                    substr(replace(replace(m.body_text,char(13),' '),char(10),' '),1,240),0,0,
-                   CASE WHEN m.attachments_json IS NULL THEN 0 ELSE 1 END,0,NULL,m.message_id
+                   CASE WHEN m.attachments_json IS NULL THEN 0 ELSE 1 END,0,NULL,m.message_id,import_direction(m.mailbox)
             FROM eudora.messages m JOIN FolderMap f ON f.original=m.mailbox;
 
             INSERT INTO MessageDetail
                 (unique_id,account_id,folder_name,to_addr,cc,reply_to,plain_body,html_body,attachments_json,calendar_ics,raw_headers)
-            SELECT 'eudora-'||m.id,$aid,f.target,import_recipient(m.to_addr,m.mailbox,$recipient),m.cc_addr,'',m.body_text,m.body_html,m.attachments_json,NULL,m.raw_headers
+            SELECT {{importedId}},$aid,f.target,import_recipient(m.to_addr,m.mailbox,$recipient),m.cc_addr,'',m.body_text,m.body_html,m.attachments_json,NULL,m.raw_headers
             FROM eudora.messages m JOIN FolderMap f ON f.original=m.mailbox;
 
             INSERT INTO LocalMessageFts
                 (account_id,unique_id,folder_name,from_addr,to_addr,cc_addr,subject,body_text)
-            SELECT $aid,'eudora-'||m.id,f.target,m.from_addr,import_recipient(m.to_addr,m.mailbox,$recipient),m.cc_addr,m.subject,m.body_text
+            SELECT $aid,{{importedId}},f.target,m.from_addr,import_recipient(m.to_addr,m.mailbox,$recipient),m.cc_addr,m.subject,m.body_text
             FROM eudora.messages m JOIN FolderMap f ON f.original=m.mailbox;
 
             INSERT INTO LocalMessageFtsKey(account_id,unique_id,folder_name,fts_rowid)
-            SELECT account_id,unique_id,folder_name,rowid FROM LocalMessageFts WHERE account_id=$aid;
+            SELECT account_id,unique_id,folder_name,rowid FROM LocalMessageFts
+            WHERE account_id=$aid {{keyScope}};
 
             -- Persist counts during the import so the first QuickMail launch has the same tree
             -- badges as subsequent launches; previously they appeared only after a reconnect.
@@ -284,6 +328,7 @@ internal static class NativeProfileImportCommand
                                       WHERE c.folder_name=Folder.full_name),0)
             WHERE account_id=$aid;
             DROP TABLE ImportedFolderCounts;
+            {{(selective ? "DROP TABLE IncomingEudoraIds;" : string.Empty)}}
             """;
         copy.Parameters.AddWithValue("$aid", accountId.ToString());
         copy.Parameters.AddWithValue("$recipient", dominantAddress);

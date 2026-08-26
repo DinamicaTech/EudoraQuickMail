@@ -1,7 +1,7 @@
 <Window x:Class="QuickMail.Views.FirstRunWelcomeWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Welcome to Eudora QuickMail" Height="700" Width="760"
+        Title="Welcome to Eudora QuickMail" Height="850" Width="760"
         MinHeight="620" MinWidth="700" WindowStartupLocation="CenterScreen"
         ResizeMode="CanResizeWithGrip" ShowInTaskbar="True">
     <Grid Margin="28">
@@ -20,11 +20,13 @@
                        Text="Eudora QuickMail can migrate your Eudora accounts, folders, messages, filters and referenced attachments now. Eudora should be closed during the import."/>
         </StackPanel>
 
-        <GroupBox Grid.Row="1" Header="Eudora installation" Margin="0,0,0,12">
+        <GroupBox Grid.Row="1" Header="Eudora installation (bulk import) or Eudora Mailbox (selective import)" Margin="0,0,0,12">
             <Grid Margin="12">
-                <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                <TextBox x:Name="EudoraExeBox" MinHeight="30" VerticalContentAlignment="Center"/>
-                <Button Grid.Column="1" Margin="8,0,0,0" Padding="16,5" Content="Browse…" Click="BrowseEudora_Click"/>
+                <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                <TextBox x:Name="EudoraExeBox" MinHeight="30" VerticalContentAlignment="Center" IsReadOnly="True"
+                         ToolTip="Select Eudora.exe for a complete import, or one or more .mbx/.fol items for a selective import."/>
+                <Button Grid.Column="1" Margin="8,0,0,0" Padding="12,5" Content="EXE / Mailboxes…" Click="BrowseEudora_Click"/>
+                <Button Grid.Column="2" Margin="8,0,0,0" Padding="12,5" Content=".fol folders…" Click="BrowseEudoraFolders_Click"/>
             </Grid>
         </GroupBox>
 
@@ -36,16 +38,19 @@
             </Grid>
         </GroupBox>
 
-        <GroupBox Grid.Row="3" Header="Folder tree" Margin="0,0,0,12">
+        <GroupBox x:Name="FolderTreeGroup" Grid.Row="3" Header="Folder tree" Margin="0,0,0,12">
             <Grid Margin="12">
                 <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition/></Grid.ColumnDefinitions>
-                <TextBlock VerticalAlignment="Center" Margin="0,0,12,0" Text="Root display name"/>
-                <TextBox x:Name="RootNameBox" Grid.Column="1" Text="Eudora" MinHeight="30" VerticalContentAlignment="Center"/>
+                <TextBlock x:Name="RootNameLabel" VerticalAlignment="Center" Margin="0,0,12,0" Text="Root display name"/>
+                <TextBox x:Name="RootNameBox" Grid.Column="1" Text="Eudora" MinHeight="30" VerticalContentAlignment="Center"
+                         ToolTip="For a selective import, enter an existing or new path such as Customers/T-Innova. Missing folders in the path are created automatically."/>
             </Grid>
         </GroupBox>
 
         <GroupBox Grid.Row="4" Header="Import options and attachments" Margin="0,0,0,18">
-            <StackPanel Margin="12">
+            <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                          Padding="12">
+            <StackPanel>
                 <CheckBox x:Name="ImportFiltersCheckBox" IsChecked="True" Margin="0,3"
                           Content="Import Eudora filters (filters.pce)"/>
                 <TextBlock Margin="24,0,0,0" Opacity="0.75" TextWrapping="Wrap"
@@ -61,6 +66,7 @@
                 <RadioButton x:Name="MoveAttachments" Margin="0,3" Content="Move referenced attachments to the Eudora QuickMail data folder"/>
                 <TextBlock Margin="24,0,0,0" Foreground="#B3261E" TextWrapping="Wrap" Text="Advanced option: Eudora will lose access to those attachments. Files are removed from Eudora only after a verified copy and a successful message import."/>
             </StackPanel>
+            </ScrollViewer>
         </GroupBox>
 
         <Grid Grid.Row="5">

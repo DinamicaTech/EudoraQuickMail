@@ -220,6 +220,7 @@ public class ConfigService : IConfigService
                     case "showcalendar":      config.ShowCalendar      = ParseBool(value); break;
                     case "showaccountspanel": config.ShowAccountsPanel = ParseBool(value); break;
                     case "showtodayagenda":   config.ShowTodayAgenda   = ParseBool(value); break;
+                    case "showfiltereddestinationtab": config.ShowFilteredDestinationTab = ParseBool(value); break;
                     case "syncdays":
                         if (int.TryParse(value, out var sd)) config.SyncDays = Math.Max(0, sd);
                         break;
@@ -290,6 +291,7 @@ public class ConfigService : IConfigService
                     case "announceformattingwhilenavigating": config.AnnounceFormattingWhileNavigating = ParseBool(value); break;
                     case "confirmemptytrash":    config.ConfirmEmptyTrash    = ParseBool(value); break;
                     case "notifyonnewmail":      config.NotifyOnNewMail      = ParseBool(value); break;
+                    case "notifytrayicononnewmail": config.NotifyTrayIconOnNewMail = ParseBool(value); break;
                 case "notifyonwatchedconversation": config.NotifyOnWatchedConversation = ParseBool(value); break;
                     case "closetotray":          config.CloseToTray          = ParseBool(value); break;
                     case "trayhintshown":        config.TrayHintShown        = ParseBool(value); break;
@@ -298,6 +300,9 @@ public class ConfigService : IConfigService
                         break;
                     case "enablelogging": config.EnableLogging = ParseBool(value); break;
                     case "connectiondiagnostics": config.ConnectionDiagnostics = ParseBool(value); break;
+                    case "markalsofilteroutmailboxbydefault":
+                        config.MarkAlsoFilterOutMailboxByDefault = ParseBool(value);
+                        break;
                     case "tutorialcompleted":    config.TutorialCompleted    = ParseBool(value); break;
                     case "desktopshortcutprompted": config.DesktopShortcutPrompted = ParseBool(value); break;
                     case "autoupdate":              config.AutoUpdate              = ParseBool(value); break;
@@ -341,8 +346,8 @@ public class ConfigService : IConfigService
                         };
                         break;
                     case "composeopenmode":
-                        config.Windowing.ComposeOpenMode = value.Equals("dockedTab", StringComparison.OrdinalIgnoreCase)
-                            ? Models.ComposeOpenMode.DockedTab : Models.ComposeOpenMode.FloatingWindow;
+                        config.Windowing.ComposeOpenMode = value.Equals("floatingWindow", StringComparison.OrdinalIgnoreCase)
+                            ? Models.ComposeOpenMode.FloatingWindow : Models.ComposeOpenMode.DockedTab;
                         break;
                     case "confirmclosetabwithunsaved":
                         config.Windowing.ConfirmCloseTabWithUnsaved = ParseBool(value);
@@ -475,6 +480,10 @@ public class ConfigService : IConfigService
 
         sb.AppendLine($"ShowTodayAgenda = {(config.ShowTodayAgenda ? "on" : "off")}");
         sb.AppendLine("# Show today's compact appointment list above the folder tree.");
+        sb.AppendLine();
+
+        sb.AppendLine($"ShowFilteredDestinationTab = {(config.ShowFilteredDestinationTab ? "on" : "off")}");
+        sb.AppendLine("# Keep one background tab pointing at the latest successful rule destination.");
         sb.AppendLine();
 
         sb.AppendLine($"SyncDays = {config.SyncDays}");
@@ -638,8 +647,13 @@ public class ConfigService : IConfigService
         sb.AppendLine();
 
         sb.AppendLine($"NotifyOnNewMail = {(config.NotifyOnNewMail ? "on" : "off")}");
-        sb.AppendLine("# Show a Windows notification when new mail arrives in an inbox.");
+        sb.AppendLine("# Show a Windows notification banner when new mail arrives in an inbox.");
         sb.AppendLine("# Notifications appear while QuickMail is running. Values: on, off.");
+        sb.AppendLine();
+
+        sb.AppendLine($"NotifyTrayIconOnNewMail = {(config.NotifyTrayIconOnNewMail ? "on" : "off")}");
+        sb.AppendLine("# Change the notification-area icon when new mail arrives. Independent of");
+        sb.AppendLine("# the Windows notification banner above. Values: on, off.");
         sb.AppendLine();
 
         sb.AppendLine($"NotifyOnWatchedConversation = {(config.NotifyOnWatchedConversation ? "on" : "off")}");
@@ -701,6 +715,11 @@ public class ConfigService : IConfigService
         sb.AppendLine($"ShowUpdateInstalledAlerts = {(config.ShowUpdateInstalledAlerts ? "on" : "off")}");
         sb.AppendLine("# Show a dialog on the first launch after an update has been installed.");
         sb.AppendLine("# Values: on, off.");
+        sb.AppendLine();
+
+        sb.AppendLine($"MarkAlsoFilterOutMailboxByDefault = {(config.MarkAlsoFilterOutMailboxByDefault ? "on" : "off")}");
+        sb.AppendLine("# Preselect 'Also filter Out mailbox' when creating a new QuickMail filter.");
+        sb.AppendLine("# Existing filters are not modified. Values: on, off.");
         sb.AppendLine();
 
         sb.AppendLine($"LastRunVersion = {config.LastRunVersion}");
@@ -814,7 +833,7 @@ public class ConfigService : IConfigService
 
         sb.AppendLine($"ComposeOpenMode = {(config.Windowing.ComposeOpenMode == Models.ComposeOpenMode.DockedTab ? "dockedTab" : "floatingWindow")}");
         sb.AppendLine("# Where New, Reply, Forward, Draft and Scheduled messages are edited.");
-        sb.AppendLine("# Values: floatingWindow (default), dockedTab.");
+        sb.AppendLine("# Values: dockedTab (default), floatingWindow.");
         sb.AppendLine();
 
         sb.AppendLine($"ConfirmCloseTabWithUnsaved = {(config.Windowing.ConfirmCloseTabWithUnsaved ? "on" : "off")}");

@@ -198,7 +198,13 @@
                     </ListBox.ItemContainerStyle>
                     <ListBox.ItemTemplate>
                         <DataTemplate>
-                            <TextBlock Text="{Binding FileName}" ToolTip="{Binding FileSizeDisplay}"/>
+                            <Border Background="{DynamicResource Theme.AccentSubtle}"
+                                    BorderBrush="{DynamicResource Theme.Border}"
+                                    BorderThickness="1" CornerRadius="3"
+                                    Padding="7,3" Margin="2,1">
+                                <TextBlock Text="{Binding FileName}" ToolTip="{Binding FileSizeDisplay}"
+                                           TextTrimming="CharacterEllipsis"/>
+                            </Border>
                         </DataTemplate>
                     </ListBox.ItemTemplate>
                     <ListBox.ContextMenu>
@@ -216,6 +222,15 @@
                                                 RelativeSource={RelativeSource AncestorType=ContextMenu}}"
                                       CommandParameter="{Binding PlacementTarget.SelectedItem,
                                                 RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
+                            <Separator/>
+                            <MenuItem Header="_Copy attachment"
+                                      Click="AttachmentContextMenu_CopyPath_Click"
+                                      Tag="{Binding PlacementTarget.SelectedItem,
+                                            RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
+                            <MenuItem Header="_Explore"
+                                      Click="AttachmentContextMenu_Explore_Click"
+                                      Tag="{Binding PlacementTarget.SelectedItem,
+                                            RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
                         </ContextMenu>
                     </ListBox.ContextMenu>
                 </ListBox>

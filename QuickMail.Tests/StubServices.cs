@@ -420,8 +420,9 @@ sealed class StubRuleService : IRuleService
     public List<MailMessageSummary> TestRule(MailRule rule, IEnumerable<MailMessageSummary> messages)
         => messages.ToList(); // Stub matches everything
 
-    public Task<int> ApplyRuleToMessagesAsync(MailRule rule, List<MailMessageSummary> messages,
-        ILocalStoreService store, CancellationToken ct) => Task.FromResult(messages.Count);
+    public Task<(int MatchedCount, List<MailMessageSummary> RemovedMessages)> ApplyRuleToMessagesAsync(
+        MailRule rule, List<MailMessageSummary> messages, ILocalStoreService store, CancellationToken ct)
+        => Task.FromResult((messages.Count, new List<MailMessageSummary>()));
 
     public Task<List<MailMessageSummary>> ApplyRulesToExistingAsync(
         ILocalStoreService store, IReadOnlyDictionary<Guid, string> inboxFolderByAccount, CancellationToken ct)
@@ -525,6 +526,12 @@ sealed class StubCalendarService : ICalendarService
     public IReadOnlyList<CalendarEvent> Events => StoredEvents;
 
     public Task RefreshAsync(CancellationToken ct = default)
+    {
+        RefreshCallCount++;
+        return Task.CompletedTask;
+    }
+
+    public Task RebuildAsync(CancellationToken ct = default)
     {
         RefreshCallCount++;
         return Task.CompletedTask;

@@ -182,12 +182,17 @@
         height: '100%',
         resize: false,
         menubar: false,
-        statusbar: false,
+        statusbar: true,
+        elementpath: false,
         branding: false,
         promotion: false,
-        plugins: 'lists link image table code searchreplace',
-        toolbar: 'undo redo | bold italic underline strikethrough | ' +
-          'blocks | bullist numlist | link image table | removeformat code',
+        plugins: 'lists advlist autolink link image table code searchreplace emoticons ' +
+          'charmap fullscreen preview wordcount visualblocks',
+        toolbar: 'undo redo | blocks fontfamily fontsize | ' +
+          'bold italic underline strikethrough forecolor backcolor | ' +
+          'alignleft aligncenter alignright alignjustify | outdent indent blockquote | ' +
+          'bullist numlist | link image table emoticons charmap hr | ' +
+          'visualblocks preview fullscreen wordcount | removeformat code',
         toolbar_mode: 'wrap',
         browser_spellcheck: true,
         // Let Chromium own the context menu so its spelling suggestions and

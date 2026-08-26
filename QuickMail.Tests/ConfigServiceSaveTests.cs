@@ -29,6 +29,22 @@ public class ConfigServiceSaveTests
     }
 
     [Fact]
+    public void SaveThenLoad_RoundTripsAlsoFilterOutDefault()
+    {
+        var profile = MakeTempProfile();
+        var service = new ConfigService(profile);
+
+        Assert.False(service.Load().MarkAlsoFilterOutMailboxByDefault);
+        var config = service.Load();
+        config.MarkAlsoFilterOutMailboxByDefault = true;
+        config.ShowFilteredDestinationTab = false;
+        service.Save(config);
+
+        Assert.True(new ConfigService(profile).Load().MarkAlsoFilterOutMailboxByDefault);
+        Assert.False(new ConfigService(profile).Load().ShowFilteredDestinationTab);
+    }
+
+    [Fact]
     public void SaveThenLoad_RoundTripsSort()
     {
         // Sort had exactly the failure this class exists to catch: ConfigModel.Sort existed and
@@ -225,6 +241,25 @@ public class ConfigServiceSaveTests
         service.Save(config);
 
         var reloaded = new ConfigService(profile).Load();
+        Assert.True(reloaded.NotifyOnNewMail);
+    }
+
+    [Fact]
+    public void NewMailTrayIcon_DefaultsOn_AndIsIndependentOfBanner()
+    {
+        var profile = MakeTempProfile();
+        var service = new ConfigService(profile);
+
+        Assert.True(service.Load().NotifyTrayIconOnNewMail);
+        Assert.False(service.Load().NotifyOnNewMail);
+
+        var config = service.Load();
+        config.NotifyTrayIconOnNewMail = false;
+        config.NotifyOnNewMail = true;
+        service.Save(config);
+
+        var reloaded = service.Load();
+        Assert.False(reloaded.NotifyTrayIconOnNewMail);
         Assert.True(reloaded.NotifyOnNewMail);
     }
 

@@ -13,6 +13,8 @@ internal static class MigrationCommand
         var attachmentMode = (Value(args, "--attachments") ?? "keep").ToLowerInvariant();
         var importFilters = !string.Equals(Value(args, "--filters"), "false", StringComparison.OrdinalIgnoreCase);
         var respectCheckMail = string.Equals(Value(args, "--respect-check-mail"), "true", StringComparison.OrdinalIgnoreCase);
+        var selective = string.Equals(Value(args, "--selective"), "true", StringComparison.OrdinalIgnoreCase);
+        var selectedSources = Values(args, "--selected-source");
         if (attachmentMode is not ("keep" or "copy" or "move"))
             throw new ArgumentException("--attachments must be keep, copy, or move.");
         var intermediate = Path.Combine(Path.GetFullPath(profile), "eudora-import.db");
@@ -23,7 +25,14 @@ internal static class MigrationCommand
         Console.WriteLine();
         try
         {
-            var imported = await ImportCommand.RunAsync(["--source", source, "--output", intermediate, "--replace"]);
+            var importArguments = new List<string> { "--source", source, "--output", intermediate, "--replace" };
+            if (selective)
+            {
+                importArguments.AddRange(["--target-path", rootName]);
+                foreach (var selected in selectedSources)
+                    importArguments.AddRange(["--selected-source", selected]);
+            }
+            var imported = await ImportCommand.RunAsync(importArguments.ToArray());
             if (imported != 0)
             {
                 WriteResult(profile, $"Eudora mailbox import failed with exit code {imported}.\n\n{ImportCommand.LastError}");
@@ -44,10 +53,11 @@ internal static class MigrationCommand
                 "--database", intermediate, "--profile", profile,
                 "--eudora-root", source, "--root-name", rootName,
                 "--filters", importFilters ? Path.Combine(source, "filters.pce") : string.Empty,
-                "--respect-check-mail", respectCheckMail ? "true" : "false"]);
+                "--respect-check-mail", respectCheckMail ? "true" : "false",
+                "--selective", selective ? "true" : "false"]);
             if (result == 0)
             {
-                try { EudoraImportMetadata.Save(profile, source, attachmentMode); }
+                try { if (!selective) EudoraImportMetadata.Save(profile, source, attachmentMode); }
                 catch (Exception ex) { Console.WriteLine($"Warning: import location metadata was not saved: {ex.Message}"); }
             }
             if (result == 0 && attachmentMode == "move")
@@ -100,5 +110,13 @@ internal static class MigrationCommand
     {
         var index = Array.FindIndex(args, value => value.Equals(name, StringComparison.OrdinalIgnoreCase));
         return index >= 0 && index + 1 < args.Length ? args[index + 1] : null;
+    }
+
+    private static List<string> Values(string[] args, string name)
+    {
+        var result = new List<string>();
+        for (var i = 0; i + 1 < args.Length; i++)
+            if (args[i].Equals(name, StringComparison.OrdinalIgnoreCase)) result.Add(args[++i]);
+        return result;
     }
 }

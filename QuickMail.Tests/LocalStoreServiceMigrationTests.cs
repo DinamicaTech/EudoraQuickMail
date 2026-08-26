@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.Data.Sqlite;
 using QuickMail.Models;
@@ -202,7 +203,7 @@ public class LocalStoreServiceMigrationTests
         store.Initialize();
 
         Assert.True(File.Exists(dbPath + ".pre-v2"), "pre-v2 backup should be created");
-        Assert.Equal(5, ReadUserVersion(dbPath));
+        Assert.Equal(6, ReadUserVersion(dbPath));
         Assert.True(TableExists(dbPath, "DeltaToken"), "DeltaToken table should exist after migration");
         Assert.True(TableExists(dbPath, "CalendarEvent"), "CalendarEvent table should exist after migration");
     }
@@ -238,10 +239,54 @@ public class LocalStoreServiceMigrationTests
         store.Initialize();
 
         Assert.False(File.Exists(dbPath + ".pre-v2"), "fresh DB must not produce a backup");
-        Assert.Equal(5, ReadUserVersion(dbPath));
+        Assert.Equal(6, ReadUserVersion(dbPath));
         Assert.True(TableExists(dbPath, "DeltaToken"));
         Assert.True(TableExists(dbPath, "CalendarEvent"));
         Assert.Equal("TEXT", ColumnType(dbPath, "MessageSummary", "unique_id"));
+    }
+
+    [Fact]
+    public async Task V6DirectionBackfill_RunsOnce_AndRecognisesHistoricalOutTrees()
+    {
+        var dir = NewTempDir();
+        var dbPath = Path.Combine(dir, "mail.db");
+        var accountId = Guid.NewGuid();
+        var store = new LocalStoreService(new ProfileContext(dir));
+        store.Initialize();
+
+        MailMessageSummary Row(string id, string folder) => new()
+        {
+            MessageId = id, AccountId = accountId, FolderName = folder,
+            Subject = id, Date = DateTimeOffset.UtcNow,
+            Direction = MessageDirection.Unknown,
+        };
+        await store.UpsertSummariesAsync([
+            Row("out", "MensajesHistoricos/_Out/Out2024"),
+            Row("in", "In"),
+            Row("custom", "Ocio/Pintura"),
+        ]);
+
+        using (var conn = new SqliteConnection($"Data Source={dbPath}"))
+        {
+            conn.Open();
+            using var downgrade = conn.CreateCommand();
+            downgrade.CommandText = "PRAGMA user_version = 5;";
+            downgrade.ExecuteNonQuery();
+        }
+
+        store.Initialize();
+        var migrated = await store.LoadAllSummariesAsync();
+        Assert.Equal(MessageDirection.Outgoing, migrated.Single(message => message.MessageId == "out").Direction);
+        Assert.Equal(MessageDirection.Incoming, migrated.Single(message => message.MessageId == "in").Direction);
+        Assert.Equal(MessageDirection.Incoming, migrated.Single(message => message.MessageId == "custom").Direction);
+
+        // Once the schema is v6, an unknown value in a mixed custom folder must not be repeatedly
+        // overwritten during startup. Live sync can then preserve a direction learned elsewhere.
+        await store.UpsertSummariesAsync([Row("later", "Ocio/Pintura")]);
+        store.Initialize();
+        var afterRestart = await store.LoadAllSummariesAsync();
+        Assert.Equal(MessageDirection.Unknown,
+            afterRestart.Single(message => message.MessageId == "later").Direction);
     }
 
     [Fact]
@@ -344,7 +389,7 @@ public class LocalStoreServiceMigrationTests
     }
 
     [Fact]
-    public async Task ExternallyUnflagged_ExistingMessage_ClearsFlagOnUpsert()
+    public async Task ExternallyUnflagged_ExistingMessage_PreservesLocalFlagOnUpsert()
     {
         var dir       = NewTempDir();
         var accountId = Guid.NewGuid();
@@ -354,11 +399,11 @@ public class LocalStoreServiceMigrationTests
         // First sync: message arrives server-flagged → gets built-in flag_id.
         await store.UpsertSummariesAsync([MakeSummary(accountId, "1", serverFlagged: true)]);
 
-        // Second sync: server no longer reports \Flagged (externally unflagged).
+        // Second sync: server no longer reports \Flagged. Local-first flags remain intact.
         await store.UpsertSummariesAsync([MakeSummary(accountId, "1", serverFlagged: false)]);
 
         var loaded = await store.LoadFolderSummariesAsync(accountId, "Inbox");
-        Assert.Null(loaded[0].FlagId);
+        Assert.Equal(QuickMail.Models.FlagDefinition.BuiltInFlagId.ToString(), loaded[0].FlagId);
     }
 
     [Fact]

@@ -317,6 +317,32 @@ public class ImapMailService : IMailService, IChangeNotifier, IConnectionProbe
 
     // ── Message detail ───────────────────────────────────────────────────────────
 
+    public async Task<MailMessageSummary?> GetMessageSummaryAsync(
+        Guid accountId, string folderName, string messageId, CancellationToken ct = default)
+    {
+        using var timing = PerformanceLogService.Measure("IMAP: fetch one envelope",
+            $"account={accountId}; folder={folderName}; uid={messageId}");
+        using var lease = await RentClientAsync(accountId, ImapLeasePriority.Background, ct);
+        var folder = await lease.Client.GetFolderAsync(folderName, ct);
+        await folder.OpenAsync(FolderAccess.ReadOnly, ct);
+        try
+        {
+            var summaries = await folder.FetchAsync(
+                new[] { ToUid(messageId) },
+                MessageSummaryItems.UniqueId
+                | MessageSummaryItems.Envelope
+                | MessageSummaryItems.Flags,
+                _mailingListHeaders,
+                ct);
+            var summary = summaries.FirstOrDefault();
+            return summary == null ? null : SummaryToModel(summary, accountId, folderName);
+        }
+        finally
+        {
+            await folder.CloseAsync(false, ct);
+        }
+    }
+
     public Task<MailMessageDetail> GetMessageDetailAsync(
         Guid accountId, string folderName, string messageId, CancellationToken ct = default) =>
         GetMessageDetailCoreAsync(accountId, folderName, messageId, markRead: true, ImapLeasePriority.Foreground, ct);
@@ -615,13 +641,50 @@ public class ImapMailService : IMailService, IChangeNotifier, IConnectionProbe
 
     public async Task MoveMessagesAsync(Guid accountId, string folderName, IList<string> messageIds, string destinationFolder, CancellationToken ct = default)
     {
+        var started = Stopwatch.GetTimestamp();
+        var perf = $"account={accountId}; source={folderName}; destination={destinationFolder}; messages={messageIds.Count}";
+        PerformanceLogService.Marker("IMAP: move messages BEGIN", perf);
         using var lease = await RentClientAsync(accountId, ImapLeasePriority.Foreground, ct);
+        var connected = Stopwatch.GetTimestamp();
+        PerformanceLogService.Record("IMAP: move messages/rent connection",
+            Stopwatch.GetElapsedTime(started, connected), perf);
         var client = lease.Client;
         var folder = await client.GetFolderAsync(folderName, ct);
-        var dest   = await client.GetFolderAsync(destinationFolder, ct);
+        var dest   = await GetOrCreateFolderPathAsync(client, destinationFolder, ct);
+        var foldersReady = Stopwatch.GetTimestamp();
+        PerformanceLogService.Record("IMAP: move messages/resolve folders",
+            Stopwatch.GetElapsedTime(connected, foldersReady), perf);
         await folder.OpenAsync(FolderAccess.ReadWrite, ct);
         try   { await folder.MoveToAsync(messageIds.Select(ToUid).ToList(), dest, ct); }
         finally { await folder.CloseAsync(false, ct); }
+        PerformanceLogService.Record("IMAP: move messages END",
+            Stopwatch.GetElapsedTime(started), perf);
+    }
+
+    private static async Task<IMailFolder> GetOrCreateFolderPathAsync(
+        ImapClient client, string destinationFolder, CancellationToken ct)
+    {
+        try { return await client.GetFolderAsync(destinationFolder, ct); }
+        catch (FolderNotFoundException) { }
+
+        if (client.PersonalNamespaces.Count == 0)
+            throw new InvalidOperationException($"The IMAP account has no personal folder namespace for '{destinationFolder}'.");
+        IMailFolder current = client.GetFolder(client.PersonalNamespaces[0]);
+        var segments = destinationFolder.Split(['/', '\\'], StringSplitOptions.RemoveEmptyEntries);
+        foreach (var segment in segments)
+        {
+            try
+            {
+                current = await current.GetSubfolderAsync(segment, ct)
+                    ?? throw new InvalidOperationException($"The IMAP folder '{segment}' could not be resolved.");
+            }
+            catch (FolderNotFoundException)
+            {
+                current = await current.CreateAsync(segment, true, ct)
+                    ?? throw new InvalidOperationException($"The IMAP folder '{segment}' could not be created.");
+            }
+        }
+        return current;
     }
 
     // ── Folder CRUD ──────────────────────────────────────────────────────────────
@@ -1700,7 +1763,9 @@ public class ImapMailService : IMailService, IChangeNotifier, IConnectionProbe
             // RFC 5322 Message-ID — stable across every folder/label a message appears in, so
             // aggregate views can collapse Gmail's per-folder duplicate copies (issue #220).
             InternetMessageId = s.Envelope?.MessageId ?? string.Empty,
-            From        = FormatAddressListDisplay(s.Envelope?.From),
+            // Keep both the friendly name and the actual mailbox.  Displaying only the alias made
+            // Gmail rows ambiguous and, more importantly, produced unusable FROM rule templates.
+            From        = FormatAddressList(s.Envelope?.From),
             To          = FormatAddressList(s.Envelope?.To),
             Subject     = s.Envelope?.Subject ?? "(no subject)",
             Date        = s.Envelope?.Date ?? DateTimeOffset.MinValue,

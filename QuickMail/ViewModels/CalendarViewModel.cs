@@ -19,6 +19,8 @@ namespace QuickMail.ViewModels;
 /// </summary>
 public partial class CalendarViewModel : ObservableObject
 {
+    public sealed record SourceChoice(string Label, MainViewModel.CalendarFilter? Filter);
+
     private readonly ICalendarService _calendarService;
     private readonly bool _onlineMode;
     private readonly bool _showDeclinedEvents;
@@ -87,6 +89,22 @@ public partial class CalendarViewModel : ObservableObject
     public BatchObservableCollection<CalendarEvent> TodayEvents { get; } = [];
     public bool HasTodayEvents => TodayEvents.Count > 0;
     public string TodayAgendaTitle => $"Today — {DateTime.Today:ddd, d MMM}";
+
+    public BatchObservableCollection<SourceChoice> SourceChoices { get; } = [];
+
+    [ObservableProperty]
+    private SourceChoice? _selectedSource;
+
+    partial void OnSelectedSourceChanged(SourceChoice? value) => SourceFilter = value?.Filter;
+
+    public void SetSourceChoices(IEnumerable<SourceChoice> choices)
+    {
+        var previous = SelectedSource?.Label;
+        SourceChoices.Clear();
+        foreach (var choice in choices) SourceChoices.Add(choice);
+        SelectedSource = SourceChoices.FirstOrDefault(x => x.Label == previous)
+                         ?? SourceChoices.FirstOrDefault();
+    }
 
     [ObservableProperty]
     private bool _isTodayFilter;
@@ -289,13 +307,22 @@ public partial class CalendarViewModel : ObservableObject
         AnnounceOpenHint();
     }
 
-    /// <summary>Re-harvests from the cache and reloads. Bound to F5.</summary>
+    /// <summary>Reloads already-materialized calendar rows without re-harvesting the mail cache.</summary>
+    public async Task ReloadFromStoreAsync(CancellationToken ct = default)
+    {
+        if (_onlineMode) return;
+        await _calendarService.RefreshAsync(ct);
+        ApplyFilters();
+    }
+
+    /// <summary>Re-harvests from the cache in the background and reloads. Bound to F5.</summary>
     [RelayCommand]
     private async Task RefreshAsync()
     {
         if (_onlineMode) return;
-        Announce("Refreshing calendar.", AnnouncementCategory.Status);
-        await _calendarService.RefreshAsync();
+        Announce("Rebuilding calendar in the background.", AnnouncementCategory.Status);
+        using var timing = PerformanceLogService.Measure("Calendar: rebuild from cached messages");
+        await Task.Run(() => _calendarService.RebuildAsync());
         ApplyFilters();
         Announce($"Calendar updated. {VisibleEvents.Count} event{(VisibleEvents.Count == 1 ? "" : "s")}.",
                  AnnouncementCategory.Result);

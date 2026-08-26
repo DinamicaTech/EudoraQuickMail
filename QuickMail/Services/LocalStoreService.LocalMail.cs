@@ -1,5 +1,6 @@
 using Microsoft.Data.Sqlite;
 using QuickMail.Models;
+using System.Diagnostics;
 using System.IO;
 using System.Security.Cryptography;
 using System.Text.Json;
@@ -103,7 +104,8 @@ public partial class LocalStoreService
                     ? SpecialFolderKind.Sent
                 : message.FolderName.Equals("Trash", StringComparison.OrdinalIgnoreCase)
                     ? SpecialFolderKind.Trash
-                : message.FolderName.Equals("Inbox", StringComparison.OrdinalIgnoreCase)
+                : message.FolderName.Equals("In", StringComparison.OrdinalIgnoreCase)
+                  || message.FolderName.Equals("Inbox", StringComparison.OrdinalIgnoreCase)
                     ? SpecialFolderKind.Inbox
                 : SpecialFolderKind.None;
             folder.Parameters.AddWithValue("$kind", (int)kind);
@@ -119,13 +121,14 @@ public partial class LocalStoreService
             summary.CommandText = """
                 INSERT INTO MessageSummary
                     (unique_id,account_id,folder_name,from_disp,to_addr,subject,date_ticks,is_read,
-                     preview_text,is_replied,is_forwarded,has_attachments,is_mailing_list,flag_id,internet_message_id)
-                VALUES ($uid,$aid,$fn,$from,$to,$subject,$date,$read,$preview,$replied,$forwarded,$hasAttachments,$list,NULL,$imid)
+                     preview_text,is_replied,is_forwarded,has_attachments,is_mailing_list,flag_id,internet_message_id,message_direction)
+                VALUES ($uid,$aid,$fn,$from,$to,$subject,$date,$read,$preview,$replied,$forwarded,$hasAttachments,$list,NULL,$imid,$direction)
                 ON CONFLICT(unique_id,account_id,folder_name) DO UPDATE SET
                     from_disp=excluded.from_disp,to_addr=excluded.to_addr,subject=excluded.subject,
                     date_ticks=excluded.date_ticks,is_read=excluded.is_read,preview_text=excluded.preview_text,
                     has_attachments=excluded.has_attachments,
-                    internet_message_id=excluded.internet_message_id;
+                    internet_message_id=excluded.internet_message_id,
+                    message_direction=CASE WHEN excluded.message_direction=0 THEN message_direction ELSE excluded.message_direction END;
                 """;
             AddMessageKey(summary, message);
             summary.Parameters.AddWithValue("$from", message.From ?? string.Empty);
@@ -139,6 +142,7 @@ public partial class LocalStoreService
             summary.Parameters.AddWithValue("$hasAttachments", hasVisibleAttachments ? 1 : 0);
             summary.Parameters.AddWithValue("$list", message.IsMailingList ? 1 : 0);
             summary.Parameters.AddWithValue("$imid", message.InternetMessageId ?? string.Empty);
+            summary.Parameters.AddWithValue("$direction", (int)message.Direction);
             await summary.ExecuteNonQueryAsync(ct);
         }
 
@@ -269,9 +273,14 @@ public partial class LocalStoreService
 
     public async Task<LocalSearchResult> SearchLocalMessagesAsync(LocalSearchQuery query, CancellationToken ct = default)
     {
+        var totalStarted = Stopwatch.GetTimestamp();
         if (string.IsNullOrWhiteSpace(query.Text)) return new LocalSearchResult([], 0);
         var parsed = QuickSearchParser.Parse(query.Text);
         var terms = parsed.Groups.SelectMany(g => g.Alternatives).ToList();
+        var flagOnly = terms.Count > 0 && terms.All(term => term.Field == QuickSearchField.Flagged);
+        var detail = $"kind={(flagOnly ? "flags" : "general")}; terms={terms.Count}; " +
+                     $"folder={query.FolderName ?? "(scoped)"}; scopes={query.FolderScopes?.Count ?? 0}; " +
+                     $"accountScope={query.AccountId?.ToString() ?? (query.AccountIds?.Count.ToString() ?? "all")}";
         var requiresFts = terms.Any(t => t.Field is QuickSearchField.Any or QuickSearchField.To
             or QuickSearchField.From or QuickSearchField.Cc or QuickSearchField.Subject
             or QuickSearchField.Body);
@@ -288,6 +297,7 @@ public partial class LocalStoreService
         var folderFilter = !string.IsNullOrWhiteSpace(query.FolderName)
             ? query.IncludeDescendants ? " AND (s.folder_name=$fn OR (s.folder_name >= $ds AND s.folder_name < $de))" : " AND s.folder_name=$fn"
             : string.Empty;
+        var folderScopesFilter = BuildFolderScopesFilter("s.", query.FolderScopes);
         var order = query.Sort switch
         {
             LocalSearchSort.OldestFirst => "s.date_ticks ASC",
@@ -302,9 +312,16 @@ public partial class LocalStoreService
             LocalSearchSort.ReadDescending => "s.is_read DESC, s.date_ticks DESC",
             LocalSearchSort.AttachmentsFirst => "s.has_attachments DESC, s.date_ticks DESC",
             LocalSearchSort.AttachmentsLast => "s.has_attachments ASC, s.date_ticks DESC",
+            LocalSearchSort.DirectionAscending => "s.message_direction ASC, s.date_ticks DESC",
+            LocalSearchSort.DirectionDescending => "s.message_direction DESC, s.date_ticks DESC",
             _ => "s.date_ticks DESC",
         };
+        var stageStarted = Stopwatch.GetTimestamp();
         await using var conn = await OpenAsync();
+        await PopulateFolderScopesAsync(conn, query.FolderScopes, ct);
+        await PopulateExcludedFolderScopesAsync(conn, query.ExcludedFolderScopes, ct);
+        PerformanceLogService.Record("Search SQLite: open and prepare scope",
+            Stopwatch.GetElapsedTime(stageStarted), detail);
         await using var predicateCommand = conn.CreateCommand();
         var predicate = BuildQuickSearchPredicate(parsed, predicateCommand);
         long total;
@@ -315,10 +332,13 @@ public partial class LocalStoreService
                 SELECT count(*) FROM MessageSummary s
                 {ftsJoin}
                 {detailJoin}
-                WHERE ({predicate}){accountFilter}{folderFilter};
+                WHERE ({predicate}){accountFilter}{folderFilter}{folderScopesFilter}{BuildExcludedFolderScopesFilter("s.", query.ExcludedFolderScopes)};
                 """;
             AddScopeParameters(count, query);
+            stageStarted = Stopwatch.GetTimestamp();
             total = Convert.ToInt64(await count.ExecuteScalarAsync(ct) ?? 0);
+            PerformanceLogService.Record("Search SQLite: count matches",
+                Stopwatch.GetElapsedTime(stageStarted), $"{detail}; total={total}");
         }
 
         var messages = new List<MailMessageSummary>();
@@ -326,20 +346,133 @@ public partial class LocalStoreService
         cmd.CommandText = $"""
             SELECT s.unique_id,s.account_id,s.folder_name,s.internet_message_id,s.from_disp,s.to_addr,
                    s.subject,s.date_ticks,s.is_read,s.preview_text,s.is_replied,s.is_forwarded,
-                   s.has_attachments,s.is_mailing_list,s.flag_id
+                   s.has_attachments,s.is_mailing_list,s.flag_id,s.message_direction
             FROM MessageSummary s
             {ftsJoin}
             {detailJoin}
-            WHERE ({predicate}){accountFilter}{folderFilter}
+            WHERE ({predicate}){accountFilter}{folderFilter}{folderScopesFilter}{BuildExcludedFolderScopesFilter("s.", query.ExcludedFolderScopes)}
             ORDER BY {order} LIMIT $limit OFFSET $offset;
             """;
         CopyParameters(predicateCommand, cmd);
         AddScopeParameters(cmd, query);
         cmd.Parameters.AddWithValue("$limit", limit);
         cmd.Parameters.AddWithValue("$offset", Math.Max(0, query.Offset));
+        stageStarted = Stopwatch.GetTimestamp();
         await using var reader = await cmd.ExecuteReaderAsync(ct);
+        PerformanceLogService.Record("Search SQLite: execute page query",
+            Stopwatch.GetElapsedTime(stageStarted), $"{detail}; limit={limit}");
+        stageStarted = Stopwatch.GetTimestamp();
         while (await reader.ReadAsync(ct)) messages.Add(ReadLocalSummary(reader));
+        PerformanceLogService.Record("Search SQLite: materialize page rows",
+            Stopwatch.GetElapsedTime(stageStarted), $"{detail}; rows={messages.Count}");
+        PerformanceLogService.Record("Search SQLite: total quick search",
+            Stopwatch.GetElapsedTime(totalStarted), $"{detail}; rows={messages.Count}; total={total}");
         return new LocalSearchResult(messages, total);
+    }
+
+    private const int InlineFolderScopeLimit = 32;
+
+    private static List<LocalFolderScope> EffectiveFolderScopes(IReadOnlyCollection<LocalFolderScope> scopes) =>
+        scopes.Distinct()
+            .Where(candidate => !scopes.Any(parent => parent.AccountId == candidate.AccountId &&
+                parent.IncludeDescendants && candidate.FolderName.StartsWith(
+                    parent.FolderName.TrimEnd('/') + "/", StringComparison.OrdinalIgnoreCase)))
+            .ToList();
+
+    private static string BuildFolderScopesFilter(string prefix, IReadOnlyCollection<LocalFolderScope>? scopes)
+    {
+        if (scopes is not { Count: > 0 }) return string.Empty;
+        var effective = EffectiveFolderScopes(scopes);
+        if (effective.Count <= InlineFolderScopeLimit)
+        {
+            var alternatives = effective.Select((scope, index) => scope.IncludeDescendants
+                ? $"({prefix}account_id=$fsa{index} AND ({prefix}folder_name=$fsn{index} OR " +
+                  $"({prefix}folder_name >= $fsd{index} AND {prefix}folder_name < $fse{index})))"
+                : $"({prefix}account_id=$fsa{index} AND {prefix}folder_name=$fsn{index})");
+            // Small canonical selections (notably In and the F flag command) become direct indexed
+            // seeks. Large trees retain the temp-table strategy to stay below SQLite's expression
+            // depth limit.
+            return " AND (" + string.Join(" OR ", alternatives) + ")";
+        }
+        // A canonical root can project thousands of physical folders. Expanding those scopes as
+        // one OR expression hits SQLite's default expression-depth limit (1000) before the query
+        // can run. The scopes are instead materialized once per connection and matched as rows.
+        return $"""
+             AND EXISTS(SELECT 1 FROM temp.QuickMailFolderScope qfs
+                         WHERE qfs.account_id={prefix}account_id
+                           AND (qfs.folder_name={prefix}folder_name OR
+                                (qfs.include_descendants=1 AND
+                                 {prefix}folder_name >= qfs.folder_name || '/' AND
+                                 {prefix}folder_name <  qfs.folder_name || '0')))
+            """;
+    }
+
+    private static async Task PopulateFolderScopesAsync(SqliteConnection connection,
+        IReadOnlyCollection<LocalFolderScope>? scopes, CancellationToken ct)
+    {
+        if (scopes is not { Count: > 0 }) return;
+        var effectiveScopes = EffectiveFolderScopes(scopes);
+        if (effectiveScopes.Count <= InlineFolderScopeLimit) return;
+        await using (var setup = connection.CreateCommand())
+        {
+            setup.CommandText = """
+                CREATE TEMP TABLE IF NOT EXISTS QuickMailFolderScope(
+                    account_id TEXT NOT NULL,
+                    folder_name TEXT NOT NULL,
+                    include_descendants INTEGER NOT NULL,
+                    PRIMARY KEY(account_id,folder_name,include_descendants)) WITHOUT ROWID;
+                DELETE FROM temp.QuickMailFolderScope;
+                """;
+            await setup.ExecuteNonQueryAsync(ct);
+        }
+        // A recursive parent scope already covers its physical descendants. Canonical roots loaded
+        // from an Eudora tree can otherwise contribute well over a thousand redundant rows.
+        await using var tx = (SqliteTransaction)await connection.BeginTransactionAsync(ct);
+        await using var insert = connection.CreateCommand();
+        insert.Transaction = tx;
+        insert.CommandText = "INSERT OR IGNORE INTO temp.QuickMailFolderScope(account_id,folder_name,include_descendants) VALUES($account,$folder,$descendants);";
+        var account = insert.Parameters.Add("$account", SqliteType.Text);
+        var folder = insert.Parameters.Add("$folder", SqliteType.Text);
+        var descendants = insert.Parameters.Add("$descendants", SqliteType.Integer);
+        foreach (var scope in effectiveScopes)
+        {
+            account.Value = scope.AccountId.ToString();
+            folder.Value = scope.FolderName;
+            descendants.Value = scope.IncludeDescendants ? 1 : 0;
+            await insert.ExecuteNonQueryAsync(ct);
+        }
+        await tx.CommitAsync(ct);
+    }
+
+    private static string BuildExcludedFolderScopesFilter(string prefix,
+        IReadOnlyCollection<LocalFolderScope>? scopes) => scopes is not { Count: > 0 } ? string.Empty :
+        $" AND NOT EXISTS(SELECT 1 FROM temp.QuickMailExcludedFolderScope qfe WHERE qfe.account_id={prefix}account_id AND qfe.folder_name={prefix}folder_name)";
+
+    private static async Task PopulateExcludedFolderScopesAsync(SqliteConnection connection,
+        IReadOnlyCollection<LocalFolderScope>? scopes, CancellationToken ct)
+    {
+        if (scopes is not { Count: > 0 }) return;
+        await using var setup = connection.CreateCommand();
+        setup.CommandText = """
+            CREATE TEMP TABLE IF NOT EXISTS QuickMailExcludedFolderScope(
+                account_id TEXT NOT NULL, folder_name TEXT NOT NULL,
+                PRIMARY KEY(account_id,folder_name)) WITHOUT ROWID;
+            DELETE FROM temp.QuickMailExcludedFolderScope;
+            """;
+        await setup.ExecuteNonQueryAsync(ct);
+        await using var tx = (SqliteTransaction)await connection.BeginTransactionAsync(ct);
+        await using var insert = connection.CreateCommand();
+        insert.Transaction = tx;
+        insert.CommandText = "INSERT OR IGNORE INTO temp.QuickMailExcludedFolderScope(account_id,folder_name) VALUES($account,$folder);";
+        var account = insert.Parameters.Add("$account", SqliteType.Text);
+        var folder = insert.Parameters.Add("$folder", SqliteType.Text);
+        foreach (var scope in scopes.Distinct())
+        {
+            account.Value = scope.AccountId.ToString();
+            folder.Value = scope.FolderName;
+            await insert.ExecuteNonQueryAsync(ct);
+        }
+        await tx.CommitAsync(ct);
     }
 
     private static string BuildQuickSearchPredicate(ParsedQuickSearch query, SqliteCommand command)
@@ -358,6 +491,16 @@ public partial class LocalStoreService
                 if (term.Field == QuickSearchField.Flagged)
                 {
                     alternatives.Add("s.flag_id IS NOT NULL");
+                    continue;
+                }
+                if (term.Field == QuickSearchField.Incoming)
+                {
+                    alternatives.Add($"s.message_direction={(int)MessageDirection.Incoming}");
+                    continue;
+                }
+                if (term.Field == QuickSearchField.Outgoing)
+                {
+                    alternatives.Add($"s.message_direction={(int)MessageDirection.Outgoing}");
                     continue;
                 }
                 var p = "$q" + parameterIndex++;
@@ -432,6 +575,27 @@ public partial class LocalStoreService
         AddAccountParameters(command, query.AccountId, query.AccountIds);
         if (!string.IsNullOrWhiteSpace(query.FolderName)) command.Parameters.AddWithValue("$fn", query.FolderName);
         if (!string.IsNullOrWhiteSpace(query.FolderName) && query.IncludeDescendants) AddDescendantRange(command, query.FolderName);
+        AddFolderScopeParameters(command, query.FolderScopes);
+    }
+
+    private static void AddFolderScopeParameters(SqliteCommand command,
+        IReadOnlyCollection<LocalFolderScope>? scopes)
+    {
+        if (scopes is not { Count: > 0 }) return;
+        var effective = EffectiveFolderScopes(scopes);
+        if (effective.Count > InlineFolderScopeLimit) return;
+        var index = 0;
+        foreach (var scope in effective)
+        {
+            command.Parameters.AddWithValue("$fsa" + index, scope.AccountId.ToString());
+            command.Parameters.AddWithValue("$fsn" + index, scope.FolderName);
+            if (scope.IncludeDescendants)
+            {
+                command.Parameters.AddWithValue("$fsd" + index, scope.FolderName + "/");
+                command.Parameters.AddWithValue("$fse" + index, scope.FolderName + "0");
+            }
+            index++;
+        }
     }
 
     public async Task<LocalSearchResult> SearchLocalMessagesAdvancedAsync(AdvancedSearchQuery query, CancellationToken ct = default)
@@ -439,6 +603,8 @@ public partial class LocalStoreService
         if (query.Criteria.Count == 0) return new LocalSearchResult([], 0);
         var predicates = new List<string>();
         await using var conn = await OpenAsync();
+        await PopulateFolderScopesAsync(conn, query.FolderScopes, ct);
+        await PopulateExcludedFolderScopesAsync(conn, query.ExcludedFolderScopes, ct);
         await using var count = conn.CreateCommand();
         for (var i = 0; i < query.Criteria.Count; i++)
         {
@@ -489,6 +655,9 @@ public partial class LocalStoreService
             count.Parameters.AddWithValue("$fn", query.FolderName);
             if (query.IncludeDescendants) AddDescendantRange(count, query.FolderName);
         }
+        scope += BuildFolderScopesFilter("s.", query.FolderScopes);
+        AddFolderScopeParameters(count, query.FolderScopes);
+        scope += BuildExcludedFolderScopesFilter("s.", query.ExcludedFolderScopes);
         var where = string.Concat(predicates);
         count.CommandText = $"SELECT count(*) FROM MessageSummary s JOIN LocalMessageFts ON LocalMessageFts.account_id=s.account_id AND LocalMessageFts.unique_id=s.unique_id AND LocalMessageFts.folder_name=s.folder_name WHERE ({where}){scope};";
         var total = Convert.ToInt64(await count.ExecuteScalarAsync(ct) ?? 0);
@@ -510,12 +679,14 @@ public partial class LocalStoreService
             LocalSearchSort.ReadDescending => "s.is_read DESC, s.date_ticks DESC",
             LocalSearchSort.AttachmentsFirst => "s.has_attachments DESC, s.date_ticks DESC",
             LocalSearchSort.AttachmentsLast => "s.has_attachments ASC, s.date_ticks DESC",
+            LocalSearchSort.DirectionAscending => "s.message_direction ASC, s.date_ticks DESC",
+            LocalSearchSort.DirectionDescending => "s.message_direction DESC, s.date_ticks DESC",
             _ => "s.date_ticks DESC",
         };
         cmd.CommandText = $"""
             SELECT s.unique_id,s.account_id,s.folder_name,s.internet_message_id,s.from_disp,s.to_addr,
                    s.subject,s.date_ticks,s.is_read,s.preview_text,s.is_replied,s.is_forwarded,
-                   s.has_attachments,s.is_mailing_list,s.flag_id
+                   s.has_attachments,s.is_mailing_list,s.flag_id,s.message_direction
             FROM MessageSummary s JOIN LocalMessageFts ON LocalMessageFts.account_id=s.account_id AND LocalMessageFts.unique_id=s.unique_id AND LocalMessageFts.folder_name=s.folder_name
             WHERE ({where}){scope} ORDER BY {order} LIMIT $limit OFFSET $offset;
             """;
@@ -527,8 +698,12 @@ public partial class LocalStoreService
 
     public async Task<LocalSearchResult> LoadLocalPageAsync(Guid? accountId, string? folderName, int limit, int offset,
         LocalSearchSort sort = LocalSearchSort.NewestFirst, bool includeDescendants = false,
-        CancellationToken ct = default, IReadOnlyCollection<Guid>? accountIds = null)
+        CancellationToken ct = default, IReadOnlyCollection<Guid>? accountIds = null,
+        IReadOnlyCollection<LocalFolderScope>? excludedFolderScopes = null, long? knownTotal = null)
     {
+        var totalStarted = Stopwatch.GetTimestamp();
+        var detail = $"folder={folderName ?? "(all)"}; descendants={includeDescendants}; " +
+                     $"sort={sort}; offset={offset}; accountScope={accountId?.ToString() ?? (accountIds?.Count.ToString() ?? "all")}";
         limit = Math.Clamp(limit, 1, LocalMailConstants.MaxRenderedMessages);
         offset = Math.Max(0, offset);
         var accountFilter = BuildAccountFilter(string.Empty, accountId, accountIds);
@@ -548,22 +723,56 @@ public partial class LocalStoreService
             LocalSearchSort.ReadDescending => "is_read DESC, date_ticks DESC",
             LocalSearchSort.AttachmentsFirst => "has_attachments DESC, date_ticks DESC",
             LocalSearchSort.AttachmentsLast => "has_attachments ASC, date_ticks DESC",
+            LocalSearchSort.DirectionAscending => "message_direction ASC, date_ticks DESC",
+            LocalSearchSort.DirectionDescending => "message_direction DESC, date_ticks DESC",
             _ => "date_ticks DESC",
         };
+        var stageStarted = Stopwatch.GetTimestamp();
         await using var conn = await OpenAsync();
-        await using var count = conn.CreateCommand();
-        count.CommandText = $"SELECT count(*) FROM MessageSummary WHERE 1=1{accountFilter}{folderFilter};";
-        AddAccountParameters(count, accountId, accountIds);
-        if (!string.IsNullOrWhiteSpace(folderName)) count.Parameters.AddWithValue("$fn", folderName);
-        if (!string.IsNullOrWhiteSpace(folderName) && includeDescendants) AddDescendantRange(count, folderName);
-        var total = Convert.ToInt64(await count.ExecuteScalarAsync(ct) ?? 0);
+        await PopulateExcludedFolderScopesAsync(conn, excludedFolderScopes, ct);
+        var excludedFilter = BuildExcludedFolderScopesFilter("MessageSummary.", excludedFolderScopes);
+        PerformanceLogService.Record("Folder SQLite: open connection",
+            Stopwatch.GetElapsedTime(stageStarted), detail);
+
+        long total;
+        if (knownTotal.HasValue)
+        {
+            total = Math.Max(0, knownTotal.Value);
+            PerformanceLogService.Record("Folder SQLite: use cached message count",
+                TimeSpan.Zero, $"{detail}; total={total}");
+        }
+        else
+        {
+            await using var count = conn.CreateCommand();
+            // Keep the exact folder and descendant range as two independent index seeks. Combining
+            // them with OR made SQLite scan most of a large account on a cold cache (4-5 seconds to
+            // count as few as 25 rows), despite idx_summary_account_folder_date being available.
+            count.CommandText = includeDescendants && !string.IsNullOrWhiteSpace(folderName)
+                ? $"""
+                    SELECT COALESCE(SUM(amount), 0) FROM (
+                        SELECT count(*) AS amount FROM MessageSummary
+                        WHERE 1=1{accountFilter} AND folder_name=$fn{excludedFilter}
+                        UNION ALL
+                        SELECT count(*) AS amount FROM MessageSummary
+                        WHERE 1=1{accountFilter} AND folder_name >= $ds AND folder_name < $de{excludedFilter}
+                    );
+                    """
+                : $"SELECT count(*) FROM MessageSummary WHERE 1=1{accountFilter}{folderFilter}{excludedFilter};";
+            AddAccountParameters(count, accountId, accountIds);
+            if (!string.IsNullOrWhiteSpace(folderName)) count.Parameters.AddWithValue("$fn", folderName);
+            if (!string.IsNullOrWhiteSpace(folderName) && includeDescendants) AddDescendantRange(count, folderName);
+            stageStarted = Stopwatch.GetTimestamp();
+            total = Convert.ToInt64(await count.ExecuteScalarAsync(ct) ?? 0);
+            PerformanceLogService.Record("Folder SQLite: count matching messages",
+                Stopwatch.GetElapsedTime(stageStarted), $"{detail}; total={total}");
+        }
 
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = $"""
             SELECT unique_id,account_id,folder_name,internet_message_id,from_disp,to_addr,
                    subject,date_ticks,is_read,preview_text,is_replied,is_forwarded,
-                   has_attachments,is_mailing_list,flag_id
-            FROM MessageSummary WHERE 1=1{accountFilter}{folderFilter}
+                   has_attachments,is_mailing_list,flag_id,message_direction
+            FROM MessageSummary WHERE 1=1{accountFilter}{folderFilter}{excludedFilter}
             ORDER BY {order} LIMIT $limit OFFSET $offset;
             """;
         AddAccountParameters(cmd, accountId, accountIds);
@@ -572,8 +781,17 @@ public partial class LocalStoreService
         cmd.Parameters.AddWithValue("$limit", limit);
         cmd.Parameters.AddWithValue("$offset", offset);
         var messages = new List<MailMessageSummary>();
+        stageStarted = Stopwatch.GetTimestamp();
         await using var reader = await cmd.ExecuteReaderAsync(ct);
+        PerformanceLogService.Record("Folder SQLite: execute page query",
+            Stopwatch.GetElapsedTime(stageStarted), $"{detail}; limit={limit}");
+
+        stageStarted = Stopwatch.GetTimestamp();
         while (await reader.ReadAsync(ct)) messages.Add(ReadLocalSummary(reader));
+        PerformanceLogService.Record("Folder SQLite: materialize page rows",
+            Stopwatch.GetElapsedTime(stageStarted), $"{detail}; rows={messages.Count}");
+        PerformanceLogService.Record("Folder SQLite: total local page load",
+            Stopwatch.GetElapsedTime(totalStarted), $"{detail}; rows={messages.Count}; total={total}");
         return new LocalSearchResult(messages, total);
     }
 
@@ -622,15 +840,22 @@ public partial class LocalStoreService
         IsRead = reader.GetInt64(8) != 0, Preview = reader.GetString(9), IsReplied = reader.GetInt64(10) != 0,
         IsForwarded = reader.GetInt64(11) != 0, HasAttachments = reader.GetInt64(12) != 0,
         IsMailingList = reader.GetInt64(13) != 0, FlagId = reader.IsDBNull(14) ? null : reader.GetString(14),
+        Direction = reader.IsDBNull(15) ? MessageDirection.Unknown : (MessageDirection)reader.GetInt64(15),
     };
 
     public async Task MoveLocalMessagesAsync(Guid accountId, string sourceFolder, string destinationFolder,
         IReadOnlyCollection<string> messageIds, CancellationToken ct = default)
     {
         if (messageIds.Count == 0 || sourceFolder.Equals(destinationFolder, StringComparison.OrdinalIgnoreCase)) return;
+        var totalStarted = Stopwatch.GetTimestamp();
+        var detail = $"messages={messageIds.Count}; source={sourceFolder}; destination={destinationFolder}";
+        var stageStarted = Stopwatch.GetTimestamp();
         await using var conn = await OpenAsync();
         await using var tx = (SqliteTransaction)await conn.BeginTransactionAsync(ct);
         await EnsureNotContainerAsync(conn, tx, accountId, destinationFolder, allowMissing: false, ct);
+        PerformanceLogService.Record("Message move SQLite: open and validate destination",
+            Stopwatch.GetElapsedTime(stageStarted), detail);
+        stageStarted = Stopwatch.GetTimestamp();
         foreach (var id in messageIds)
         {
             // A previous move of the same local identity may already exist in Trash (for
@@ -664,9 +889,19 @@ public partial class LocalStoreService
                 "UPDATE AttachmentContent SET folder_name=$dest WHERE account_id=$aid AND folder_name=$source AND unique_id=$uid;",
                 accountId, sourceFolder, id, destinationFolder, ct);
         }
+        PerformanceLogService.Record("Message move SQLite: update message, search and attachment keys",
+            Stopwatch.GetElapsedTime(stageStarted), detail);
+        stageStarted = Stopwatch.GetTimestamp();
         await UpdateFolderCountsAsync(conn, tx, accountId, sourceFolder, ct);
         await UpdateFolderCountsAsync(conn, tx, accountId, destinationFolder, ct);
+        PerformanceLogService.Record("Message move SQLite: refresh source and destination counts",
+            Stopwatch.GetElapsedTime(stageStarted), detail);
+        stageStarted = Stopwatch.GetTimestamp();
         await tx.CommitAsync(ct);
+        PerformanceLogService.Record("Message move SQLite: commit",
+            Stopwatch.GetElapsedTime(stageStarted), detail);
+        PerformanceLogService.Record("Message move SQLite: total",
+            Stopwatch.GetElapsedTime(totalStarted), detail);
     }
 
     public async Task DeleteLocalMessagesAsync(Guid accountId, string folderName,

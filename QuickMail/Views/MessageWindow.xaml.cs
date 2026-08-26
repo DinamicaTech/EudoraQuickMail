@@ -767,6 +767,45 @@ public partial class MessageWindow : Window
         }
     }
 
+    private async void AttachmentContextMenu_CopyPath_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem { Tag: AttachmentModel attachment } || _vm.MessageDetail is null) return;
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+            var path = await AttachmentPathMaterializer.EnsureLocalPathAsync(
+                attachment, _vm.MessageDetail, _imap, cts.Token);
+            Clipboard.SetText(path);
+        }
+        catch (Exception ex)
+        {
+            LogService.Log("Copy attachment path from message window", ex);
+            MessageBox.Show(this, $"Could not copy the attachment path:\n\n{ex.Message}",
+                "Copy Attachment", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    private async void AttachmentContextMenu_Explore_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem { Tag: AttachmentModel attachment } || _vm.MessageDetail is null) return;
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+            var path = await AttachmentPathMaterializer.EnsureLocalPathAsync(
+                attachment, _vm.MessageDetail, _imap, cts.Token);
+            var start = new System.Diagnostics.ProcessStartInfo("explorer.exe") { UseShellExecute = true };
+            start.ArgumentList.Add("/select,");
+            start.ArgumentList.Add(path);
+            System.Diagnostics.Process.Start(start);
+        }
+        catch (Exception ex)
+        {
+            LogService.Log("Explore attachment from message window", ex);
+            MessageBox.Show(this, $"Could not show the attachment in File Explorer:\n\n{ex.Message}",
+                "Explore Attachment", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
     // Alt+A (window.focusAttachments, issue #350): move focus to this message's attachment list.
     // GotKeyboardFocus selects the first item so the screen reader lands on an attachment rather
     // than the empty list shell. When the message has none, announce it instead of moving focus

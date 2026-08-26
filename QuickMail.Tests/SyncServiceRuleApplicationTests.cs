@@ -82,8 +82,9 @@ public class SyncServiceRuleApplicationTests : IDisposable
         public List<MailRule> LoadRules() => OneEnabledRule;
         public void SaveRules(List<MailRule> rules) { }
         public List<MailMessageSummary> TestRule(MailRule rule, IEnumerable<MailMessageSummary> messages) => [];
-        public Task<int> ApplyRuleToMessagesAsync(MailRule rule, List<MailMessageSummary> messages,
-            ILocalStoreService store, CancellationToken ct) => Task.FromResult(0);
+        public Task<(int MatchedCount, List<MailMessageSummary> RemovedMessages)> ApplyRuleToMessagesAsync(
+            MailRule rule, List<MailMessageSummary> messages, ILocalStoreService store, CancellationToken ct)
+            => Task.FromResult((0, new List<MailMessageSummary>()));
         public Task<List<MailMessageSummary>> ApplyRulesToExistingAsync(ILocalStoreService store, IReadOnlyDictionary<Guid, string> inboxFolderByAccount, CancellationToken ct)
             => Task.FromResult(new List<MailMessageSummary>());
     }
@@ -442,6 +443,34 @@ public class SyncServiceRuleApplicationTests : IDisposable
         await sync.SyncFolderFullAsync(Account(), custom, CancellationToken.None);
 
         Assert.Empty(rules.Calls);   // rules never ran on the non-Inbox folder
+    }
+
+    [Fact]
+    public async Task SyncFolderFull_CustomFolder_DoesNotOverwritePersistedOutgoingDirection()
+    {
+        var custom = new MailFolderModel { FullName = "Archive", DisplayName = "Archive" };
+        var persisted = new MailMessageSummary
+        {
+            MessageId = "1", AccountId = _accountId, FolderName = custom.FullName,
+            From = "me@example.com", To = "customer@example.com", Subject = "sent",
+            Date = DateTimeOffset.UtcNow, Direction = MessageDirection.Outgoing,
+        };
+        await _store.UpsertSummariesAsync([persisted]);
+
+        // A normal IMAP summary has no QuickMail direction metadata. Re-syncing a mixed custom
+        // folder must retain the direction learned before the message was filed out of Sent.
+        var serverCopy = new MailMessageSummary
+        {
+            MessageId = "1", AccountId = _accountId, FolderName = custom.FullName,
+            From = persisted.From, To = persisted.To, Subject = persisted.Subject,
+            Date = persisted.Date, Direction = MessageDirection.Unknown,
+        };
+        var sync = Build(new FetchStubMailService([serverCopy]), new CapturingRuleService());
+
+        await sync.SyncFolderFullAsync(Account(), custom, CancellationToken.None);
+
+        var stored = await _store.LoadFolderSummariesAsync(_accountId, custom.FullName);
+        Assert.Equal(MessageDirection.Outgoing, Assert.Single(stored).Direction);
     }
 
     [Fact]

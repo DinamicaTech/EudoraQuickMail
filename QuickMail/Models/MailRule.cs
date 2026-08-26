@@ -44,6 +44,13 @@ public class MailRule
     /// <summary>Run automatically for newly-arrived Inbox mail; manual application ignores this flag.</summary>
     public bool ApplyAutomatically { get; set; } = true;
 
+    /// <summary>
+    /// When this rule is invoked manually for a folder, also evaluate the physical Out/Sent
+    /// mailbox. This never makes a manual rule automatic and is deliberately ignored by the
+    /// incoming-mail pipeline.
+    /// </summary>
+    public bool AlsoFilterOutMailbox { get; set; }
+
     // ── Conditions (all ANDed) ──────────────────────────────────────────────
 
     /// <summary>When true, the FromContains condition is active.</summary>

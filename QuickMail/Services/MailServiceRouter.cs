@@ -154,6 +154,9 @@ public class MailServiceRouter : IMailService, IConnectionProbe
     public Task<List<MailMessageSummary>> GetMessagesSinceAsync(Guid accountId, string folderName, string sinceMessageId, int initialCount, CancellationToken ct = default)
         => For(accountId).GetMessagesSinceAsync(accountId, folderName, sinceMessageId, initialCount, ct);
 
+    public Task<MailMessageSummary?> GetMessageSummaryAsync(Guid accountId, string folderName, string messageId, CancellationToken ct = default)
+        => For(accountId).GetMessageSummaryAsync(accountId, folderName, messageId, ct);
+
     public Task<MailMessageDetail> GetMessageDetailAsync(Guid accountId, string folderName, string messageId, CancellationToken ct = default)
         => For(accountId).GetMessageDetailAsync(accountId, folderName, messageId, ct);
 

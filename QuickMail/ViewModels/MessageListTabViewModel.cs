@@ -9,6 +9,9 @@ namespace QuickMail.ViewModels;
 /// </summary>
 public sealed class MessageListTabViewModel : TabSessionViewModel
 {
+    /// <summary>The folder to restore when returning from a secondary navigation tab.</summary>
+    public MailFolderModel? Folder { get; set; }
+
     public MessageListTabViewModel()
         : base(new TabSessionModel
         {

@@ -8,13 +8,17 @@ public sealed record LocalSearchQuery(
     int Offset = 0,
     LocalSearchSort Sort = LocalSearchSort.NewestFirst,
     bool IncludeDescendants = false,
-    IReadOnlyCollection<Guid>? AccountIds = null);
+    IReadOnlyCollection<Guid>? AccountIds = null,
+    IReadOnlyCollection<LocalFolderScope>? FolderScopes = null,
+    IReadOnlyCollection<LocalFolderScope>? ExcludedFolderScopes = null);
+
+public sealed record LocalFolderScope(Guid AccountId, string FolderName, bool IncludeDescendants = false);
 
 public enum LocalSearchSort
 {
     NewestFirst, OldestFirst, Relevance, FromAscending, FromDescending,
     SubjectAscending, SubjectDescending, ReadAscending, ReadDescending, AttachmentsFirst, AttachmentsLast
-    , ToAscending, ToDescending
+    , ToAscending, ToDescending, DirectionAscending, DirectionDescending
 }
 
 public static class LocalMailConstants
@@ -29,4 +33,6 @@ public sealed record AdvancedSearchCriterion(string Field, string Operator, stri
 public sealed record AdvancedSearchQuery(IReadOnlyList<AdvancedSearchCriterion> Criteria,
     Guid? AccountId = null, string? FolderName = null, int Limit = LocalMailConstants.MaxRenderedMessages,
     int Offset = 0, LocalSearchSort Sort = LocalSearchSort.NewestFirst, bool IncludeDescendants = false,
-    IReadOnlyCollection<Guid>? AccountIds = null);
+    IReadOnlyCollection<Guid>? AccountIds = null,
+    IReadOnlyCollection<LocalFolderScope>? FolderScopes = null,
+    IReadOnlyCollection<LocalFolderScope>? ExcludedFolderScopes = null);

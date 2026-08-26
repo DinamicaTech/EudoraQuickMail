@@ -26,6 +26,17 @@ public static class PerformanceLogService
         Write(operation, elapsed.TotalMilliseconds, details);
     }
 
+    /// <summary>
+    /// Writes an immediate zero-duration checkpoint. Unlike a disposable timing scope this leaves
+    /// evidence in the log even when an operation blocks, is cancelled, or the process is closed
+    /// before its END record can be emitted.
+    /// </summary>
+    public static void Marker(string operation, string? details = null)
+    {
+        if (!Enabled) return;
+        Write(operation, 0, details);
+    }
+
     public static void DeleteLog()
     {
         try

@@ -123,6 +123,9 @@ public partial class MainWindow : Window
     private readonly IAutoDiscoverService? _autoDiscover;
     private readonly ICommandRegistry _registry;
     private readonly IRowLayoutService? _rowLayoutService;
+    private readonly MessageListLayoutStore _messageListLayoutStore;
+    private string? _messageListResolutionKey;
+    private double _preferredReadingPaneHeight = 300;
     private RowFieldsWindow? _rowFieldsWindow;
     private WatchedConversationsWindow? _watchedConversationsWindow;
     // Null in tests that construct MainWindow without it; the manager command no-ops when absent.
@@ -137,6 +140,8 @@ public partial class MainWindow : Window
     private bool _calendarWebViewReady;
     private bool _calendarWebViewInitializing;
     private readonly TypeAheadPrefixTracker _typeAhead = new();
+    private readonly TypeAheadPrefixTracker _folderTypeAhead =
+        new(resetDelay: TimeSpan.FromMilliseconds(500));
     private int _messageBodyRenderVersion;
 
     // Tracks which pane (GetFocusedPaneIndex) was active when the window last deactivated
@@ -147,6 +152,8 @@ public partial class MainWindow : Window
     // "12 messages", …) coalesce into a single final reading by the screen reader.
     private DispatcherTimer? _statusAnnounceTimer;
     private string? _pendingStatusText;
+    private string? _statusBeforeLinkHover;
+    private string? _currentLinkHoverStatus;
     // Category captured at queue time (issue #317) so delete/archive chatter announces under the
     // MessageAction toggle while sync/loading updates stay Status. Last queued write wins.
     private AnnouncementCategory _pendingStatusCategory = AnnouncementCategory.Status;
@@ -247,6 +254,7 @@ public partial class MainWindow : Window
         _vm = vm;
         _watchService = watchService;
         _profileContext = profileContext ?? ProfileContext.Default();
+        _messageListLayoutStore = new MessageListLayoutStore(_profileContext);
         _rowLayoutService = rowLayoutService;
         // Optional so existing test constructions keep compiling; a null catalog falls back to the
         // built-in table, which is a pure lookup with no dependencies of its own.
@@ -281,6 +289,8 @@ public partial class MainWindow : Window
         _statusClockTimer.Start();
         _vm.MessagesDeleting += OnMessagesDeleting;
         _vm.FolderSelectionDataReady += OnFolderSelectionDataReady;
+        _vm.NewMailArrived += OnNewMailArrived;
+        Loaded += (_, _) => EnsureTrayIcon();
         var initialConfig = _configService.Load();
         ApplyAccountsPanelVisibility(initialConfig.ShowAccountsPanel);
         ApplyTodayAgendaVisibility(initialConfig.ShowTodayAgenda);
@@ -359,7 +369,8 @@ public partial class MainWindow : Window
             return dlg.ShowDialog(this) == true ? dlg.FolderName : null;
         };
         vm.RulesManagerRequested += (_, _) => OpenRulesManager();
-        vm.CreateRuleFromMessageRequested += (_, template) => OpenRulesManager(template);
+        vm.CreateRuleFromMessageRequested += (_, template) => OpenRuleFromMessage(template);
+        vm.FilterAllLikeThisRequested += async (_, _) => await FilterAllLikeThisAsync();
         vm.TutorialRequested += (_, _) => ShowTutorial();
         vm.UpdateDialogRequested += (_, info) =>
         {
@@ -570,16 +581,32 @@ public partial class MainWindow : Window
                      e.PropertyName == nameof(MainViewModel.FolderTree))
             {
                 if (e.PropertyName == nameof(MainViewModel.SelectedFolder))
-                    _vm.UpdateMessageListTabTitle(_vm.SelectedFolder?.DisplayName);
+                {
+                    if (_vm.ActiveTab is MessageListTabViewModel)
+                    {
+                        _vm.RememberMainMessageListFolder(_vm.SelectedFolder);
+                        _vm.UpdateMessageListTabTitle(_vm.SelectedFolder?.DisplayName);
+                    }
+                    ResetMessageListVirtualScroll();
+                }
                 Dispatcher.InvokeAsync(() => SyncFolderTreeSelection(false), DispatcherPriority.Input);
+            }
+            else if (e.PropertyName == nameof(MainViewModel.SearchText))
+            {
+                // A new result set always starts at its first row. Without resetting the external
+                // total-results scrollbar, its old absolute anchor can immediately hide the first
+                // viewport of the new list when the user touches the wheel.
+                ResetMessageListVirtualScroll();
             }
             else if (e.PropertyName == nameof(MainViewModel.IsMessageOpen) ||
                      e.PropertyName == nameof(MainViewModel.ReadingPaneVisible) ||
                      e.PropertyName == nameof(MainViewModel.IsComposeTabActive))
             {
                 ReadingPaneRow.Height = vm.ReadingPaneVisible
-                    ? new GridLength(Math.Clamp(_configService.Load().Windowing.ReadingPaneHeight, 120, 1200))
+                    ? new GridLength(_preferredReadingPaneHeight)
                     : new GridLength(0);
+                if (vm.ReadingPaneVisible && vm.IsMessagesView && vm.SelectedMessage != null)
+                    KeepSelectedMessageVisibleAfterPreviewOpens(vm.SelectedMessage);
             }
 
             if (e.PropertyName == nameof(MainViewModel.StatusText) && !string.IsNullOrEmpty(vm.StatusText))
@@ -696,6 +723,7 @@ public partial class MainWindow : Window
 
     protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
     {
+        SaveMessageListLayout();
         // When close-to-tray is enabled, a normal window close hides to the notification area
         // instead of exiting so the new-mail watchers keep running. An explicit exit (File > Exit
         // or the tray Exit item) sets _explicitExit and falls through to a real close.
@@ -711,8 +739,7 @@ public partial class MainWindow : Window
 
     private void HideToTray(Models.ConfigModel cfg)
     {
-        _trayIcon ??= new TrayIconManager(onOpen: RestoreFromTray, onExit: RequestExit);
-        _trayIcon.Show();
+        EnsureTrayIcon();
         Hide();
 
         // One-time hint so the app doesn't silently vanish. Delivered as a toast (announced natively
@@ -733,7 +760,19 @@ public partial class MainWindow : Window
     public void RestoreFromTray()
     {
         RestoreAndActivate();
-        _trayIcon?.Hide(); // tray icon is only shown while the window is hidden
+        _trayIcon?.ClearNewMailIndicator();
+    }
+
+    private void EnsureTrayIcon()
+    {
+        _trayIcon ??= new TrayIconManager(onOpen: RestoreFromTray, onExit: RequestExit);
+        _trayIcon.Show();
+    }
+
+    private void OnNewMailArrived(string accountLabel, int count)
+    {
+        EnsureTrayIcon();
+        _trayIcon?.SignalNewMail(accountLabel, count);
     }
 
     // Invoked from File > Exit (vm.ExitRequested) and the tray Exit item. Flags an explicit exit so
@@ -834,6 +873,7 @@ public partial class MainWindow : Window
         foreach (var w in _openMessageWindows.ToList())
             w.Close();
         _rulesWindow?.Close(); // unowned (#347), so not auto-closed with the main window
+        _vm.NewMailArrived -= OnNewMailArrived;
         _trayIcon?.Dispose(); // remove the tray icon so it doesn't linger after exit
         // Cancels all in-flight VM operations (sync, prefetch, loads) and releases
         // their CTS handles. OnClosed, not OnClosing — the close cannot be cancelled here.
@@ -991,8 +1031,9 @@ public partial class MainWindow : Window
             ? new GridLength(Math.Clamp(paneConfig.AccountPaneHeight, 60, 800)) : new GridLength(0);
         TodayAgendaRow.Height = navigationConfig.ShowTodayAgenda
             ? new GridLength(Math.Clamp(paneConfig.TodayAgendaHeight, 80, 800)) : new GridLength(0);
+        ApplyMessageListLayout(paneConfig.ReadingPaneHeight);
         ReadingPaneRow.Height = _vm.ReadingPaneVisible
-            ? new GridLength(Math.Clamp(paneConfig.ReadingPaneHeight, 120, 1200))
+            ? new GridLength(_preferredReadingPaneHeight)
             : new GridLength(0);
 
         // Register commands that require UI access (must run after InitializeComponent).
@@ -1007,8 +1048,7 @@ public partial class MainWindow : Window
 
         _registry.Register(new CommandDefinition(
             id: "view.searchFolders", category: "View", title: "Search Folders…",
-            execute: OpenFolderPicker,
-            defaultKey: Key.F, defaultModifiers: ModifierKeys.Control | ModifierKeys.Shift));
+            execute: OpenFolderPicker));
 
         _registry.Register(new CommandDefinition(
             id: "view.openViewMenu", category: "View", title: "Open View Menu",
@@ -1223,6 +1263,14 @@ public partial class MainWindow : Window
             id: "folder.new", category: "Mail", title: "New Folder…",
             execute: () => _ = NewFolderFromSelectionAsync(),
             isAvailable: () => _vm.Accounts.Count > 0));
+
+        _registry.Register(new CommandDefinition(
+            id: "folder.rename", category: "Mail", title: "Rename Folder…",
+            execute: () => _ = RenameFolderFromSelectionAsync(),
+            defaultKey: Key.F2, defaultModifiers: ModifierKeys.None,
+            isAvailable: () => FolderList.IsKeyboardFocusWithin
+                && FolderList.SelectedItem is FolderTreeNode node
+                && IsRenameableFolder(node)));
 
         // Delete on a real folder in the folder tree deletes that folder (shares the Delete gesture
         // with mail.delete; the registry prefers whichever command is available for the focus).
@@ -1899,7 +1947,7 @@ public partial class MainWindow : Window
 
                 case Key.D1:
                     e.Handled = true;
-                    await OpenShortcutFolderAsync(MainViewModel.AllInboxesFolder);
+                    await OpenShortcutFolderAsync(_vm.ResolveInboxShortcutFolder());
                     return;
 
                 case Key.D2:
@@ -2207,17 +2255,44 @@ public partial class MainWindow : Window
             || e.NewValue is not FolderTreeNode { Folder: { } folder }) return;
         _folderSelectionChangedDuringClick = true;
         await _vm.SelectFolderCommand.ExecuteAsync(folder);
+        _vm.RememberMainMessageListFolder(folder);
         _vm.UpdateMessageListTabTitle(folder.DisplayName);
         _vm.ActivateMessageListTab();
     }
 
     private bool _folderSelectionChangedDuringClick;
+    private Point _folderDragStart;
+    private FolderTreeNode? _folderDragNode;
 
-    private void FolderList_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e) =>
+    private void FolderList_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
         _folderSelectionChangedDuringClick = false;
+        _folderDragStart = e.GetPosition(FolderList);
+        // ContainerFromElement(FolderList, source) only resolves root-level containers. Nested
+        // TreeViewItems are generated by their parent TreeViewItem, which made dragging appear
+        // completely dead for almost every real folder. Walk the visual tree instead, just as the
+        // drop target and context-menu paths do.
+        var current = e.OriginalSource as DependencyObject;
+        while (current is not null && current is not TreeViewItem)
+            current = System.Windows.Media.VisualTreeHelper.GetParent(current);
+        _folderDragNode = current is TreeViewItem { DataContext: FolderTreeNode node } ? node : null;
+    }
+
+    private void FolderList_PreviewMouseMove(object sender, MouseEventArgs e)
+    {
+        if (e.LeftButton != MouseButtonState.Pressed || _folderDragNode is not { } node) return;
+        var current = e.GetPosition(FolderList);
+        if (Math.Abs(current.X - _folderDragStart.X) < SystemParameters.MinimumHorizontalDragDistance
+            && Math.Abs(current.Y - _folderDragStart.Y) < SystemParameters.MinimumVerticalDragDistance) return;
+
+        _folderDragNode = null;
+        if (!IsMovableFolder(node, "move")) return;
+        DragDrop.DoDragDrop(FolderList, node, DragDropEffects.Move);
+    }
 
     private async void FolderList_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
+        _folderDragNode = null;
         if (_folderSelectionChangedDuringClick) return;
         var current = e.OriginalSource as DependencyObject;
         while (current is not null && current is not TreeViewItem)
@@ -2227,6 +2302,7 @@ public partial class MainWindow : Window
             || !ReferenceEquals(FolderList.SelectedItem, item.DataContext)) return;
 
         await _vm.SelectFolderCommand.ExecuteAsync(folder);
+        _vm.RememberMainMessageListFolder(folder);
         _vm.UpdateMessageListTabTitle(folder.DisplayName);
         _vm.ActivateMessageListTab();
     }
@@ -2240,8 +2316,110 @@ public partial class MainWindow : Window
         if (TodayAgendaRow.ActualHeight >= 80)
             cfg.Windowing.TodayAgendaHeight = TodayAgendaRow.ActualHeight;
         if (_vm.IsMessageOpen && ReadingPaneRow.ActualHeight >= 120)
-            cfg.Windowing.ReadingPaneHeight = ReadingPaneRow.ActualHeight;
+            _preferredReadingPaneHeight = Math.Clamp(ReadingPaneRow.ActualHeight, 120, 1200);
         _configService.Save(cfg);
+        SaveMessageListLayout();
+    }
+
+    private void ApplyMessageListLayout(double legacyReadingPaneHeight)
+    {
+        _messageListResolutionKey = CurrentDisplayResolutionKey();
+        var layout = _messageListLayoutStore.Load(_messageListResolutionKey);
+        if (layout is null)
+        {
+            // Seed the very first per-resolution profile from the old global preference so an
+            // upgrade keeps the user's current pane height. Once the JSON exists, every unseen
+            // resolution deliberately starts from the shipped 300px default.
+            _preferredReadingPaneHeight = _messageListLayoutStore.HasStoredLayouts
+                ? 300
+                : Math.Clamp(legacyReadingPaneHeight, 120, 1200);
+            return;
+        }
+
+        _preferredReadingPaneHeight = Math.Clamp(layout.ReadingPaneHeight, 120, 1200);
+        if (MessageList.View is not GridView grid || layout.Columns.Count == 0) return;
+
+        var current = grid.Columns
+            .Select(column => (Id: MessageColumnId(column), Column: column))
+            .Where(entry => entry.Id.Length > 0)
+            .ToDictionary(entry => entry.Id, entry => entry.Column, StringComparer.OrdinalIgnoreCase);
+        var reordered = new List<GridViewColumn>(grid.Columns.Count);
+        foreach (var saved in layout.Columns)
+        {
+            if (!current.Remove(saved.Id, out var column)) continue;
+            if (double.IsFinite(saved.Width)) column.Width = Math.Clamp(saved.Width, 24, 1600);
+            reordered.Add(column);
+        }
+        // Columns introduced after a layout was saved should appear in their useful default
+        // position, not be stranded after Attachments at the far right. Direction was also absent
+        // from the first layout-store implementation, so repair both without disturbing the
+        // user's explicitly saved order for all other columns.
+        foreach (var column in grid.Columns.Where(column => !reordered.Contains(column)).ToList())
+        {
+            var id = MessageColumnId(column);
+            if (id is "direction" or "replied")
+            {
+                var statusIndex = reordered.FindIndex(candidate => MessageColumnId(candidate) == "status");
+                if (statusIndex >= 0)
+                {
+                    reordered.Insert(statusIndex, column);
+                    continue;
+                }
+            }
+            reordered.Add(column);
+        }
+
+        grid.Columns.Clear();
+        foreach (var column in reordered) grid.Columns.Add(column);
+    }
+
+    private void SaveMessageListLayout()
+    {
+        if (!IsInitialized || MessageList.View is not GridView grid) return;
+        _messageListResolutionKey ??= CurrentDisplayResolutionKey();
+        if (_vm.IsMessageOpen && ReadingPaneRow.ActualHeight >= 120)
+            _preferredReadingPaneHeight = Math.Clamp(ReadingPaneRow.ActualHeight, 120, 1200);
+
+        var columns = grid.Columns.Select(column => new MessageListColumnLayout
+        {
+            Id = MessageColumnId(column),
+            Width = Math.Clamp(double.IsFinite(column.ActualWidth) && column.ActualWidth > 0
+                ? column.ActualWidth
+                : double.IsFinite(column.Width) ? column.Width : 100, 24, 1600),
+        }).Where(column => column.Id.Length > 0).ToList();
+
+        _messageListLayoutStore.Save(_messageListResolutionKey, new MessageListDisplayLayout
+        {
+            ReadingPaneHeight = _preferredReadingPaneHeight,
+            Columns = columns,
+        });
+    }
+
+    private string CurrentDisplayResolutionKey()
+    {
+        var handle = new WindowInteropHelper(this).Handle;
+        var bounds = System.Windows.Forms.Screen.FromHandle(handle).Bounds;
+        return $"{bounds.Width}x{bounds.Height}";
+    }
+
+    private static string MessageColumnId(GridViewColumn column)
+    {
+        if (column.Header is not GridViewColumnHeader header) return string.Empty;
+        return header.Content?.ToString() switch
+        {
+            "In/Out" => "direction",
+            "↩" => "replied",
+            "Status" => "status",
+            "From" => "from",
+            "To" => "to",
+            "Subject" => "subject",
+            "Date" => "date",
+            "Time" => "time",
+            "Folder" => "folder",
+            _ when string.Equals(header.Tag?.ToString(), "Attachments", StringComparison.OrdinalIgnoreCase)
+                => "attachments",
+            _ => string.Empty,
+        };
     }
 
     private async void LocalPageSlider_DragCompleted(object sender, DragCompletedEventArgs e)
@@ -2267,7 +2445,8 @@ public partial class MainWindow : Window
             "From" => descending ? MessageSort.FromDescending : MessageSort.FromAscending,
             "To" => descending ? MessageSort.ToDescending : MessageSort.ToAscending,
             "Subject" => descending ? MessageSort.AlphaDescending : MessageSort.AlphaAscending,
-            "Status" => descending ? MessageSort.ReadStateDescending : MessageSort.ReadStateAscending,
+            "Status" => descending ? MessageSort.StatusDescending : MessageSort.StatusAscending,
+            "Direction" => descending ? MessageSort.DirectionDescending : MessageSort.DirectionAscending,
             "Attachments" => descending ? MessageSort.AttachmentsFirst : MessageSort.AttachmentsLast,
             _ => descending ? MessageSort.DateDescending : MessageSort.DateAscending,
         };
@@ -2401,7 +2580,8 @@ public partial class MainWindow : Window
     private bool TryBuildTypeAheadPrefix(string? text, object scope, out string prefix)
     {
         prefix = string.Empty;
-        return TreeViewFocusHelper.ModifiersAllowTypeAhead && _typeAhead.TryAppend(text, scope, out prefix);
+        var tracker = ReferenceEquals(scope, FolderList) ? _folderTypeAhead : _typeAhead;
+        return TreeViewFocusHelper.ModifiersAllowTypeAhead && tracker.TryAppend(text, scope, out prefix);
     }
 
     // Peek route (PreviewKeyDown): computes the prefix without recording it. The KeyDown site
@@ -2411,11 +2591,16 @@ public partial class MainWindow : Window
     private bool TryPeekTypeAheadPrefix(string? text, object scope, out string prefix)
     {
         prefix = string.Empty;
-        return TreeViewFocusHelper.ModifiersAllowTypeAhead && _typeAhead.TryPeek(text, scope, out prefix);
+        var tracker = ReferenceEquals(scope, FolderList) ? _folderTypeAhead : _typeAhead;
+        return TreeViewFocusHelper.ModifiersAllowTypeAhead && tracker.TryPeek(text, scope, out prefix);
     }
 
     // Commits the exact prefix the KeyDown route peeked and matched on.
-    private void CommitTypeAheadPrefix(string prefix, object scope) => _typeAhead.Commit(prefix, scope);
+    private void CommitTypeAheadPrefix(string prefix, object scope)
+    {
+        var tracker = ReferenceEquals(scope, FolderList) ? _folderTypeAhead : _typeAhead;
+        tracker.Commit(prefix, scope);
+    }
 
     private static bool TryGetTypeAheadKeyText(KeyEventArgs e, out string text)
         => TreeViewFocusHelper.TryGetTypeAheadKeyText(e, out text);
@@ -2977,7 +3162,7 @@ public partial class MainWindow : Window
                 _vm.SelectedMessage = summary;
                 await _vm.SelectMessageCommand.ExecuteAsync(summary);
                 if (_vm.IsMessageOpen && _vm.MessageDetail != null)
-                    await ShowMessageBodyAsync(_vm.MessageDetail);
+                    await ShowMessageBodyAsync(_vm.MessageDetail, focusMessageBody: false);
             }
             else
             {
@@ -3040,9 +3225,36 @@ public partial class MainWindow : Window
         _vm.IsMessageOpen = false;
     }
 
+    private void KeepSelectedMessageVisibleAfterPreviewOpens(MailMessageSummary selected)
+    {
+        // IsMessageOpen changes before WPF has measured the shorter list row. Waiting until Loaded
+        // lets Grid apply ReadingPaneRow.Height first; ScrollIntoView can then use the real viewport
+        // and preserve the user's position instead of leaving the selected bottom row behind the pane.
+        _ = Dispatcher.InvokeAsync(() =>
+        {
+            if (!_vm.ReadingPaneVisible || !ReferenceEquals(_vm.SelectedMessage, selected) ||
+                !MessageList.Items.Contains(selected)) return;
+            MessageList.UpdateLayout();
+            MessageList.ScrollIntoView(selected);
+            MessageList.UpdateLayout();
+        }, DispatcherPriority.Loaded);
+    }
+
     private Point _messageDragStart;
     private bool _messageDragArmed;
+    private ModifierKeys _messageDragModifiers;
     private int _totalScrollVersion;
+
+    private void ResetMessageListVirtualScroll()
+    {
+        Interlocked.Increment(ref _totalScrollVersion);
+        TotalMessageScrollBar.Value = 0;
+        _ = Dispatcher.InvokeAsync(() =>
+        {
+            if (FindScrollViewer(MessageList) is { } viewer)
+                viewer.ScrollToTop();
+        }, DispatcherPriority.Loaded);
+    }
 
     private void TotalMessageScrollBar_Scroll(object sender, ScrollEventArgs e) =>
         QueueTotalMessageScroll(e.NewValue, e.ScrollEventType == ScrollEventType.ThumbTrack ? 80 : 0);
@@ -3050,7 +3262,11 @@ public partial class MainWindow : Window
     private void MessageList_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
     {
         if (_vm.LocalTotalMessages <= 0) return;
-        var step = Math.Max(1, Math.Abs(e.Delta) / Mouse.MouseWheelDeltaForOneLine * 3);
+        // Treat one WPF wheel event as one message regardless of the raw Delta magnitude. Some
+        // mouse drivers aggregate a physical notch and report 120 * N; interpreting that value as
+        // N separate notches made a single movement jump 21 rows on the user's hardware.
+        // Pagination remains transparent and only swaps backing pages at their boundary.
+        const int step = 1;
         var target = TotalMessageScrollBar.Value + (e.Delta > 0 ? -step : step);
         target = Math.Max(TotalMessageScrollBar.Minimum, Math.Min(TotalMessageScrollBar.Maximum, target));
         TotalMessageScrollBar.Value = target;
@@ -3063,7 +3279,7 @@ public partial class MainWindow : Window
         var version = Interlocked.Increment(ref _totalScrollVersion);
         try
         {
-            using var webViewTiming = PerformanceLogService.Measure("Startup/splash: create WebView2 environment");
+            using var scrollTiming = PerformanceLogService.Measure("Message grid: settle virtual scroll position");
             if (delayMilliseconds > 0)
                 await Task.Delay(delayMilliseconds);
             if (version != _totalScrollVersion) return;
@@ -3078,7 +3294,14 @@ public partial class MainWindow : Window
 
             var localIndex = absoluteIndex - _vm.LocalPageOffset;
             if (localIndex >= 0 && localIndex < MessageList.Items.Count)
-                MessageList.ScrollIntoView(MessageList.Items[localIndex]);
+            {
+                // CanContentScroll is explicitly true, so VerticalOffset is expressed in logical
+                // items, not pixels. Passing localIndex therefore means exactly “put this message at
+                // the top”; using a measured row height here made WPF interpret ~22 pixels as ~22
+                // messages on systems where the template retained logical scrolling.
+                if (FindScrollViewer(MessageList) is { } viewer)
+                    viewer.ScrollToVerticalOffset(localIndex);
+            }
         }
         catch (Exception ex) { LogService.Log("TotalMessageScroll", ex); }
     }
@@ -3090,7 +3313,11 @@ public partial class MainWindow : Window
         // any arbitrary child is what stole their native drag gestures.
         _messageDragArmed = e.OriginalSource is DependencyObject source
             && ItemsControl.ContainerFromElement(MessageList, source) is ListViewItem;
-        if (_messageDragArmed) _messageDragStart = e.GetPosition(MessageList);
+        if (_messageDragArmed)
+        {
+            _messageDragStart = e.GetPosition(MessageList);
+            _messageDragModifiers = Keyboard.Modifiers;
+        }
     }
 
     private void MessageList_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e) =>
@@ -3104,29 +3331,66 @@ public partial class MainWindow : Window
             && Math.Abs(current.Y - _messageDragStart.Y) < SystemParameters.MinimumVerticalDragDistance) return;
         _messageDragArmed = false;
         var selected = MessageList.SelectedItems.OfType<MailMessageSummary>().ToList();
-        DragDrop.DoDragDrop(MessageList, selected, DragDropEffects.Move);
+        try { DragDrop.DoDragDrop(MessageList, selected, DragDropEffects.Move); }
+        finally { _messageDragModifiers = ModifierKeys.None; }
     }
 
     private void FolderList_DragOver(object sender, DragEventArgs e)
     {
         e.Effects = e.Data.GetDataPresent(typeof(List<MailMessageSummary>))
+            || e.Data.GetDataPresent(typeof(FolderTreeNode))
             ? DragDropEffects.Move : DragDropEffects.None;
         e.Handled = true;
     }
 
     private async void FolderList_Drop(object sender, DragEventArgs e)
     {
-        if (e.Data.GetData(typeof(List<MailMessageSummary>)) is not List<MailMessageSummary> messages) return;
         var element = FolderList.InputHitTest(e.GetPosition(FolderList)) as DependencyObject;
         while (element is not null && element is not TreeViewItem)
             element = System.Windows.Media.VisualTreeHelper.GetParent(element);
         if (element is not TreeViewItem { DataContext: FolderTreeNode { Folder: { } folder } node }) return;
-        var shiftDrop = (e.KeyStates & DragDropKeyStates.ShiftKey) != 0;
-        if (folder.IsContainer)
+        if (e.Data.GetData(typeof(FolderTreeNode)) is FolderTreeNode sourceNode)
+        {
+            if (!IsMovableFolder(sourceNode, "move") || !IsFolderMoveDestination(node)) return;
+            var source = sourceNode.Folder!;
+            if (_vm.IsInvalidFolderMoveTarget(source, folder, out var reason))
+            {
+                Report(reason);
+                return;
+            }
+            var willMerge = _vm.WillMergeFolderMove(source, folder);
+            var prompt = willMerge
+                ? $"'{node.Label}' already contains a folder named '{sourceNode.Label}'.\n\n"
+                  + "Merge the folders? All messages and subfolders from the source will be moved "
+                  + "into the existing folder. Filters will be updated automatically."
+                : $"Move folder '{sourceNode.Label}' and all its subfolders to '{node.Label}'?\n\n"
+                  + "Filters that point to the old folder path will be updated automatically.";
+            if (MessageBox.Show(this, prompt, willMerge ? "Merge Folders" : "Move Folder",
+                    MessageBoxButton.YesNo, MessageBoxImage.Question,
+                    MessageBoxResult.No) != MessageBoxResult.Yes) return;
+            await _vm.MoveFolderToAsync(sourceNode, folder);
+            return;
+        }
+
+        if (e.Data.GetData(typeof(List<MailMessageSummary>)) is not List<MailMessageSummary> messages) return;
+        // KeyStates can lose Control while WPF transitions from OLE drag tracking to Drop. Preserve
+        // the modifiers captured when the row drag began, and also sample the live keyboard state.
+        var modifiers = _messageDragModifiers | Keyboard.Modifiers;
+        var shiftDrop = (e.KeyStates & DragDropKeyStates.ShiftKey) != 0 ||
+                        (modifiers & ModifierKeys.Shift) != 0;
+        var controlShiftDrop = shiftDrop && ((e.KeyStates & DragDropKeyStates.ControlKey) != 0 ||
+                                              (modifiers & ModifierKeys.Control) != 0);
+        if (shiftDrop)
+            await _vm.EnsureSenderAddressAsync(messages[0]);
+        // Old/imported trees can carry a stale is_container=0 even though the node visibly owns
+        // children. The visible hierarchy is authoritative: a node with children cannot receive
+        // messages directly and must take the create-subfolder drop path.
+        var isContainer = folder.IsContainer || node.Children.Count > 0;
+        if (isContainer)
         {
             if (shiftDrop)
             {
-                await ShiftDropOnContainerAsync(messages, node, folder);
+                await ShiftDropOnContainerAsync(messages, node, folder, controlShiftDrop);
                 return;
             }
             AccessibilityHelper.Announce(this, "Choose a subfolder; container folders cannot contain messages.",
@@ -3137,7 +3401,8 @@ public partial class MainWindow : Window
         if (shiftDrop) OpenRulesManager(CreateMoveRuleTemplate(messages[0], folder));
     }
 
-    private async Task ShiftDropOnContainerAsync(List<MailMessageSummary> messages, FolderTreeNode node, MailFolderModel container)
+    private async Task ShiftDropOnContainerAsync(List<MailMessageSummary> messages, FolderTreeNode node,
+        MailFolderModel container, bool createAndApplyFilter)
     {
         var accountId = messages[0].AccountId;
         var parentName = container.FullName.Length > 0 && container.FullName[0] != '\0'
@@ -3151,20 +3416,38 @@ public partial class MainWindow : Window
         };
         if (dialog.ShowDialog() != true) return;
 
-        var folders = _vm.CachedFolders.TryGetValue(accountId, out var cached) ? cached : [];
-        var destination = folders.FirstOrDefault(f =>
-            string.Equals(f.DisplayName, dialog.FolderName, StringComparison.OrdinalIgnoreCase)
-            && (parentName == null || string.Equals(f.ParentId, parentName, StringComparison.OrdinalIgnoreCase)
-                || f.FullName.StartsWith(parentName + "/", StringComparison.OrdinalIgnoreCase)
-                || f.FullName.StartsWith(parentName + ".", StringComparison.OrdinalIgnoreCase)));
-        if (destination == null)
+        MailFolderModel? destination;
+        if (_vm.IsCanonicalLocalFolder(container))
         {
-            var refreshed = await _vm.CreateFolderReturningFoldersAsync(accountId, parentName, dialog.FolderName);
-            destination = refreshed?.FirstOrDefault(f =>
-                string.Equals(f.DisplayName, dialog.FolderName, StringComparison.OrdinalIgnoreCase));
-            _vm.CommitPendingFolderTreeRebuild();
+            // Ctrl/Shift-drop creates a leaf below the visible canonical container. Returning the
+            // canonical model is essential: using its physical binding misclassified it as another
+            // container and RuleService correctly refused to store the message there.
+            destination = await _vm.CreateCanonicalFolderAndRefreshAsync(
+                container, dialog.FolderName, isContainer: false);
+        }
+        else
+        {
+            var folders = _vm.CachedFolders.TryGetValue(accountId, out var cached) ? cached : [];
+            destination = folders.FirstOrDefault(f =>
+                string.Equals(f.DisplayName, dialog.FolderName, StringComparison.OrdinalIgnoreCase)
+                && (parentName == null || string.Equals(f.ParentId, parentName, StringComparison.OrdinalIgnoreCase)
+                    || f.FullName.StartsWith(parentName + "/", StringComparison.OrdinalIgnoreCase)
+                    || f.FullName.StartsWith(parentName + ".", StringComparison.OrdinalIgnoreCase)));
+            if (destination == null)
+            {
+                var refreshed = await _vm.CreateFolderReturningFoldersAsync(accountId, parentName, dialog.FolderName);
+                destination = refreshed?.FirstOrDefault(f =>
+                    string.Equals(f.DisplayName, dialog.FolderName, StringComparison.OrdinalIgnoreCase));
+                _vm.CommitPendingFolderTreeRebuild();
+            }
         }
         if (destination == null) return;
+
+        if (createAndApplyFilter)
+        {
+            await CreateDomainRuleAndApplyToSourceFolderAsync(messages[0], destination);
+            return;
+        }
 
         await _vm.MoveSelectedMessagesToFolderAsync(messages, destination);
         if (MessageBox.Show(this, "Create a filter for messages like this?", "Create Filter",
@@ -3172,20 +3455,96 @@ public partial class MainWindow : Window
             OpenRulesManager(CreateMoveRuleTemplate(messages[0], destination));
     }
 
-    private static MailRule CreateMoveRuleTemplate(MailMessageSummary message, MailFolderModel destination) => new()
+    private MailRule CreateMoveRuleTemplate(MailMessageSummary message, MailFolderModel destination) => new()
     {
-        Name = $"Rule for {message.From}",
-        FromContains = message.From,
+        Name = $"Rule for {MainViewModel.SenderMailbox(message.From)}",
+        FromContains = MainViewModel.SenderMailbox(message.From),
         UseFromCondition = true,
         AccountId = null,
         Action = RuleAction.MoveToFolder,
         AlsoMarkAsRead = true,
         ApplyAutomatically = false,
-        TargetFolder = destination.FullName,
+        AlsoFilterOutMailbox = _configService.Load().MarkAlsoFilterOutMailboxByDefault,
+        TargetFolder = _vm.RuleTargetPath(destination),
     };
+
+    private async Task CreateDomainRuleAndApplyToSourceFolderAsync(
+        MailMessageSummary sourceMessage, MailFolderModel destination)
+    {
+        var started = Stopwatch.GetTimestamp();
+        var operationId = Guid.NewGuid().ToString("N")[..8];
+        var perf = $"id={operationId}; source={sourceMessage.FolderName}; destination={_vm.RuleTargetPath(destination)}";
+        PerformanceLogService.Marker("Rules: quick filter BEGIN", perf);
+        await _vm.EnsureSenderAddressAsync(sourceMessage);
+        var domain = DomainCriterion(sourceMessage.From);
+        if (string.IsNullOrWhiteSpace(domain))
+        {
+            Report("A domain could not be extracted from the sender, so the filter was not created.");
+            PerformanceLogService.Record("Rules: quick filter END",
+                Stopwatch.GetElapsedTime(started), perf + "; result=no-domain");
+            return;
+        }
+
+        var rule = CreateMoveRuleTemplate(sourceMessage, destination);
+        rule.Name = $"Rule for {domain}";
+        rule.FromContains = domain;
+        rule.IsEnabled = true;
+        rule.AccountId = null;
+
+        var (savedRule, created) = _ruleService.SaveOrUpdateQuickMoveRule(rule);
+        rule = savedRule;
+
+        _vm.IsBusy = true;
+        _vm.IsStatusHighlighted = true;
+        _vm.StatusText = $"Applying {(created ? "new" : "updated")} filter {domain} to {sourceMessage.FolderName}…";
+        try
+        {
+            var loadStarted = Stopwatch.GetTimestamp();
+            var sourceMessages = (await _localStore.LoadFolderSummariesAsync(
+                sourceMessage.AccountId, sourceMessage.FolderName)).ToList();
+            PerformanceLogService.Record("Rules: quick filter/load source",
+                Stopwatch.GetElapsedTime(loadStarted), perf + $"; rows={sourceMessages.Count}");
+            using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(5));
+            var result = await _ruleService.ApplyRuleToMessagesAsync(
+                rule, sourceMessages, _localStore, cts.Token);
+            if (result.RemovedMessages.Count > 0)
+                _vm.RemoveMessagesFromActiveView(result.RemovedMessages);
+            await _vm.RefreshAfterLocalMutationAsync("quick-filter");
+            if (result.RemovedMessages.Count > 0)
+                _vm.ShowLatestFilteredDestination(rule, result.RemovedMessages[0]);
+            Report($"Filter '{rule.Name}' {(created ? "created" : "updated")} and applied to {sourceMessage.FolderName}: "
+                + $"{result.MatchedCount:N0} message{(result.MatchedCount == 1 ? "" : "s")} matched.");
+        }
+        catch (Exception ex)
+        {
+            LogService.Log("Create and apply filter from Ctrl+Shift+Drag", ex);
+            Report($"The filter was {(created ? "created" : "updated")}, but it could not be applied: {ex.Message}");
+        }
+        finally
+        {
+            PerformanceLogService.Record("Rules: quick filter END",
+                Stopwatch.GetElapsedTime(started), perf);
+            _vm.IsBusy = false;
+            _vm.IsStatusHighlighted = false;
+        }
+    }
+
+    private static string DomainCriterion(string? from)
+    {
+        var value = MainViewModel.SenderMailbox(from);
+        if (string.IsNullOrWhiteSpace(value)) return string.Empty;
+        var at = value.LastIndexOf('@');
+        if (at < 0 || at + 1 >= value.Length) return string.Empty;
+        var domain = value[(at + 1)..]
+            .TrimStart()
+            .Split([' ', '\t', '\r', '\n', '>', '<', ',', ';'], StringSplitOptions.RemoveEmptyEntries)
+            .FirstOrDefault();
+        return string.IsNullOrWhiteSpace(domain) ? string.Empty : "@" + domain;
+    }
 
     private static string SuggestedDomainFolder(string? from)
     {
+        from = MainViewModel.SenderMailbox(from);
         if (string.IsNullOrWhiteSpace(from)) return string.Empty;
         var at = from.LastIndexOf('@');
         if (at < 0) return string.Empty;
@@ -3792,7 +4151,9 @@ public partial class MainWindow : Window
         try
         {
             var result = await _graphCalendarSyncService.SyncDayAsync(day);
-            await _vm.CalendarVm.RefreshCommand.ExecuteAsync(null);
+            // SyncDayAsync has already materialized the selected day's rows. Reload those rows;
+            // running the F5 command here used to launch a full mail-cache calendar harvest.
+            await _vm.CalendarVm.ReloadFromStoreAsync();
             _vm.StatusText = result.Error is not null
                 ? $"Calendar sync failed: {result.Error}"
                 : result.AccountsSynced == 0
@@ -3834,7 +4195,9 @@ public partial class MainWindow : Window
                 // is inside this WebView2 then. Note the key is 'W' (upper case) with Shift held.
                 +"else if(e.ctrlKey&&e.shiftKey&&(e.key==='w'||e.key==='W')){window.chrome.webview.postMessage('ctrl-shift-w');e.preventDefault();}"
                 +"});"
-                +"window.addEventListener('contextmenu',function(e){e.preventDefault();window.chrome.webview.postMessage('message-body-context');});");
+                +"window.addEventListener('contextmenu',function(e){e.preventDefault();window.chrome.webview.postMessage('message-body-context');});"
+                +"document.addEventListener('mouseover',function(e){const a=e.target.closest&&e.target.closest('a[href]');if(a)window.chrome.webview.postMessage('link-hover:'+a.href);});"
+                +"document.addEventListener('mouseout',function(e){const a=e.target.closest&&e.target.closest('a[href]');if(a&&(!e.relatedTarget||!a.contains(e.relatedTarget)))window.chrome.webview.postMessage('link-leave');});");
 
             MessageBody.CoreWebView2.WebMessageReceived += (_, args) =>
             {
@@ -3862,6 +4225,10 @@ public partial class MainWindow : Window
                         DispatcherPriority.Input);
                 else if (msg == "message-body-context")
                     Dispatcher.InvokeAsync(OpenMessageBodyContextMenu, DispatcherPriority.Input);
+                else if (msg.StartsWith("link-hover:", StringComparison.Ordinal))
+                    Dispatcher.InvokeAsync(() => ShowHoveredLink(msg["link-hover:".Length..]), DispatcherPriority.Input);
+                else if (msg == "link-leave")
+                    Dispatcher.InvokeAsync(ClearHoveredLink, DispatcherPriority.Input);
             };
 
             MessageBody.CoreWebView2.NavigationStarting += (_, args) =>
@@ -3957,8 +4324,10 @@ public partial class MainWindow : Window
         MessageBody.CoreWebView2.NavigateToString(html);
     }
 
-    // Render the message body in the browser and move focus into it
-    private async Task ShowMessageBodyAsync(MailMessageDetail detail)
+    // Render the message body in the browser. Opening a dedicated message tab/notification moves
+    // focus into the document; a selection made in the message list deliberately does not, so
+    // list-scoped shortcuts (Shift+F, Delete, flags, etc.) remain available after the preview loads.
+    private async Task ShowMessageBodyAsync(MailMessageDetail detail, bool focusMessageBody = true)
     {
         if (!_webViewReady) return;
 
@@ -4011,7 +4380,8 @@ public partial class MainWindow : Window
                 MessageBodyRendered?.Invoke();
             });
 
-        await FocusMessageBodyAsync(renderVersion, detail.Subject);
+        if (focusMessageBody)
+            await FocusMessageBodyAsync(renderVersion, detail.Subject);
     }
 
     private async Task FocusMessageBodyAsync(int renderVersion, string? subject)
@@ -4244,11 +4614,67 @@ public partial class MainWindow : Window
 
     private void OpenMessageBodyContextMenu()
     {
-        var item = new MenuItem { Header = "Bla bla bla" };
-        item.Click += (_, _) => ShowExpandedMessageInformation();
         var menu = new ContextMenu { PlacementTarget = MessageBody, Placement = PlacementMode.MousePoint };
-        menu.Items.Add(item);
+        var expanded = new MenuItem { Header = "Bla bla bla" };
+        expanded.Click += (_, _) => ShowExpandedMessageInformation();
+        menu.Items.Add(expanded);
+
+        var browser = new MenuItem { Header = "Send to _browser" };
+        browser.Click += async (_, _) => await SendPreviewToBrowserAsync();
+        menu.Items.Add(browser);
+        menu.Items.Add(new Separator());
+
+        var reply = new MenuItem { Header = "_Reply", Command = _vm.ReplyCommand };
+        var forward = new MenuItem { Header = "_Forward", Command = _vm.ForwardCommand };
+        menu.Items.Add(reply);
+        menu.Items.Add(forward);
+        if (_vm.SelectedMessage is { } selected && IsOutgoingMessage(selected))
+            menu.Items.Add(new MenuItem { Header = "Send _again", Command = _vm.SendAgainCommand });
         menu.IsOpen = true;
+    }
+
+    private async Task SendPreviewToBrowserAsync()
+    {
+        var detail = _vm.MessageDetail;
+        if (detail is null) return;
+        try
+        {
+            _vm.IsBusy = true;
+            _vm.IsStatusHighlighted = true;
+            _vm.StatusText = "Preparing message for the browser…";
+            var html = await Task.Run(() =>
+                MessageBodyHtmlBuilder.BuildMessageHtml(detail, themeCss: null, forcePlainText: false));
+            var path = Path.Combine(Path.GetTempPath(), $"QuickMail-message-{Guid.NewGuid():N}.html");
+            await File.WriteAllTextAsync(path, html, System.Text.Encoding.UTF8);
+            Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+            _vm.StatusText = "Message opened in the default browser.";
+        }
+        catch (Exception ex)
+        {
+            LogService.Log("Send preview to browser", ex);
+            _vm.StatusText = $"Could not open the message in the browser: {ex.Message}";
+        }
+        finally
+        {
+            _vm.IsBusy = false;
+        }
+    }
+
+    private bool IsOutgoingMessage(MailMessageSummary message)
+    {
+        if (_vm.CachedFolders.TryGetValue(message.AccountId, out var folders) &&
+            folders.Any(folder => folder.Kind == SpecialFolderKind.Sent &&
+                folder.FullName.Equals(message.FolderName, StringComparison.OrdinalIgnoreCase)))
+            return true;
+
+        var leaf = message.FolderName.Replace('\\', '/').Split('/')[^1];
+        if (leaf.Equals("Out", StringComparison.OrdinalIgnoreCase) ||
+            leaf.Equals("Sent", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        var ownAddress = _vm.Accounts.FirstOrDefault(account => account.Id == message.AccountId)?.Username;
+        return !string.IsNullOrWhiteSpace(ownAddress) &&
+            message.From.Contains(ownAddress, StringComparison.OrdinalIgnoreCase);
     }
 
     private void ShowExpandedMessageInformation()
@@ -4268,24 +4694,200 @@ public partial class MainWindow : Window
             { Owner = this }.Show();
     }
 
+    private async void OpenRuleFromMessage(MailRule template)
+    {
+        var message = GetSelectedMessages().FirstOrDefault();
+        if (message == null)
+        {
+            OpenRulesManager(template);
+            return;
+        }
+
+        try
+        {
+            var sender = await _vm.EnsureSenderAddressAsync(message);
+            var detail = await _localStore.LoadDetailAsync(
+                message.AccountId, message.FolderName, message.MessageId);
+            var body = !string.IsNullOrWhiteSpace(detail?.PlainTextBody)
+                ? detail.PlainTextBody
+                : detail?.HtmlBody;
+            if (!string.IsNullOrWhiteSpace(sender))
+            {
+                template.FromContains = sender;
+                template.Name = $"Rule for {sender}";
+            }
+            var existing = _ruleService.LoadRules().FirstOrDefault(rule =>
+                _ruleService.IsMatch(rule, message, body));
+            if (existing != null)
+            {
+                OpenRulesManager(selectRuleId: existing.Id,
+                    compatibilityMessage: message, compatibilityBodyOverride: body);
+                return;
+            }
+        }
+        catch (Exception ex)
+        {
+            LogService.Log("Find existing rule for selected message", ex);
+        }
+        OpenRulesManager(template);
+    }
+
+    private async Task<string?> LoadCompleteBodyForRuleMatchAsync(MailMessageSummary message)
+    {
+        var detail = await _localStore.LoadDetailAsync(
+            message.AccountId, message.FolderName, message.MessageId);
+        return !string.IsNullOrWhiteSpace(detail?.PlainTextBody)
+            ? detail.PlainTextBody
+            : detail?.HtmlBody;
+    }
+
+    private async Task FilterAllLikeThisAsync()
+    {
+        var sample = GetSelectedMessages().FirstOrDefault();
+        var folder = _vm.SelectedFolder;
+        if (sample == null || folder == null) return;
+
+        var operationId = Guid.NewGuid().ToString("N")[..8];
+        var perf = $"id={operationId}; sample={sample.MessageId}; folder={folder.DisplayName}";
+        var started = Stopwatch.GetTimestamp();
+        PerformanceLogService.Marker("Rules: filter all like this BEGIN", perf);
+        _vm.IsBusy = true;
+        _vm.IsStatusHighlighted = true;
+        _vm.StatusText = "Finding filters applicable to the selected message…";
+        await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Render);
+        try
+        {
+            await _vm.EnsureSenderAddressAsync(sample);
+            var body = await LoadCompleteBodyForRuleMatchAsync(sample);
+            var applicable = _ruleService.LoadRules()
+                .Where(rule => rule.IsEnabled && _ruleService.IsMatch(rule, sample, body))
+                .ToList();
+            PerformanceLogService.Record("Rules: filter all like this/match filters",
+                Stopwatch.GetElapsedTime(started), perf + $"; applicable={applicable.Count}");
+            if (applicable.Count == 0)
+            {
+                Report("No enabled filters match the selected message.");
+                return;
+            }
+
+            _vm.StatusText = $"Applying {applicable.Count:N0} matching filter{(applicable.Count == 1 ? "" : "s")} to {folder.DisplayName}…";
+            await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Render);
+            var candidates = await _vm.LoadCurrentFolderSummariesForRulesAsync(folder);
+            var outgoingCandidates = new List<MailMessageSummary>();
+            if (applicable.Any(rule => rule.AlsoFilterOutMailbox))
+                outgoingCandidates = await _vm.LoadOutFolderSummariesForRulesAsync(folder);
+            var totalMatches = 0;
+            var removed = new List<MailMessageSummary>();
+            MailRule? latestMoveRule = null;
+            MailMessageSummary? latestMovedMessage = null;
+            using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(10));
+            for (var index = 0; index < applicable.Count; index++)
+            {
+                var rule = applicable[index];
+                _vm.StatusText = $"Applying filter {index + 1:N0}/{applicable.Count:N0}: {rule.Name}…";
+                await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Render);
+                var ruleStarted = Stopwatch.GetTimestamp();
+                var ruleCandidates = rule.AlsoFilterOutMailbox
+                    ? candidates.Concat(outgoingCandidates).DistinctBy(message =>
+                        (message.AccountId, message.FolderName, message.MessageId)).ToList()
+                    : candidates;
+                var result = await _ruleService.ApplyRuleToMessagesAsync(
+                    rule, ruleCandidates, _localStore, cts.Token);
+                totalMatches += result.MatchedCount;
+                removed.AddRange(result.RemovedMessages);
+                if (result.RemovedMessages.Count > 0 && rule.Action == RuleAction.MoveToFolder)
+                {
+                    latestMoveRule = rule;
+                    latestMovedMessage = result.RemovedMessages[0];
+                }
+                if (result.RemovedMessages.Count > 0)
+                {
+                    var keys = result.RemovedMessages.Select(message =>
+                        (message.AccountId, message.FolderName, message.MessageId)).ToHashSet();
+                    candidates.RemoveAll(message => keys.Contains(
+                        (message.AccountId, message.FolderName, message.MessageId)));
+                    outgoingCandidates.RemoveAll(message => keys.Contains(
+                        (message.AccountId, message.FolderName, message.MessageId)));
+                }
+                PerformanceLogService.Record("Rules: filter all like this/rule",
+                    Stopwatch.GetElapsedTime(ruleStarted),
+                    perf + $"; index={index + 1}; rule={rule.Name}; matched={result.MatchedCount}");
+            }
+
+            if (removed.Count > 0)
+                _vm.RemoveMessagesFromActiveView(removed.DistinctBy(message =>
+                    (message.AccountId, message.FolderName, message.MessageId)).ToList());
+            await _vm.RefreshAfterLocalMutationAsync("filter-all-like-this");
+            if (latestMoveRule != null)
+                _vm.ShowLatestFilteredDestination(latestMoveRule, latestMovedMessage);
+            Report($"Applied {applicable.Count:N0} matching filter{(applicable.Count == 1 ? "" : "s")} to {folder.DisplayName}: {totalMatches:N0} match{(totalMatches == 1 ? "" : "es")}.");
+        }
+        catch (Exception ex)
+        {
+            LogService.Log("Filter all like this", ex);
+            Report($"Filter all like this failed: {ex.Message}");
+        }
+        finally
+        {
+            PerformanceLogService.Record("Rules: filter all like this END",
+                Stopwatch.GetElapsedTime(started), perf);
+            _vm.IsBusy = false;
+            _vm.IsStatusHighlighted = false;
+        }
+    }
+
     private async Task ApplyRulesToSelectedMessagesAsync()
     {
         var selected = MessageList.SelectedItems.OfType<MailMessageSummary>().ToList();
         var matched = 0;
+        var removed = new List<MailMessageSummary>();
+        MailRule? destinationRule = null;
         _vm.IsBusy = true;
         _vm.IsStatusHighlighted = true;
         _vm.StatusText = $"Filtering {selected.Count:N0} selected messages…";
         await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Render);
         try
         {
+            if (selected.FirstOrDefault() is { } sample)
+            {
+                await _vm.EnsureSenderAddressAsync(sample);
+                var body = await LoadCompleteBodyForRuleMatchAsync(sample);
+                destinationRule = _ruleService.LoadRules().FirstOrDefault(rule =>
+                    rule.IsEnabled && rule.Action == RuleAction.MoveToFolder &&
+                    _ruleService.IsMatch(rule, sample, body));
+            }
             foreach (var accountGroup in selected.GroupBy(m => m.AccountId))
             {
                 var result = await _ruleService.ApplyRulesAsync(accountGroup.ToList(), accountGroup.Key, CancellationToken.None);
                 matched += result.MatchedCount;
+                removed.AddRange(result.RemovedMessages);
             }
+            if (destinationRule is { AlsoFilterOutMailbox: true })
+            {
+                var outgoing = await _vm.LoadOutFolderSummariesForRulesAsync(
+                    _vm.SelectedFolder, destinationRule.AccountId);
+                using var outCts = new CancellationTokenSource(TimeSpan.FromMinutes(5));
+                var outResult = await _ruleService.ApplyRuleToMessagesAsync(
+                    destinationRule, outgoing, _localStore, outCts.Token);
+                matched += outResult.MatchedCount;
+                removed.AddRange(outResult.RemovedMessages);
+            }
+            // Move/Delete changes the database immediately. Remove those rows from the current
+            // page before refreshing so a click cannot try to open a now-stale source reference.
+            if (removed.Count > 0)
+                _vm.RemoveMessagesFromActiveView(removed);
+            if (matched > 0)
+                await _vm.RefreshAfterLocalMutationAsync("apply-rules-to-selection");
+            if (destinationRule != null && removed.Count > 0)
+                _vm.ShowLatestFilteredDestination(destinationRule, removed[0]);
             _vm.StatusText = $"Rules applied: {matched:N0} matched.";
             AccessibilityHelper.Announce(this, _vm.StatusText, category: AnnouncementCategory.Result);
-            if (matched > 0) _vm.RefreshCommand.Execute(null);
+        }
+        catch (Exception ex)
+        {
+            LogService.Log("Apply rules to selected messages", ex);
+            _vm.StatusText = $"Filtering failed: {ex.Message}";
+            AccessibilityHelper.Announce(this, _vm.StatusText, category: AnnouncementCategory.Result);
         }
         finally { _vm.IsBusy = false; }
     }
@@ -4299,6 +4901,80 @@ public partial class MainWindow : Window
             await _vm.OpenAttachmentCommand.ExecuteAsync(attachment);
             e.Handled = true;
         }
+    }
+
+    private async void AttachmentContextMenu_CopyPath_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem { Tag: AttachmentModel attachment }) return;
+        try
+        {
+            var path = await EnsureAttachmentLocalPathAsync(attachment);
+            if (path is null) return;
+            Clipboard.SetText(path);
+            _vm.StatusText = $"Attachment path copied: {path}";
+        }
+        catch (Exception ex)
+        {
+            LogService.Log("Copy attachment path", ex);
+            _vm.StatusText = $"Could not copy the attachment path: {ex.Message}";
+        }
+    }
+
+    private async void AttachmentContextMenu_Explore_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem { Tag: AttachmentModel attachment }) return;
+        try
+        {
+            var path = await EnsureAttachmentLocalPathAsync(attachment);
+            if (path is null) return;
+            var start = new ProcessStartInfo("explorer.exe") { UseShellExecute = true };
+            start.ArgumentList.Add("/select,");
+            start.ArgumentList.Add(path);
+            Process.Start(start);
+            _vm.StatusText = $"Showing attachment in File Explorer: {path}";
+        }
+        catch (Exception ex)
+        {
+            LogService.Log("Explore attachment", ex);
+            _vm.StatusText = $"Could not show the attachment in File Explorer: {ex.Message}";
+        }
+    }
+
+    private async Task<string?> EnsureAttachmentLocalPathAsync(AttachmentModel attachment)
+    {
+        var detail = _vm.MessageDetail;
+        if (detail is null) return null;
+        _vm.IsBusy = true;
+        _vm.IsStatusHighlighted = true;
+        _vm.StatusText = $"Preparing {attachment.FileName}…";
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+            return await AttachmentPathMaterializer.EnsureLocalPathAsync(attachment, detail, _imap, cts.Token);
+        }
+        finally
+        {
+            _vm.IsBusy = false;
+        }
+    }
+
+    private void ShowHoveredLink(string url)
+    {
+        if (string.IsNullOrWhiteSpace(url)) return;
+        if (_currentLinkHoverStatus == null) _statusBeforeLinkHover = _vm.StatusText;
+        _currentLinkHoverStatus = MessageLinkDomain.IsForeign(url, _vm.MessageDetail?.From)
+            ? "Warning! " + url
+            : url;
+        _vm.StatusText = _currentLinkHoverStatus;
+    }
+
+    private void ClearHoveredLink()
+    {
+        // Do not overwrite a newer operation status that arrived while the pointer was on a link.
+        if (_currentLinkHoverStatus != null && _vm.StatusText == _currentLinkHoverStatus)
+            _vm.StatusText = _statusBeforeLinkHover ?? string.Empty;
+        _currentLinkHoverStatus = null;
+        _statusBeforeLinkHover = null;
     }
 
     // Close the reading pane safely: cancel any in-flight render/focus chain and
@@ -4438,12 +5114,7 @@ public partial class MainWindow : Window
     {
         if (!MainStatusBar.IsKeyboardFocusWithin) return 0;
 
-        if (StatusTextBox.IsKeyboardFocused)          return 1;
-        if (ConnectionStatusTextBox.IsKeyboardFocused) return 2;
-        if (RulesStatusButton.IsKeyboardFocused)       return 3;
-        if (StatusProgressBar.IsKeyboardFocused)       return 4;
-
-        return 0;
+        return StatusTextBox.IsKeyboardFocused ? 1 : 0;
     }
 
     /// <summary>
@@ -4452,24 +5123,7 @@ public partial class MainWindow : Window
     /// </summary>
     private void FocusStatusBarRegion(int region)
     {
-        switch (region)
-        {
-            case 1:
-                StatusTextBox.Focus();
-                break;
-            case 2:
-                ConnectionStatusTextBox.Focus();
-                break;
-            case 3:
-                RulesStatusButton.Focus();
-                break;
-            case 4:
-                if (StatusProgressItem.Visibility == Visibility.Visible)
-                    StatusProgressBar.Focus();
-                else
-                    FocusStatusBarRegion(1); // fallback: wrap to first
-                break;
-        }
+        StatusTextBox.Focus();
     }
 
     /// <summary>
@@ -4478,22 +5132,7 @@ public partial class MainWindow : Window
     /// </summary>
     private void NavigateStatusBar(bool forward)
     {
-        int current = GetFocusedStatusBarRegion();
-        if (current == 0) { FocusStatusBarRegion(1); return; }
-
-        // Build the ordered list of visible region indices.
-        var visible = new List<int> { 1, 2, 3 };
-        if (StatusProgressItem.Visibility == Visibility.Visible)
-            visible.Add(4);
-
-        int pos = visible.IndexOf(current);
-        if (pos < 0) { FocusStatusBarRegion(visible[0]); return; }
-
-        int nextPos = forward
-            ? (pos + 1) % visible.Count
-            : (pos - 1 + visible.Count) % visible.Count;
-
-        FocusStatusBarRegion(visible[nextPos]);
+        FocusStatusBarRegion(1);
     }
 
     /// <summary>
@@ -5766,8 +6405,26 @@ public partial class MainWindow : Window
         // Compose windows are modeless, so the one-turn delay is imperceptible.
         Dispatcher.InvokeAsync(() =>
         {
-            var composeVm = new ComposeViewModel(_smtp, _accountService, _credentials, _imap, _templateService);
+            var composeVm = new ComposeViewModel(_smtp, _accountService, _credentials, _imap,
+                _templateService, localStore: _localStore);
             composeVm.Seed(composeModel);
+            composeVm.OriginalMessageReplied += (accountId, folderName, messageId) =>
+            {
+                foreach (var message in _vm.Messages.Where(message => message.AccountId == accountId
+                             && ((message.MessageId == messageId
+                                  && message.FolderName.Equals(folderName, StringComparison.OrdinalIgnoreCase))
+                                 || (!string.IsNullOrWhiteSpace(composeModel.InReplyToMessageId)
+                                     && message.InternetMessageId.Equals(composeModel.InReplyToMessageId,
+                                         StringComparison.OrdinalIgnoreCase)))))
+                    message.IsReplied = true;
+                if (_vm.MessageDetail is { } detail && detail.AccountId == accountId
+                    && ((detail.MessageId == messageId
+                         && detail.FolderName.Equals(folderName, StringComparison.OrdinalIgnoreCase))
+                        || (!string.IsNullOrWhiteSpace(composeModel.InReplyToMessageId)
+                            && detail.InternetMessageId.Equals(composeModel.InReplyToMessageId,
+                                StringComparison.OrdinalIgnoreCase))))
+                    detail.IsReplied = true;
+            };
             if (composeVm.IsEditingStoredMessage)
                 composeVm.SaveStoredMessageRequested = SaveStoredMessageAsync;
             composeVm.LocalFolderChanged += accountId =>
@@ -5940,7 +6597,7 @@ public partial class MainWindow : Window
             default: // ReadingPane
                 await _vm.SelectMessageCommand.ExecuteAsync(summary);
                 if (_vm.IsMessageOpen && _vm.MessageDetail != null)
-                    await ShowMessageBodyAsync(_vm.MessageDetail);
+                    await ShowMessageBodyAsync(_vm.MessageDetail, focusMessageBody: false);
                 break;
         }
     }
@@ -5977,14 +6634,49 @@ public partial class MainWindow : Window
         }
 
         // Message-list tab: show the list, hide reading pane, done.
-        if (tab is MessageListTabViewModel)
+        if (tab is MessageListTabViewModel listTab)
         {
             _vm.IsMessageOpen = false;
             _vm.MessageDetail = null;
+            if (listTab.Folder != null && (_vm.SelectedFolder == null ||
+                !FolderMatches(listTab.Folder, _vm.SelectedFolder)))
+                await _vm.SelectFolderCommand.ExecuteAsync(listTab.Folder);
             if (closeInProgress)
                 await Dispatcher.InvokeAsync(FocusActiveTabStripItem, DispatcherPriority.Input);
             else
                 FocusActiveMessagePanel();
+            return;
+        }
+
+        if (tab is FilteredFolderTabViewModel filteredTab)
+        {
+            _vm.IsMessageOpen = false;
+            _vm.MessageDetail = null;
+            await _vm.SelectFolderCommand.ExecuteAsync(filteredTab.Folder);
+            if (version != _tabChangedVersion) return;
+            var moved = filteredTab.LatestMovedMessage;
+            if (moved != null)
+            {
+                var row = _vm.Messages.FirstOrDefault(candidate =>
+                    candidate.AccountId == moved.AccountId && candidate.MessageId == moved.MessageId)
+                    ?? _vm.Messages.FirstOrDefault(candidate =>
+                        !string.IsNullOrWhiteSpace(moved.InternetMessageId) &&
+                        candidate.InternetMessageId == moved.InternetMessageId);
+                if (row != null)
+                {
+                    MessageList.SelectedItem = row;
+                    MessageList.ScrollIntoView(row);
+                }
+            }
+            FocusActiveMessagePanel();
+            return;
+        }
+
+        if (tab is CalendarTabViewModel)
+        {
+            _vm.IsMessageOpen = false;
+            _vm.MessageDetail = null;
+            await _vm.ActivateCalendarTabAsync();
             return;
         }
 
@@ -6414,6 +7106,53 @@ public partial class MainWindow : Window
     private async void FolderContextMenu_NewFolder_Click(object sender, RoutedEventArgs e)
         => await CreateFolderUnderNodeAsync(GetContextMenuFolderNode(sender));
 
+    private async void FolderContextMenu_RenameFolder_Click(object sender, RoutedEventArgs e)
+        => await RenameFolderAsync(GetContextMenuFolderNode(sender));
+
+    private async void FolderContextMenu_MarkRead_Click(object sender, RoutedEventArgs e)
+    {
+        var node = GetContextMenuFolderNode(sender);
+        if (node is null || node.IsHeader || node.Folder is null) return;
+
+        var folder = node.Folder;
+        var message = $"Mark every message in '{node.Label}' and all its subfolders as read?";
+        if (MessageBox.Show(this, message, "Mark Folder as Read",
+                MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No) != MessageBoxResult.Yes)
+            return;
+
+        _vm.IsBusy = true;
+        _vm.IsStatusHighlighted = true;
+        _vm.StatusText = $"Loading unread messages in {node.Label}…";
+        try
+        {
+            var messages = await _vm.LoadCurrentFolderSummariesForRulesAsync(
+                folder, preservePhysicalCopies: true);
+            var unread = messages.Where(item => !item.IsRead).ToList();
+            await _vm.MarkMessagesReadAsync(unread);
+            await _vm.RefreshCanonicalFolderCountsAsync();
+            Report(unread.Count == 0
+                ? $"All messages in {node.Label} are already read."
+                : $"Marked {unread.Count:N0} message{(unread.Count == 1 ? "" : "s")} in {node.Label} as read.");
+        }
+        catch (Exception ex)
+        {
+            LogService.Log("Mark folder recursively as read", ex);
+            Report($"Could not mark {node.Label} as read: {ex.Message}");
+        }
+        finally
+        {
+            _vm.IsBusy = false;
+            _vm.IsStatusHighlighted = false;
+        }
+    }
+
+    private void FolderContextMenu_Filters_Click(object sender, RoutedEventArgs e)
+    {
+        var folder = GetContextMenuFolderNode(sender)?.Folder;
+        if (folder == null) return;
+        OpenRulesManager(targetFolderFilter: _vm.RuleTargetAliases(folder));
+    }
+
     // Entry point for the New Folder command (menu / Command Palette / customizable hotkey).
     // Uses the folder tree's current selection so the same "create under here" behaviour as the
     // context menu is reachable without a mouse — the context menu was the only path before, which
@@ -6421,12 +7160,52 @@ public partial class MainWindow : Window
     private async Task NewFolderFromSelectionAsync()
         => await CreateFolderUnderNodeAsync(FolderList.SelectedItem as FolderTreeNode);
 
+    private async Task RenameFolderFromSelectionAsync()
+        => await RenameFolderAsync(FolderList.SelectedItem as FolderTreeNode);
+
+    private async Task RenameFolderAsync(FolderTreeNode? node)
+    {
+        if (!IsMovableFolder(node, "rename")) return;
+        var folder = node!.Folder!;
+        var currentPath = _vm.FolderDisplayPath(folder);
+        var slash = currentPath.LastIndexOf('\\');
+        var parentPath = slash < 0 ? string.Empty : currentPath[..slash];
+        var dialog = new NewFolderDialog
+        {
+            Owner = this,
+            Title = "Rename Folder",
+            ParentFolderName = parentPath,
+            DefaultFolderName = node.Label,
+        };
+        if (dialog.ShowDialog() != true ||
+            string.Equals(dialog.FolderName, node.Label, StringComparison.Ordinal)) return;
+
+        await _vm.RenameFolderAsync(node, dialog.FolderName);
+    }
+
     private async Task CreateFolderUnderNodeAsync(FolderTreeNode? node)
     {
         // Determine the parent: a header node (account) creates at root; a folder node creates
-        // beneath it. With no folder-tree selection, fall back to the selected account's root.
+        // beneath it. A shared tree root is synthetic, so let the view-model resolve it to the
+        // physical root of the account that owns that tree.
         var parentFolder = node is { IsHeader: false } ? node.Folder : null;
-        var accountId    = parentFolder?.AccountId
+        if (parentFolder != null && (_vm.IsCanonicalLocalFolder(parentFolder)
+            || parentFolder.FullName.StartsWith("\u0000RootMail:", StringComparison.Ordinal)))
+        {
+            var canonicalDialog = new NewFolderDialog
+            {
+                Owner = this,
+                // Homonymous nodes are common after a large Eudora import (for example
+                // Dinamica\Bancos and Dinamica\Prov\Bancos). Show the complete path so the user
+                // can verify the actual parent before accepting the new folder name.
+                ParentFolderName = _vm.FolderDisplayPath(parentFolder)
+            };
+            if (canonicalDialog.ShowDialog() == true)
+                await _vm.CreateCanonicalFolderAndRefreshAsync(parentFolder, canonicalDialog.FolderName);
+            return;
+        }
+        var resolvedRoot = _vm.ResolveNewFolderLocation(parentFolder);
+        var accountId    = resolvedRoot?.AccountId
                           ?? (node != null ? _vm.Accounts.FirstOrDefault(a => a.AccountLabel == node.Label)?.Id : null)
                           ?? _vm.SelectedAccount?.Id;
         if (accountId == null || accountId == Guid.Empty) return;
@@ -6438,7 +7217,13 @@ public partial class MainWindow : Window
         };
         if (dlg.ShowDialog() != true) return;
 
-        await _vm.CreateFolderAndRefreshAsync(accountId.Value, parentFolder?.FullName, dlg.FolderName);
+        var physicalParentName = resolvedRoot.HasValue
+            ? resolvedRoot.Value.ParentFullName
+            : parentFolder?.FullName;
+        await _vm.CreateFolderAndRefreshAsync(
+            accountId.Value,
+            physicalParentName,
+            dlg.FolderName);
     }
 
     // ── Move / copy folder (issue #431) ───────────────────────────────────────
@@ -6451,6 +7236,9 @@ public partial class MainWindow : Window
     // opens a full picker and fails at the server.
     private bool IsMovableFolder(FolderTreeNode? node, string verb)
     {
+        if (node is { IsHeader: false, Folder: { } canonical } &&
+            _vm.CanMoveCanonicalFolder(canonical))
+            return true;
         if (node is { IsHeader: false, Folder: { } folder } &&
             folder.AccountId != Guid.Empty &&
             folder.FullName.Length > 0 && folder.FullName[0] != '\0')
@@ -6461,6 +7249,20 @@ public partial class MainWindow : Window
         if (node is { IsHeader: false })
             Report($"'{node.Label}' is a view, not a folder, so there is nothing to {verb}.");
         return false;
+    }
+
+    private bool IsRenameableFolder(FolderTreeNode? node)
+    {
+        if (node is not { IsHeader: false, Folder: { } folder }) return false;
+        if (_vm.IsCanonicalLocalFolder(folder)) return _vm.CanMoveCanonicalFolder(folder);
+        return folder.AccountId != Guid.Empty && folder.FullName.Length > 0 && folder.FullName[0] != '\0';
+    }
+
+    private bool IsFolderMoveDestination(FolderTreeNode? node)
+    {
+        if (node is not { IsHeader: false, Folder: { } folder }) return false;
+        if (_vm.IsCanonicalLocalFolder(folder)) return true;
+        return folder.AccountId != Guid.Empty && folder.FullName.Length > 0 && folder.FullName[0] != '\0';
     }
 
     // Status bar for sighted users, announcement for screen-reader users — the pairing
@@ -6476,9 +7278,11 @@ public partial class MainWindow : Window
         var node = GetContextMenuFolderNode(sender);
         if (!IsMovableFolder(node, "move")) return;
 
-        if (_vm.CachedFolders.Count == 0) return;
-        var picker = FolderPickerWindow.ForFolderMoveCopy(
-            _vm.Accounts, _vm.CachedFolders, node!.Folder!, "Move Folder To");
+        var picker = _vm.IsCanonicalLocalFolder(node!.Folder)
+            ? FolderPickerWindow.ForCanonicalFolderMove(
+                _vm.FolderTree, node.Folder!, "Move Folder To")
+            : FolderPickerWindow.ForFolderMoveCopy(
+                _vm.Accounts, _vm.CachedFolders, node.Folder!, "Move Folder To");
         if (picker == null)
         {
             Report($"There is no other folder in this account to move '{node.Label}' into.");
@@ -6714,7 +7518,8 @@ public partial class MainWindow : Window
         ComposeWindow GetOrOpenCompose()
         {
             if (pending is not null) return pending;
-            var cvm = new ComposeViewModel(_smtp, _accountService, _credentials, _imap, _templateService);
+            var cvm = new ComposeViewModel(_smtp, _accountService, _credentials, _imap,
+                _templateService, localStore: _localStore);
             // Seed with an empty new-message model so the sender-account list is populated and the
             // default account + signature are applied — same as the normal "New message" path. Without
             // this the From picker is empty and the user can't choose who to send from (a pre-existing
@@ -6847,6 +7652,8 @@ public partial class MainWindow : Window
             // apply the theme (ThemeChanged handlers rebuild parent UI).
             var cfg = _configService.Load();
             _vm.ApplySettings(cfg);
+            if (!cfg.NotifyTrayIconOnNewMail)
+                _trayIcon?.ClearNewMailIndicator();
             ApplyAccountsPanelVisibility(cfg.ShowAccountsPanel);
             ApplyTodayAgendaVisibility(cfg.ShowTodayAgenda);
             if (cfg.ShowTodayAgenda && _vm.CalendarVm != null)
@@ -7193,7 +8000,7 @@ public partial class MainWindow : Window
             wizard.Choice != FirstRunWelcomeWindow.WelcomeChoice.ImportEudora) return;
         var options = new EudoraImportOptions(
             wizard.EudoraRoot, wizard.DataFolder, wizard.RootDisplayName, wizard.AttachmentMode,
-            wizard.ImportFilters, wizard.RespectCheckMailSettings);
+            wizard.ImportFilters, wizard.RespectCheckMailSettings, wizard.SelectedSources);
         if (!EudoraImportLauncher.TryStart(options, out var error))
         {
             MessageBox.Show(this, error, "Import from Eudora", MessageBoxButton.OK, MessageBoxImage.Error);
@@ -7419,22 +8226,50 @@ public partial class MainWindow : Window
 
     private Window? _rulesWindow;
 
-    private void OpenRulesManager(MailRule? template = null)
+    private async void OpenRulesManager(MailRule? template = null,
+        IReadOnlyCollection<string>? targetFolderFilter = null, Guid? selectRuleId = null,
+        MailMessageSummary? compatibilityMessage = null, string? compatibilityBodyOverride = null)
     {
+        // Repair the short-lived internal-id spelling that older folder pickers persisted. Rules
+        // should contain a human-readable canonical path, both for the editor and for diagnostics.
+        var persistedRules = _ruleService.LoadRules();
+        var repairedTargets = false;
+        foreach (var rule in persistedRules.Where(rule => rule.Action == RuleAction.MoveToFolder))
+        {
+            var normalized = _vm.NormalizeRuleTargetPath(rule.TargetFolder);
+            if (string.Equals(normalized, rule.TargetFolder, StringComparison.Ordinal)) continue;
+            rule.TargetFolder = normalized;
+            repairedTargets = true;
+        }
+        if (repairedTargets) _ruleService.SaveRules(persistedRules);
+
         // Single-instance: this window is modeless (see below), so a second open request
         // would otherwise stack another copy. Bring the existing one forward — and if this
-        // request carries a rule prefilled from the current message (Ctrl+Shift+T), add it
+        // request carries a rule prefilled from the current message (Ctrl+Shift+F), add it
         // to the open window rather than silently dropping it.
         if (_rulesWindow is { IsLoaded: true } existing)
         {
+            if (targetFolderFilter is { Count: > 0 } && existing.DataContext is RulesManagerViewModel filteredVm)
+            {
+                filteredVm.SetTargetFolderFilter(targetFolderFilter);
+                existing.Activate();
+                return;
+            }
             if (template != null)
             {
                 if (existing is RulesManagerWindow rmw) rmw.PrefillFromTemplate(template);
                 else if (existing is UnifiedRulesWindow urw) urw.PrefillFromTemplate(template);
             }
+            if (selectRuleId is { } existingRuleId && existing is RulesManagerWindow existingRules)
+            {
+                if (compatibilityMessage != null)
+                    existingRules.SelectRule(existingRuleId, compatibilityMessage, compatibilityBodyOverride);
+                else
+                    existingRules.SelectRule(existingRuleId);
+            }
             existing.Activate();
             existing.Topmost = true;
-            existing.Dispatcher.BeginInvoke(() => existing.Topmost = false,
+            _ = existing.Dispatcher.BeginInvoke(() => existing.Topmost = false,
                 DispatcherPriority.ApplicationIdle);
             return;
         }
@@ -7451,9 +8286,21 @@ public partial class MainWindow : Window
         {
             using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(5));
             var messages = await _vm.LoadCurrentFolderSummariesForRulesAsync(currentFolder);
-            var matched = await _ruleService.ApplyRuleToMessagesAsync(rule, messages, _localStore, cts.Token);
-            _vm.RefreshCommand.Execute(null);
-            return matched;
+            if (rule.AlsoFilterOutMailbox)
+            {
+                messages.AddRange(await _vm.LoadOutFolderSummariesForRulesAsync(
+                    currentFolder, rule.AccountId));
+                messages = messages
+                    .DistinctBy(message => (message.AccountId, message.FolderName, message.MessageId))
+                    .ToList();
+            }
+            var result = await _ruleService.ApplyRuleToMessagesAsync(rule, messages, _localStore, cts.Token);
+            if (result.RemovedMessages.Count > 0)
+                _vm.RemoveMessagesFromActiveView(result.RemovedMessages);
+            await _vm.RefreshAfterLocalMutationAsync("apply-rule-to-current-folder");
+            if (result.RemovedMessages.Count > 0)
+                _vm.ShowLatestFilteredDestination(rule, result.RemovedMessages[0]);
+            return result.MatchedCount;
         }
 
         // Unowned (issue #347) so the window reads its own title, not the main window's. Modeless
@@ -7501,7 +8348,10 @@ public partial class MainWindow : Window
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
             var removed = await Task.Run(() => _ruleService.ApplyRulesToExistingAsync(_localStore, inboxByAccount, cts.Token));
             if (removed.Count > 0)
-                _vm.RefreshCommand.Execute(null);
+            {
+                _vm.RemoveMessagesFromActiveView(removed);
+                await _vm.RefreshAfterLocalMutationAsync("run-rules-on-existing-mail");
+            }
             return removed.Count;
         }
 
@@ -7511,7 +8361,30 @@ public partial class MainWindow : Window
         // server rules are enabled and a Graph account exists; otherwise the client-only manager. The
         // shared Closed handler below works for either window type.
         // Messages the Test Rule action runs against — the same set for either window type.
-        var selectedMessages = _vm.Messages.ToList();
+        // Test/compatibility filtering must use the actual selection, not every row currently
+        // rendered in the grid. In particular, Create Rule from Message uses the first selected
+        // message as the sample against which existing rules are filtered.
+        var selectedMessages = compatibilityMessage == null
+            ? GetSelectedMessages()
+            : new List<MailMessageSummary> { compatibilityMessage };
+        string? compatibilityBody = compatibilityBodyOverride;
+        if (template != null && selectedMessages.FirstOrDefault() is { } sampleMessage)
+        {
+            try
+            {
+                var detail = await _localStore.LoadDetailAsync(
+                    sampleMessage.AccountId, sampleMessage.FolderName, sampleMessage.MessageId);
+                compatibilityBody = !string.IsNullOrWhiteSpace(detail?.PlainTextBody)
+                    ? detail.PlainTextBody
+                    : detail?.HtmlBody;
+            }
+            catch (Exception ex)
+            {
+                // Headers/preview still give a useful filter; a damaged body must not prevent the
+                // Rules Manager from opening.
+                LogService.Log("Load message body for compatible-rules filter", ex);
+            }
+        }
 
         Window dialog;
         UnifiedRulesWindow? unifiedWindow = null;
@@ -7525,7 +8398,7 @@ public partial class MainWindow : Window
                 _ruleService, _serverRuleService, accounts, _vm.CachedFolders, _vm.SelectedAccount?.Id,
                 selectedMessagesForTest: selectedMessages, configService: _configService);
             unifiedVm.RunOnExistingRequested += RunClientRulesOnExisting;
-            // The window prefills from the template (Ctrl+Shift+T) in its Loaded handler, once shown.
+            // The window prefills from the template (Ctrl+Shift+F) in its Loaded handler, once shown.
             unifiedWindow = new UnifiedRulesWindow(unifiedVm, accounts, _vm.CachedFolders, template);
             dialog = unifiedWindow;
         }
@@ -7536,12 +8409,17 @@ public partial class MainWindow : Window
                 prefillTemplate: template,
                 selectedMessagesForTest: selectedMessages,
                 configService: _configService,
-                currentFolderName: currentFolderName);
+                currentFolderName: currentFolderName,
+                compatibilityBody: compatibilityBody,
+                foldersByAccount: _vm.CachedFolders,
+                targetFolderFilter: targetFolderFilter);
+            if (selectRuleId is { } ruleId) rulesVm.SelectRule(ruleId);
             rulesVm.RunOnExistingRequested += RunClientRulesOnExisting;
             rulesVm.ApplyToCurrentFolderRequested += ApplySelectedRuleToCurrentFolder;
             dialog = new RulesManagerWindow(rulesVm, accounts, _vm.CachedFolders,
                 (accountId, parentFullName, name) =>
-                    _vm.CreateFolderReturningFoldersAsync(accountId, parentFullName, name));
+                    _vm.CreateFolderReturningFoldersAsync(accountId, parentFullName, name),
+                _vm.RuleTargetPath);
         }
 
         _rulesWindow = dialog;
@@ -7575,7 +8453,7 @@ public partial class MainWindow : Window
         dialog.Show();
         dialog.Activate();
         dialog.Topmost = true;
-        dialog.Dispatcher.BeginInvoke(() => dialog.Topmost = false, DispatcherPriority.ApplicationIdle);
+        _ = dialog.Dispatcher.BeginInvoke(() => dialog.Topmost = false, DispatcherPriority.ApplicationIdle);
     }
 
     private void RulesStatusButton_Click(object sender, RoutedEventArgs e) => OpenRulesManager();

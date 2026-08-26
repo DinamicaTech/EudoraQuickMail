@@ -1,4 +1,5 @@
 using QuickMail.Models;
+using System.Diagnostics;
 
 namespace QuickMail.Services;
 
@@ -11,6 +12,7 @@ public sealed class PeriodicPop3Receiver : IDisposable
     private readonly Timer _timer;
     private readonly CancellationTokenSource _stop = new();
     private int _running;
+    private int _disposed;
 
     public PeriodicPop3Receiver(IAccountService accounts, IPop3ReceiveService receiver,
         IRuleService? rules = null, TimeSpan? interval = null)
@@ -39,13 +41,30 @@ public sealed class PeriodicPop3Receiver : IDisposable
                 var account = accounts[index];
                 try
                 {
+                    var accountStarted = Stopwatch.GetTimestamp();
                     Started?.Invoke(account, index + 1, accounts.Count);
+                    var receiveStarted = Stopwatch.GetTimestamp();
                     var result = includeAccountsWithAutomaticCheckDisabled
                         ? await _receiver.CheckNowAsync(account, _stop.Token)
                         : await _receiver.CheckAutomaticallyAsync(account, _stop.Token);
+                    PerformanceLogService.Record("POP3 sweep: receive pipeline",
+                        Stopwatch.GetElapsedTime(receiveStarted),
+                        $"account={account.AccountLabel}; downloaded={result.Downloaded}; known={result.RemovedAlreadyKnown}; server={result.ServerMessageCount}");
                     if (_rules is not null && result.NewMessages is { Count: > 0 })
+                    {
+                        var rulesStarted = Stopwatch.GetTimestamp();
                         await _rules.ApplyAutomaticRulesAsync(result.NewMessages.ToList(), account.Id, _stop.Token);
+                        PerformanceLogService.Record("POP3 sweep: automatic rules",
+                            Stopwatch.GetElapsedTime(rulesStarted),
+                            $"account={account.AccountLabel}; messages={result.NewMessages.Count}");
+                    }
+                    var dispatchStarted = Stopwatch.GetTimestamp();
                     Completed?.Invoke(account, result);
+                    PerformanceLogService.Record("POP3 sweep: completion dispatch",
+                        Stopwatch.GetElapsedTime(dispatchStarted), $"account={account.AccountLabel}");
+                    PerformanceLogService.Record("POP3 sweep: account total",
+                        Stopwatch.GetElapsedTime(accountStarted),
+                        $"account={account.AccountLabel}; position={index + 1}/{accounts.Count}");
                 }
                 catch (OperationCanceledException) when (_stop.IsCancellationRequested) { return; }
                 catch (Exception ex)
@@ -60,8 +79,10 @@ public sealed class PeriodicPop3Receiver : IDisposable
 
     public void Dispose()
     {
-        _stop.Cancel();
+        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
         _timer.Dispose();
-        _stop.Dispose();
+        // A sweep may still be between awaits and read _stop.Token / IsCancellationRequested.
+        // Cancel it, but leave the application-lifetime CTS readable until process termination.
+        try { _stop.Cancel(); } catch { /* best effort at shutdown */ }
     }
 }

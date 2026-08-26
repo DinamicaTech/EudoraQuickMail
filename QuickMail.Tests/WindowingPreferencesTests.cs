@@ -47,7 +47,7 @@ public class WindowingPreferencesTests
         var config = new ConfigModel();
 
         Assert.Equal(MessageOpenMode.ReadingPane, config.Windowing.MessageOpenMode);
-        Assert.Equal(ComposeOpenMode.FloatingWindow, config.Windowing.ComposeOpenMode);
+        Assert.Equal(ComposeOpenMode.DockedTab, config.Windowing.ComposeOpenMode);
         Assert.True(config.Windowing.ConfirmCloseTabWithUnsaved);
     }
 
@@ -111,7 +111,7 @@ public class WindowingPreferencesTests
     [InlineData("dockedTab", ComposeOpenMode.DockedTab)]
     [InlineData("DOCKEDTAB", ComposeOpenMode.DockedTab)]
     [InlineData("floatingWindow", ComposeOpenMode.FloatingWindow)]
-    [InlineData("unknown", ComposeOpenMode.FloatingWindow)]
+    [InlineData("unknown", ComposeOpenMode.DockedTab)]
     public void ComposeOpenMode_ParsesSafely(string raw, ComposeOpenMode expected)
     {
         var config = LoadFromIni($"[windowing]\nComposeOpenMode = {raw}\n");

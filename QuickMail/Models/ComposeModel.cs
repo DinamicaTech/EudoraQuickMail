@@ -43,6 +43,15 @@ public class ComposeModel
     /// <summary>RFC 2822 Message-ID of the message being replied to.</summary>
     public string? InReplyToMessageId { get; set; }
 
+    /// <summary>
+    /// Local identity of the incoming message this composition replies to. Kept separately
+    /// from <see cref="InReplyToMessageId"/> because imported/local messages do not always have
+    /// a valid RFC Message-ID. Scheduled replies persist these fields until actually sent.
+    /// </summary>
+    public Guid? ReplySourceAccountId { get; set; }
+    public string? ReplySourceFolderName { get; set; }
+    public string? ReplySourceMessageId { get; set; }
+
     /// <summary>Server message id of the existing draft (null when composing new).</summary>
     public string? DraftMessageId { get; set; }
 

@@ -133,6 +133,34 @@ public class ComposeViewModelReplyTests
         Assert.DoesNotContain("ignored html", model.Body);
     }
 
+    [Fact]
+    public void CreateReply_IncomingMessage_PreservesOriginalLocalIdentity()
+    {
+        var detail = MakeDetail("alice@example.com", "bob@example.com", "");
+        detail.InternetMessageId = "<original@example.com>";
+        detail.Direction = MessageDirection.Incoming;
+
+        var model = ComposeViewModel.CreateReply(detail, Guid.NewGuid());
+
+        Assert.Equal(detail.AccountId, model.ReplySourceAccountId);
+        Assert.Equal(detail.FolderName, model.ReplySourceFolderName);
+        Assert.Equal(detail.MessageId, model.ReplySourceMessageId);
+        Assert.Equal(detail.InternetMessageId, model.InReplyToMessageId);
+    }
+
+    [Fact]
+    public void CreateReply_OutgoingMessage_DoesNotCreateReplyMarkerTarget()
+    {
+        var detail = MakeDetail("alice@example.com", "bob@example.com", "");
+        detail.Direction = MessageDirection.Outgoing;
+
+        var model = ComposeViewModel.CreateReply(detail, Guid.NewGuid());
+
+        Assert.Null(model.ReplySourceAccountId);
+        Assert.Null(model.ReplySourceFolderName);
+        Assert.Null(model.ReplySourceMessageId);
+    }
+
     // ── CreateReplyAll tests ────────────────────────────────────────────────────
 
     [Fact]

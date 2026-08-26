@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.IO;
+using System.Diagnostics;
 using MimeKit;
 using QuickMail.Models;
 
@@ -8,7 +9,9 @@ namespace QuickMail.Services;
 
 public sealed class Pop3ReceiveService : IPop3ReceiveService
 {
-    public const string InboxFolderName = "Inbox";
+    // Eudora calls its incoming mailbox "In". Local/POP3 mail uses that canonical physical name
+    // too; "INBOX" remains untouched for IMAP, where it is a real server folder name.
+    public const string InboxFolderName = "In";
     private readonly IPop3TransportFactory _transportFactory;
     private readonly ILocalMailboxStore _store;
     private readonly IAccountSecretProtector _secrets;
@@ -28,6 +31,12 @@ public sealed class Pop3ReceiveService : IPop3ReceiveService
 
     public async Task<Pop3ReceiveResult> CheckNowAsync(AccountModel account, CancellationToken ct = default)
     {
+        var operationStarted = Stopwatch.GetTimestamp();
+        long connectTicks = 0, authenticateTicks = 0, uidlTicks = 0, lookupTicks = 0,
+            fetchTicks = 0, saveTicks = 0, deleteTicks = 0, quitTicks = 0;
+        var downloaded = 0;
+        var known = 0;
+        var serverMessages = 0;
         if (account.BackendKind != BackendKind.Pop3Smtp)
             throw new InvalidOperationException("Only POP3/SMTP accounts can check POP3 mail.");
         if (string.IsNullOrWhiteSpace(account.Pop3Host)) throw new InvalidOperationException("POP3 host is required.");
@@ -39,38 +48,56 @@ public sealed class Pop3ReceiveService : IPop3ReceiveService
         var committed = false;
         try
         {
+            var phase = Stopwatch.GetTimestamp();
             await transport.ConnectAsync(account, ct);
+            connectTicks += Stopwatch.GetElapsedTime(phase).Ticks;
             connected = true;
+            phase = Stopwatch.GetTimestamp();
             await transport.AuthenticateAsync(account.AuthUsername, password, ct);
+            authenticateTicks += Stopwatch.GetElapsedTime(phase).Ticks;
             if (!transport.SupportsUidListing)
                 throw new NotSupportedException("The POP3 server must support UIDL.");
 
+            phase = Stopwatch.GetTimestamp();
             var uidls = await transport.GetMessageUidsAsync(ct);
-            var downloaded = 0;
-            var known = 0;
+            uidlTicks += Stopwatch.GetElapsedTime(phase).Ticks;
+            serverMessages = uidls.Count;
             var newMessages = new List<MailMessageSummary>();
             for (var index = 0; index < uidls.Count; index++)
             {
                 ct.ThrowIfCancellationRequested();
                 var uidl = uidls[index];
-                if (await _store.ContainsPop3UidAsync(account.Id, uidl, ct))
+                phase = Stopwatch.GetTimestamp();
+                var alreadyKnown = await _store.ContainsPop3UidAsync(account.Id, uidl, ct);
+                lookupTicks += Stopwatch.GetElapsedTime(phase).Ticks;
+                if (alreadyKnown)
                 {
                     // A previous QUIT may have failed after local commit. Do not duplicate it;
                     // issue DELE again so this successful session can finish the handoff.
+                    phase = Stopwatch.GetTimestamp();
                     await transport.DeleteMessageAsync(index, ct);
+                    deleteTicks += Stopwatch.GetElapsedTime(phase).Ticks;
                     known++;
                     continue;
                 }
 
+                phase = Stopwatch.GetTimestamp();
                 var mime = await transport.GetMessageAsync(index, ct);
+                fetchTicks += Stopwatch.GetElapsedTime(phase).Ticks;
                 var local = MapMessage(account.Id, uidl, mime);
+                phase = Stopwatch.GetTimestamp();
                 await _store.SavePop3MessageAsync(uidl, local, ct); // durable before DELE
+                saveTicks += Stopwatch.GetElapsedTime(phase).Ticks;
                 newMessages.Add(local);
+                phase = Stopwatch.GetTimestamp();
                 await transport.DeleteMessageAsync(index, ct);
+                deleteTicks += Stopwatch.GetElapsedTime(phase).Ticks;
                 downloaded++;
             }
 
+            phase = Stopwatch.GetTimestamp();
             await transport.DisconnectAsync(commitDeletes: true, ct); // QUIT commits DELE
+            quitTicks += Stopwatch.GetElapsedTime(phase).Ticks;
             committed = true;
             connected = false;
             return new Pop3ReceiveResult(downloaded, known, uidls.Count, Skipped: false, newMessages);
@@ -83,6 +110,16 @@ public sealed class Pop3ReceiveService : IPop3ReceiveService
                 try { await transport.DisconnectAsync(commitDeletes: false, CancellationToken.None); }
                 catch { /* original failure wins; uncommitted DELE is safe to retry */ }
             }
+            var details = $"account={account.AccountLabel}; server={serverMessages}; downloaded={downloaded}; known={known}";
+            PerformanceLogService.Record("POP3: connect", TimeSpan.FromTicks(connectTicks), details);
+            PerformanceLogService.Record("POP3: authenticate", TimeSpan.FromTicks(authenticateTicks), details);
+            PerformanceLogService.Record("POP3: UIDL listing", TimeSpan.FromTicks(uidlTicks), details);
+            PerformanceLogService.Record("POP3: local UID lookups", TimeSpan.FromTicks(lookupTicks), details);
+            PerformanceLogService.Record("POP3: download MIME messages", TimeSpan.FromTicks(fetchTicks), details);
+            PerformanceLogService.Record("POP3: materialize messages in SQLite", TimeSpan.FromTicks(saveTicks), details);
+            PerformanceLogService.Record("POP3: issue server deletes", TimeSpan.FromTicks(deleteTicks), details);
+            PerformanceLogService.Record("POP3: commit deletes with QUIT", TimeSpan.FromTicks(quitTicks), details);
+            PerformanceLogService.Record("POP3: account total", Stopwatch.GetElapsedTime(operationStarted), details);
         }
     }
 
@@ -104,6 +141,7 @@ public sealed class Pop3ReceiveService : IPop3ReceiveService
             Subject = message.Subject ?? "(no subject)",
             Date = message.Date == DateTimeOffset.MinValue ? DateTimeOffset.UtcNow : message.Date,
             IsRead = false,
+            Direction = MessageDirection.Incoming,
             Preview = CollapseWhitespace(previewSource, 240),
             PlainTextBody = plain,
             HtmlBody = html,

@@ -15,6 +15,14 @@ public interface IRuleService
     void SaveRules(List<MailRule> rules);
 
     /// <summary>
+    /// Creates the FROM-only Move-to-folder rule used by Ctrl+Shift+Drop, or reuses an existing
+    /// equivalent global rule. Reuse updates its destination and enables Also Mark as read rather
+    /// than accumulating duplicate rules.
+    /// </summary>
+    (MailRule Rule, bool Created) SaveOrUpdateQuickMoveRule(MailRule candidate) =>
+        throw new NotSupportedException("Quick move rule upsert is not supported by this rule service.");
+
+    /// <summary>
     /// Apply enabled rules to a batch of incoming messages for a specific account.
     /// Rules are evaluated in list order. Each rule is tested against every message;
     /// matching messages have the rule's action executed.
@@ -38,25 +46,29 @@ public interface IRuleService
     /// </summary>
     List<MailMessageSummary> TestRule(MailRule rule, IEnumerable<MailMessageSummary> messages);
 
-    /// <summary>Apply one rule to the supplied cached messages and return the number matched.</summary>
-    Task<int> ApplyRuleToMessagesAsync(
+    /// <summary>Tests one message with its complete body when it is already available.</summary>
+    bool IsMatch(MailRule rule, MailMessageSummary message, string? completeBody = null) =>
+        TestRule(rule, [message]).Count > 0;
+
+    /// <summary>Apply one rule and return its match count plus rows moved/deleted from the source.</summary>
+    Task<(int MatchedCount, List<MailMessageSummary> RemovedMessages)> ApplyRuleToMessagesAsync(
         MailRule rule,
         List<MailMessageSummary> messages,
         ILocalStoreService store,
         CancellationToken ct);
 
     /// <summary>
-    /// Apply all enabled rules to messages already in the local store, restricted to
-    /// each account's Inbox (issue #346 follow-up). Invoked by the user-facing
-    /// "Run on Existing Mail" action.
+    /// Apply all enabled rules to messages already in the local store. Every rule evaluates each
+    /// account's Inbox; a rule with <see cref="MailRule.AlsoFilterOutMailbox"/> also evaluates the
+    /// physical Out/Sent mailbox. Invoked only by the user-facing "Run on Existing Mail" action.
     /// <para>
     /// <paramref name="inboxFolderByAccount"/> maps an account id to the
     /// <see cref="MailFolderModel.FullName"/> of that account's Inbox. The caller supplies
     /// it because folder-kind knowledge lives in the view layer, not here — for a Graph
     /// account the Inbox's opaque id is never <c>"INBOX"</c>, so it cannot be recognised by
-    /// name. Messages in any other folder (Sent, Archive, Junk, Trash, custom) are left
-    /// untouched, and any account missing from the map is skipped entirely (fail-closed),
-    /// matching the "client rules only ever act on the Inbox" model.
+    /// name. Filed outgoing messages in custom folders, Archive, Junk and Trash are left untouched;
+    /// the extra scope is the physical Out/Sent mailbox only. Any account missing from the map is
+    /// skipped for Inbox processing (fail-closed). This option never affects automatic arrivals.
     /// </para>
     /// Returns messages that were moved or deleted (should be removed from UI).
     /// </summary>

@@ -24,7 +24,7 @@ public class WindowingPreferences
 {
     /// <summary>Where Enter / click on a message opens it.</summary>
     public MessageOpenMode MessageOpenMode { get; set; } = MessageOpenMode.ReadingPane;
-    public ComposeOpenMode ComposeOpenMode { get; set; } = ComposeOpenMode.FloatingWindow;
+    public ComposeOpenMode ComposeOpenMode { get; set; } = ComposeOpenMode.DockedTab;
 
     /// <summary>Confirm before closing a tab whose content is a draft or unsent reply.</summary>
     public bool ConfirmCloseTabWithUnsaved { get; set; } = true;

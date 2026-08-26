@@ -16,6 +16,8 @@ public sealed class CalendarService : ICalendarService
 {
     private readonly ICalendarProvider _provider;
     private readonly object _lock = new();
+    private readonly object _rebuildLock = new();
+    private Task? _activeRebuild;
     private List<CalendarEvent> _events = [];
 
     public CalendarService(ICalendarProvider provider)
@@ -33,14 +35,39 @@ public sealed class CalendarService : ICalendarService
 
     public async Task RefreshAsync(CancellationToken ct = default)
     {
-        // Harvest from the local cache (no-op for non-harvesting providers).
-        if (_provider is LocalCacheCalendarProvider local)
-            await local.HarvestAsync(ct);
-
         var loaded = await _provider.LoadEventsAsync(ct);
         lock (_lock)
         {
             _events = loaded;
+        }
+    }
+
+    public Task RebuildAsync(CancellationToken ct = default)
+    {
+        Task rebuild;
+        lock (_rebuildLock)
+        {
+            // A cache harvest is expensive. Timer, F5 and calendar-day sync can arrive close
+            // together, so every caller joins the same operation instead of starting another
+            // full MessageSummary scan.
+            rebuild = _activeRebuild ??= Task.Run(RebuildCoreAsync, CancellationToken.None);
+        }
+        return ct.CanBeCanceled ? rebuild.WaitAsync(ct) : rebuild;
+    }
+
+    private async Task RebuildCoreAsync()
+    {
+        try
+        {
+            // Rebuilding is deliberately separate from an ordinary load: harvesting can scan a
+            // very large mail cache and must never delay application startup.
+            if (_provider is LocalCacheCalendarProvider local)
+                await local.HarvestAsync(CancellationToken.None);
+            await RefreshAsync(CancellationToken.None);
+        }
+        finally
+        {
+            lock (_rebuildLock) _activeRebuild = null;
         }
     }
 

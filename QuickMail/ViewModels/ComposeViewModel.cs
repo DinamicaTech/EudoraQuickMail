@@ -23,6 +23,7 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
     private readonly IAccountService _accountService;
     private readonly ICredentialService _credentials;
     private readonly IMailService _imap;
+    private readonly ILocalStoreService? _localStore;
     private readonly ITemplateService _templateService;
     private readonly IMarkdownService _markdown;
 
@@ -147,6 +148,9 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
     [ObservableProperty] private ObservableCollection<AttachmentModel> _attachments = [];
 
     private string? _inReplyToMessageId;
+    private Guid? _replySourceAccountId;
+    private string? _replySourceFolderName;
+    private string? _replySourceMessageId;
     private string? _draftMessageId;
     private string? _draftFolderName;
     private Guid? _scheduledId;
@@ -176,6 +180,7 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
     public ComposeMode SeededMode => _seededMode;
 
     public event Action? CloseRequested;
+    public event Action<Guid, string, string>? OriginalMessageReplied;
     public Func<ComposeModel, Task>? SaveStoredMessageRequested { get; set; }
 
     /// <summary>
@@ -193,7 +198,9 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
     /// </summary>
     public IAccountService AccountService => _accountService;
 
-    public ComposeViewModel(ISendMailService smtp, IAccountService accountService, ICredentialService credentials, IMailService imap, ITemplateService templateService, IMarkdownService? markdown = null)
+    public ComposeViewModel(ISendMailService smtp, IAccountService accountService, ICredentialService credentials,
+        IMailService imap, ITemplateService templateService, IMarkdownService? markdown = null,
+        ILocalStoreService? localStore = null)
     {
         _smtp = smtp;
         _accountService = accountService;
@@ -201,6 +208,7 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
         _imap = imap;
         _templateService = templateService;
         _markdown = markdown ?? new MarkdownService();
+        _localStore = localStore;
         _attachments.CollectionChanged += (_, _) =>
         {
             _isDirty = true;
@@ -239,6 +247,9 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
     public void Seed(ComposeModel model)
     {
         _inReplyToMessageId = model.InReplyToMessageId;
+        _replySourceAccountId = model.ReplySourceAccountId;
+        _replySourceFolderName = model.ReplySourceFolderName;
+        _replySourceMessageId = model.ReplySourceMessageId;
         _draftMessageId     = model.DraftMessageId;
         _draftFolderName    = model.DraftFolderName;
         _scheduledId = model.ScheduledId;
@@ -559,6 +570,7 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
 
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
             await _smtp.SendAsync(compose, account, password, cts.Token);
+            await MarkOriginalMessageRepliedBestEffortAsync(compose);
             if (_scheduledId is { } scheduledId && System.Windows.Application.Current is App { ScheduledSender: { } scheduler })
                 await scheduler.RemoveAsync(scheduledId, deleteLocalCopy: true);
             SetStatusOutcome("Message sent.");
@@ -627,6 +639,27 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
         _isSent = true;
         SetStatusOutcome($"Message scheduled for {local:g}.");
         CloseRequested?.Invoke();
+    }
+
+    private async Task MarkOriginalMessageRepliedBestEffortAsync(ComposeModel compose)
+    {
+        if (_localStore is null || compose.ReplySourceAccountId is not { } sourceAccountId
+            || string.IsNullOrWhiteSpace(compose.ReplySourceFolderName)
+            || string.IsNullOrWhiteSpace(compose.ReplySourceMessageId))
+            return;
+        try
+        {
+            await _localStore.UpdateIsRepliedAsync(sourceAccountId, compose.ReplySourceFolderName,
+                compose.ReplySourceMessageId, compose.InReplyToMessageId);
+            OriginalMessageReplied?.Invoke(sourceAccountId, compose.ReplySourceFolderName,
+                compose.ReplySourceMessageId);
+        }
+        catch (Exception ex)
+        {
+            // SMTP already accepted the message. Never invite a duplicate retry merely because
+            // persisting this local UI marker failed.
+            LogService.Log("SendAsync: message sent but original could not be marked replied", ex);
+        }
     }
 
     [RelayCommand]
@@ -991,6 +1024,9 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
             SpellLanguage       = SpellLanguage,
             HtmlBody            = htmlBody,
             InReplyToMessageId  = _inReplyToMessageId,
+            ReplySourceAccountId = _replySourceAccountId,
+            ReplySourceFolderName = _replySourceFolderName,
+            ReplySourceMessageId = _replySourceMessageId,
             DraftMessageId      = _draftMessageId,
             DraftFolderName     = _draftFolderName,
             Attachments         = Attachments.ToList(),
@@ -1026,7 +1062,10 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
             To = string.IsNullOrEmpty(detail.ReplyTo) ? detail.From : detail.ReplyTo,
             Subject = subject,
             Body = attribution + quoted,
-            InReplyToMessageId = detail.InternetMessageId
+            InReplyToMessageId = detail.InternetMessageId,
+            ReplySourceAccountId = detail.Direction == MessageDirection.Outgoing ? null : detail.AccountId,
+            ReplySourceFolderName = detail.Direction == MessageDirection.Outgoing ? null : detail.FolderName,
+            ReplySourceMessageId = detail.Direction == MessageDirection.Outgoing ? null : detail.MessageId,
         };
 
         // Keep the original rich body for HTML replies. Previously Reply always
@@ -1111,6 +1150,22 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
 
         return model;
     }
+
+    /// <summary>Creates an independent editable copy. No reply/thread or stored-message identity is retained.</summary>
+    public static ComposeModel CreateSendAgain(MailMessageDetail detail, Guid accountId) => new()
+    {
+        Kind = ComposeKind.NewMessage,
+        AccountId = accountId,
+        To = detail.To,
+        Cc = detail.Cc,
+        Subject = detail.Subject,
+        Body = string.IsNullOrEmpty(detail.PlainTextBody) && !string.IsNullOrEmpty(detail.HtmlBody)
+            ? HtmlStripper.ToPlainText(detail.HtmlBody)
+            : detail.PlainTextBody,
+        HtmlBody = string.IsNullOrWhiteSpace(detail.HtmlBody) ? null : detail.HtmlBody,
+        Mode = string.IsNullOrWhiteSpace(detail.HtmlBody) ? ComposeMode.PlainText : ComposeMode.Html,
+        SpellLanguage = detail.DraftSpellLanguage,
+    };
 
     private static string BuildForwardedHtmlBlock(MailMessageDetail detail)
     {

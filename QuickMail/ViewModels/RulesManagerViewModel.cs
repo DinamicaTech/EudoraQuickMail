@@ -1,9 +1,12 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.Linq;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
+using System.Windows.Data;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using QuickMail.Models;
@@ -13,12 +16,19 @@ namespace QuickMail.ViewModels;
 
 public partial class RulesManagerViewModel : ObservableObject
 {
+    private const string CanonicalFolderPrefix = "\u0000LocalFolder:";
     private readonly IRuleService _ruleService;
     private readonly IEnumerable<AccountModel> _accounts;
     private readonly IEnumerable<MailMessageSummary>? _selectedMessagesForTest;
     private readonly Dictionary<Guid, string> _accountLabels = [];
+    private readonly IReadOnlyDictionary<Guid, List<MailFolderModel>> _foldersByAccount;
     private readonly bool _showFieldLabels;
+    private readonly bool _alsoFilterOutMailboxByDefault;
     private readonly List<MailRule> _originalRules;
+    private readonly HashSet<Guid> _pendingRuleIds = [];
+    private MailMessageSummary? _compatibilityMessage;
+    private string? _compatibilityBody;
+    private HashSet<string>? _targetFolderFilter;
     private bool _cancelRestored;
 
     public bool IsCommitted { get; private set; }
@@ -62,33 +72,61 @@ public partial class RulesManagerViewModel : ObservableObject
         MailRule? prefillTemplate = null,
         IEnumerable<MailMessageSummary>? selectedMessagesForTest = null,
         IConfigService? configService = null,
-        string currentFolderName = "Current folder")
+        string currentFolderName = "Current folder",
+        string? compatibilityBody = null,
+        IReadOnlyDictionary<Guid, List<MailFolderModel>>? foldersByAccount = null,
+        IEnumerable<string>? targetFolderFilter = null)
     {
         _ruleService = ruleService;
         _accounts = accounts;
-        _selectedMessagesForTest = selectedMessagesForTest;
+        var selectedMessages = selectedMessagesForTest?.ToList();
+        _selectedMessagesForTest = selectedMessages;
+        // Keep the sample also when opening an already-existing match. Otherwise SelectRule()
+        // must expose the entire rules collection merely to make the requested rule visible.
+        _compatibilityMessage = selectedMessages?.FirstOrDefault();
+        _compatibilityBody = compatibilityBody;
+        _targetFolderFilter = targetFolderFilter?.Where(value => !string.IsNullOrWhiteSpace(value))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        _foldersByAccount = foldersByAccount ?? new Dictionary<Guid, List<MailFolderModel>>();
         CurrentFolderName = string.IsNullOrWhiteSpace(currentFolderName) ? "Current folder" : currentFolderName;
 
         // Account id → label, so each rule row can show which account it applies to.
         foreach (var a in _accounts)
             _accountLabels[a.Id] = a.AccountLabel;
 
-        _showFieldLabels = configService?.Load().RuleListShowFieldLabels ?? false;
+        var config = configService?.Load();
+        _showFieldLabels = config?.RuleListShowFieldLabels ?? false;
+        _alsoFilterOutMailboxByDefault = config?.MarkAlsoFilterOutMailboxByDefault ?? false;
 
         var rules = _ruleService.LoadRules();
         _originalRules = CloneRules(rules);
         foreach (var r in rules) StampDisplay(r);
         Rules = new ObservableCollection<MailRule>(rules);
+        RulesView = CollectionViewSource.GetDefaultView(Rules);
+        RulesView.Filter = IsRuleVisible;
+
+        // When opened from a message, start with only rules that would match it. If none of the
+        // existing rules match, showing an empty list is not useful: fall back to the complete list.
+        _seeAllFilters = _compatibilityMessage is null
+            || !rules.Any(r => MatchesMessage(r, _compatibilityMessage, _compatibilityBody));
+        // The ICollectionView evaluated its predicate once when Filter was assigned, before the
+        // backing field above received its initial value. Refresh so checkbox and visible rows can
+        // never start in the contradictory state "See all checked, compatible rows only".
+        RulesView.Refresh();
 
         // "Run on Existing Mail" acts on the whole list, so it enables/disables with rule count.
         Rules.CollectionChanged += (_, _) =>
         {
             OnPropertyChanged(nameof(HasRules));
             RunOnExistingCommand.NotifyCanExecuteChanged();
+            NotifyVisibleRuleCount();
         };
 
         if (prefillTemplate != null)
         {
+            if (_alsoFilterOutMailboxByDefault)
+                prefillTemplate.AlsoFilterOutMailbox = true;
+            _pendingRuleIds.Add(prefillTemplate.Id);
             StampDisplay(prefillTemplate);
             Rules.Add(prefillTemplate);
             SelectedRule = prefillTemplate;
@@ -99,11 +137,235 @@ public partial class RulesManagerViewModel : ObservableObject
         {
             SelectedRule = Rules[0];
         }
+        NotifyVisibleRuleCount();
     }
 
     // ── Properties ──────────────────────────────────────────────────────────
 
     public ObservableCollection<MailRule> Rules { get; }
+    public ICollectionView RulesView { get; }
+    public int VisibleRuleCount => RulesView.Cast<object>().Count();
+    public string WindowTitle => $"Rules Manager ({VisibleRuleCount:N0} filter{(VisibleRuleCount == 1 ? "" : "s")})";
+
+    [ObservableProperty]
+    private bool _seeAllFilters;
+
+    partial void OnSeeAllFiltersChanged(bool value)
+    {
+        RulesView.Refresh();
+        EnsureVisibleSelection();
+        NotifyVisibleRuleCount();
+    }
+
+    public bool HasCompatibilityMessage => _compatibilityMessage is not null;
+    public bool HasFilterSearch => !string.IsNullOrWhiteSpace(SearchFrom)
+        || !string.IsNullOrWhiteSpace(SearchTo)
+        || !string.IsNullOrWhiteSpace(SearchSubject)
+        || !string.IsNullOrWhiteSpace(SearchBody);
+
+    public string? SearchFrom { get; private set; }
+    public string? SearchTo { get; private set; }
+    public string? SearchSubject { get; private set; }
+    public string? SearchBody { get; private set; }
+    public string SearchFilterSummary => HasFilterSearch
+        ? string.Join("; ", new[]
+        {
+            Label("FROM", SearchFrom), Label("TO", SearchTo),
+            Label("SUBJECT", SearchSubject), Label("BODY", SearchBody),
+        }.Where(x => x is not null))
+        : "No filter search";
+
+    private static string? Label(string name, string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : $"{name}: {value.Trim()}";
+
+    public void SetFilterSearch(string? from, string? to, string? subject, string? body)
+    {
+        SearchFrom = Normalize(from);
+        SearchTo = Normalize(to);
+        SearchSubject = Normalize(subject);
+        SearchBody = Normalize(body);
+        OnPropertyChanged(nameof(HasFilterSearch));
+        OnPropertyChanged(nameof(SearchFilterSummary));
+        RulesView.Refresh();
+        EnsureVisibleSelection();
+        NotifyVisibleRuleCount();
+        StatusText = HasFilterSearch ? $"Filter search applied: {SearchFilterSummary}." : "Filter search cleared.";
+    }
+
+    private static string? Normalize(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private bool IsRuleVisible(object item)
+    {
+        if (item is not MailRule rule) return false;
+        if (_targetFolderFilter is { Count: > 0 } &&
+            (rule.Action != RuleAction.MoveToFolder || rule.TargetFolder == null ||
+             !_targetFolderFilter.Contains(rule.TargetFolder)))
+            return false;
+        if (!SeeAllFilters && _compatibilityMessage is not null
+            && !MatchesMessage(rule, _compatibilityMessage, _compatibilityBody))
+            return false;
+        return MatchesSearch(rule);
+    }
+
+    public void SetTargetFolderFilter(IEnumerable<string> aliases)
+    {
+        _targetFolderFilter = aliases.Where(value => !string.IsNullOrWhiteSpace(value))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        SeeAllFilters = true;
+        RulesView.Refresh();
+        EnsureVisibleSelection();
+        NotifyVisibleRuleCount();
+        StatusText = $"Showing {VisibleRuleCount:N0} filter{(VisibleRuleCount == 1 ? "" : "s")} targeting this folder.";
+    }
+
+    public void SelectRule(Guid ruleId)
+    {
+        var rule = Rules.FirstOrDefault(candidate => candidate.Id == ruleId);
+        if (rule == null) return;
+        // A direct request to show an existing match must make it visible even if another search or
+        // target-folder filter was left active in the modeless manager.
+        _targetFolderFilter = null;
+        SearchFrom = SearchTo = SearchSubject = SearchBody = null;
+        SeeAllFilters = _compatibilityMessage is null ||
+            !MatchesMessage(rule, _compatibilityMessage, _compatibilityBody);
+        RulesView.Refresh();
+        SelectedRule = rule;
+        NotifyVisibleRuleCount();
+    }
+
+    public void SetCompatibilityMessage(MailMessageSummary message, string? completeBody)
+    {
+        _compatibilityMessage = message;
+        _compatibilityBody = completeBody;
+        OnPropertyChanged(nameof(HasCompatibilityMessage));
+        SeeAllFilters = !Rules.Any(rule => MatchesMessage(rule, message, completeBody));
+        RulesView.Refresh();
+        EnsureVisibleSelection();
+        NotifyVisibleRuleCount();
+    }
+
+    private bool MatchesSearch(MailRule rule) =>
+        IsPotentialMatch(SearchFrom, rule.UseFromCondition, rule.FromContains)
+        && IsPotentialMatch(SearchTo, rule.UseToCondition, rule.ToContains)
+        && IsPotentialMatch(SearchSubject, rule.UseSubjectCondition, rule.SubjectContains)
+        && IsPotentialMatch(SearchBody, rule.UseBodyCondition, rule.BodyContains);
+
+    // A search field describes a sample message value. A rule with no condition for that field is
+    // still applicable; otherwise its condition must be contained in the supplied sample value.
+    private static bool IsPotentialMatch(string? sample, bool usesCondition, string? condition)
+    {
+        if (string.IsNullOrWhiteSpace(sample)) return true;
+        if (!usesCondition || string.IsNullOrWhiteSpace(condition)) return false;
+        return condition.Contains(sample, StringComparison.OrdinalIgnoreCase)
+            || sample.Contains(condition, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool MatchesMessage(MailRule rule, MailMessageSummary message, string? completeBody)
+    {
+        if (rule.AccountId is { } accountId && accountId != message.AccountId) return false;
+        if (rule.UseFromCondition && !Contains(message.From, rule.FromContains)) return false;
+        if (rule.UseToCondition && !Contains(message.To, rule.ToContains)) return false;
+        if (rule.UseSubjectCondition && !Contains(message.Subject, rule.SubjectContains)) return false;
+        if (rule.UseBodyCondition && !Contains(completeBody ?? message.Preview, rule.BodyContains)) return false;
+        return !rule.MustHaveAttachments || message.HasAttachments;
+    }
+
+    private static bool Contains(string? value, string? condition)
+    {
+        if (string.IsNullOrWhiteSpace(condition)) return true;
+        var candidate = value ?? string.Empty;
+        if (!condition.Contains('*') && !condition.Contains('?'))
+            return candidate.Contains(condition, StringComparison.OrdinalIgnoreCase);
+        var pattern = Regex.Escape(condition).Replace("\\*", ".*").Replace("\\?", ".");
+        return Regex.IsMatch(candidate, pattern,
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(250));
+    }
+
+    private void EnsureVisibleSelection()
+    {
+        if (SelectedRule is not null && RulesView.Contains(SelectedRule)) return;
+        SelectedRule = RulesView.Cast<MailRule>().FirstOrDefault();
+    }
+
+    private void NotifyVisibleRuleCount()
+    {
+        OnPropertyChanged(nameof(VisibleRuleCount));
+        OnPropertyChanged(nameof(WindowTitle));
+    }
+
+    [RelayCommand]
+    private void Cleanup()
+    {
+        var movesToIn = Rules.Where(TargetIsIn).ToList();
+        var orphaned = Rules.Where(rule => rule.Action == RuleAction.MoveToFolder
+            && !TargetIsIn(rule)
+            && (string.IsNullOrWhiteSpace(rule.TargetFolder) || !TargetFolderExists(rule))).ToList();
+
+        var remove = new List<MailRule>();
+        if (orphaned.Count > 0)
+        {
+            var confirmed = ConfirmDeleteRequested?.Invoke(
+                $"Remove {orphaned.Count:N0} filter{(orphaned.Count == 1 ? "" : "s")} whose target folder is missing or undefined?",
+                "Cleanup Filters") ?? false;
+            if (confirmed) remove.AddRange(orphaned);
+        }
+
+        if (movesToIn.Count > 0)
+        {
+            var confirmed = ConfirmDeleteRequested?.Invoke(
+                $"Also remove {movesToIn.Count:N0} filter{(movesToIn.Count == 1 ? "" : "s")} that move messages to 'In'?\n\n" +
+                "Imported Eudora filters whose original destination could not be resolved may have been assigned to this folder.",
+                "Cleanup Filters") ?? false;
+            if (confirmed) remove.AddRange(movesToIn);
+        }
+
+        remove = remove.DistinctBy(rule => rule.Id).ToList();
+        if (remove.Count == 0)
+        {
+            StatusText = orphaned.Count == 0 && movesToIn.Count == 0
+                ? "Cleanup complete: no invalid or In-target filters were found."
+                : "Cleanup cancelled: no filters were removed.";
+            return;
+        }
+
+        // Cleanup is an explicitly confirmed immediate operation, like Delete. Persist only these
+        // removals against the original snapshot so an unrelated unsaved edit/template is not
+        // accidentally committed by pressing Cleanup.
+        foreach (var rule in remove)
+        {
+            Rules.Remove(rule);
+            _pendingRuleIds.Remove(rule.Id);
+            _originalRules.RemoveAll(original => original.Id == rule.Id);
+        }
+        _ruleService.SaveRules(CloneRules(_originalRules));
+        RulesView.Refresh();
+        EnsureVisibleSelection();
+        NotifyVisibleRuleCount();
+        StatusText = $"Cleanup complete: removed {remove.Count:N0} filter{(remove.Count == 1 ? "" : "s")}.";
+        Announce(StatusText, AnnouncementCategory.Result);
+    }
+
+    private static bool TargetIsIn(MailRule rule)
+    {
+        if (rule.Action != RuleAction.MoveToFolder) return false;
+        var target = (rule.TargetFolder ?? string.Empty).Trim().Trim('\\', '/');
+        return target.Equals("In", StringComparison.OrdinalIgnoreCase)
+            || target.Equals("Inbox", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private bool TargetFolderExists(MailRule rule)
+    {
+        // Canonical local targets are stable ids resolved by RuleService, not physical account
+        // folder names. They are valid even though the legacy account-folder cache cannot list them.
+        if (rule.TargetFolder?.StartsWith(CanonicalFolderPrefix, StringComparison.Ordinal) == true ||
+            rule.TargetFolder?.StartsWith("LocalFolder:", StringComparison.OrdinalIgnoreCase) == true)
+            return true;
+        IEnumerable<KeyValuePair<Guid, List<MailFolderModel>>> scopes = _foldersByAccount;
+        if (rule.AccountId is { } accountId)
+            scopes = scopes.Where(pair => pair.Key == accountId);
+        return scopes.SelectMany(pair => pair.Value).Any(folder =>
+            string.Equals(folder.FullName, rule.TargetFolder, StringComparison.OrdinalIgnoreCase));
+    }
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasSelectedRule))]
@@ -216,9 +478,8 @@ public partial class RulesManagerViewModel : ObservableObject
     [RelayCommand]
     private void NewRule()
     {
-        // A rule must be scoped to an account now that "All accounts" is gone (#333 D1); default to
-        // the Account Manager default account (or the sole account) so the rule is valid immediately
-        // and the Account combo lands on a real selection rather than blank. (No accounts is a
+        // New rules default to the global "All accounts" scope; the operator can narrow one when
+        // needed. (No accounts is a
         // degenerate state in which rules aren't usable anyway.)
         var rule = new MailRule
         {
@@ -230,7 +491,9 @@ public partial class RulesManagerViewModel : ObservableObject
             Action = RuleAction.MoveToFolder,
             AlsoMarkAsRead = true,
             ApplyAutomatically = false,
+            AlsoFilterOutMailbox = _alsoFilterOutMailboxByDefault,
         };
+        _pendingRuleIds.Add(rule.Id);
         StampDisplay(rule);
         Rules.Add(rule);
         SelectedRule = rule;
@@ -238,11 +501,14 @@ public partial class RulesManagerViewModel : ObservableObject
     }
 
     /// <summary>
-    /// Adds a rule prefilled from a message (e.g. Ctrl+Shift+T) and selects it. Mirrors the
+    /// Adds a rule prefilled from a message (e.g. Ctrl+Shift+F) and selects it. Mirrors the
     /// constructor's prefill path, for when the (modeless) window is already open.
     /// </summary>
     public void AddPrefilledRule(MailRule template)
     {
+        if (_alsoFilterOutMailboxByDefault)
+            template.AlsoFilterOutMailbox = true;
+        _pendingRuleIds.Add(template.Id);
         StampDisplay(template);
         Rules.Add(template);
         SelectedRule = template;
@@ -291,8 +557,19 @@ public partial class RulesManagerViewModel : ObservableObject
         if (!confirmed) return;
 
         var name = SelectedRule.Name;
+        var id = SelectedRule.Id;
         Rules.Remove(SelectedRule);
-        _ruleService.SaveRules(Rules.ToList());
+        if (_pendingRuleIds.Remove(id))
+        {
+            // A template/new rule has never been persisted. Removing it is purely an editor action.
+        }
+        else
+        {
+            // Delete is an explicitly confirmed, immediate operation. Persist only the original
+            // rule set minus this id, never another unsaved template or edits in the live form.
+            _originalRules.RemoveAll(rule => rule.Id == id);
+            _ruleService.SaveRules(CloneRules(_originalRules));
+        }
         SelectedRule = Rules.FirstOrDefault();
         Announce($"Rule '{name}' deleted.", AnnouncementCategory.Result);
     }
@@ -305,6 +582,7 @@ public partial class RulesManagerViewModel : ObservableObject
         if (!Validate(SelectedRule)) return;
 
         _ruleService.SaveRules(Rules.ToList());
+        _pendingRuleIds.Clear();
         IsCommitted = true;
         StampDisplay(SelectedRule);
         RefreshRow(SelectedRule);   // reflect a renamed rule or changed account in the list row
@@ -392,6 +670,7 @@ public partial class RulesManagerViewModel : ObservableObject
         if (SelectedRule == null || ApplyToCurrentFolderRequested is null || !Validate(SelectedRule)) return;
 
         _ruleService.SaveRules(Rules.ToList());
+        _pendingRuleIds.Clear();
         IsCommitted = true;
         StatusText = $"Applying rule to {CurrentFolderName}…";
         Announce(StatusText, AnnouncementCategory.Status);

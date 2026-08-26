@@ -6,10 +6,14 @@ namespace QuickMail.Views;
 public partial class FirstRunWelcomeWindow : Window
 {
     private readonly bool _importOnly;
+    private readonly List<string> _selectedSources = [];
     public enum WelcomeChoice { None, CreateAccount, ImportEudora }
 
     public WelcomeChoice Choice { get; private set; }
-    public string EudoraRoot => Path.GetDirectoryName(EudoraExeBox.Text.Trim()) ?? string.Empty;
+    public IReadOnlyList<string> SelectedSources => _selectedSources;
+    public bool IsSelectiveImport => _selectedSources.Count > 0 &&
+        !_selectedSources[0].EndsWith("Eudora.exe", StringComparison.OrdinalIgnoreCase);
+    public string EudoraRoot => FindEudoraRoot(_selectedSources.FirstOrDefault());
     public string DataFolder => DataFolderBox.Text.Trim();
     public string RootDisplayName => RootNameBox.Text.Trim();
     public string AttachmentMode => MoveAttachments.IsChecked == true ? "move"
@@ -20,6 +24,10 @@ public partial class FirstRunWelcomeWindow : Window
     public FirstRunWelcomeWindow(string defaultDataFolder, bool importOnly = false)
     {
         InitializeComponent();
+        // Use the extra height when it is available, but keep every import option reachable on
+        // smaller displays through the options panel's own vertical scrollbar.
+        MaxHeight = SystemParameters.WorkArea.Height;
+        Height = Math.Min(Height, MaxHeight);
         _importOnly = importOnly;
         DataFolderBox.Text = defaultDataFolder;
         if (importOnly)
@@ -35,10 +43,60 @@ public partial class FirstRunWelcomeWindow : Window
     {
         var dialog = new Microsoft.Win32.OpenFileDialog
         {
-            Title = "Select Eudora.exe", Filter = "Eudora executable (Eudora.exe)|Eudora.exe",
-            CheckFileExists = true, Multiselect = false,
+            Title = "Select Eudora.exe or one or more Eudora mailboxes",
+            Filter = "Eudora executable or mailboxes (Eudora.exe;*.mbx)|Eudora.exe;*.mbx|Eudora mailboxes (*.mbx)|*.mbx|All files (*.*)|*.*",
+            CheckFileExists = true, Multiselect = true,
         };
-        if (dialog.ShowDialog(this) == true) EudoraExeBox.Text = dialog.FileName;
+        if (dialog.ShowDialog(this) != true) return;
+        if (dialog.FileNames.Any(path => path.EndsWith("Eudora.exe", StringComparison.OrdinalIgnoreCase)))
+        {
+            _selectedSources.Clear();
+            _selectedSources.Add(dialog.FileNames.First(path => path.EndsWith("Eudora.exe", StringComparison.OrdinalIgnoreCase)));
+        }
+        else
+        {
+            _selectedSources.Clear();
+            _selectedSources.AddRange(dialog.FileNames.Where(path => path.EndsWith(".mbx", StringComparison.OrdinalIgnoreCase)));
+        }
+        UpdateSelectedSources();
+    }
+
+    private void BrowseEudoraFolders_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new Microsoft.Win32.OpenFolderDialog
+        {
+            Title = "Select one or more Eudora .fol folders", Multiselect = true,
+        };
+        if (dialog.ShowDialog(this) != true) return;
+        var folders = dialog.FolderNames
+            .Where(path => path.EndsWith(".fol", StringComparison.OrdinalIgnoreCase)).ToList();
+        if (folders.Count == 0)
+        {
+            MessageBox.Show(this, "Select a folder whose name ends in .fol.", "Selective Eudora Import",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+        if (_selectedSources.Count == 1 && _selectedSources[0].EndsWith("Eudora.exe", StringComparison.OrdinalIgnoreCase))
+            _selectedSources.Clear();
+        foreach (var folder in folders)
+            if (!_selectedSources.Contains(folder, StringComparer.OrdinalIgnoreCase)) _selectedSources.Add(folder);
+        UpdateSelectedSources();
+    }
+
+    private void UpdateSelectedSources()
+    {
+        EudoraExeBox.Text = string.Join("; ", _selectedSources);
+        var selective = IsSelectiveImport;
+        FolderTreeGroup.Header = selective ? "Selective import destination" : "Folder tree";
+        RootNameLabel.Text = selective ? "Destination folder path" : "Root display name";
+        ImportFiltersCheckBox.IsEnabled = !selective;
+        RespectCheckMailSettingsCheckBox.IsEnabled = !selective;
+        if (selective && _selectedSources.Count > 0)
+        {
+            ImportFiltersCheckBox.IsChecked = false;
+            RespectCheckMailSettingsCheckBox.IsChecked = false;
+            RootNameBox.Text = Path.GetFileNameWithoutExtension(_selectedSources[0].TrimEnd(Path.DirectorySeparatorChar));
+        }
     }
 
     private void BrowseData_Click(object sender, RoutedEventArgs e)
@@ -64,10 +122,9 @@ public partial class FirstRunWelcomeWindow : Window
 
     private void Import_Click(object sender, RoutedEventArgs e)
     {
-        if (!File.Exists(EudoraExeBox.Text.Trim()) ||
-            !Path.GetFileName(EudoraExeBox.Text.Trim()).Equals("Eudora.exe", StringComparison.OrdinalIgnoreCase))
+        if (_selectedSources.Count == 0 || _selectedSources.Any(path => !File.Exists(path) && !Directory.Exists(path)))
         {
-            MessageBox.Show(this, "Select Eudora.exe from the root of your Eudora data folder.",
+            MessageBox.Show(this, "Select Eudora.exe, one or more .mbx mailboxes, or one or more .fol folders.",
                 "Import Eudora", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
@@ -88,16 +145,31 @@ public partial class FirstRunWelcomeWindow : Window
                 "Confirm Attachment Move", MessageBoxButton.YesNo, MessageBoxImage.Warning);
             if (second != MessageBoxResult.Yes) return;
         }
+        var sourceDescription = IsSelectiveImport
+            ? string.Join("\n", _selectedSources.Select(path => " • " + path))
+            : EudoraRoot;
         var confirmation = MessageBox.Show(this,
-            $"All Eudora messages from the following folder will be imported:\n\n{EudoraRoot}\n\n" +
+            $"{(IsSelectiveImport ? "The selected Eudora mailboxes" : "All Eudora messages from the following folder")} will be imported:\n\n{sourceDescription}\n\n" +
             $"Eudora QuickMail data folder:\n{DataFolder}\n\n" +
+            (IsSelectiveImport ? $"Destination folder path: {RootDisplayName}\n\n" : string.Empty) +
             $"Import filters: {(ImportFilters ? "Yes" : "No")}\n\n" +
             $"Respect Eudora automatic mail checks: {(RespectCheckMailSettings ? "Yes" : "No")}\n\n" +
-            "Any previous Eudora import in that data folder will be replaced. Other accounts and messages are preserved. " +
+            (IsSelectiveImport ? "Existing messages are preserved; matching selected messages are updated. " :
+                "Any previous Eudora import in that data folder will be replaced. Other accounts and messages are preserved. ") +
             "Eudora QuickMail will close during the import and reopen automatically when it finishes. Continue?",
             "Import from Eudora", MessageBoxButton.YesNo, MessageBoxImage.Information);
         if (confirmation != MessageBoxResult.Yes) return;
         Choice = WelcomeChoice.ImportEudora;
         DialogResult = true;
+    }
+
+    private static string FindEudoraRoot(string? selected)
+    {
+        if (string.IsNullOrWhiteSpace(selected)) return string.Empty;
+        var directory = Directory.Exists(selected) ? new DirectoryInfo(selected) : new FileInfo(selected).Directory;
+        for (var current = directory; current != null; current = current.Parent)
+            if (File.Exists(Path.Combine(current.FullName, "Eudora.ini")) ||
+                File.Exists(Path.Combine(current.FullName, "Eudora.exe"))) return current.FullName;
+        return directory?.FullName ?? string.Empty;
     }
 }

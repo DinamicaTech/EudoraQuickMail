@@ -252,9 +252,9 @@ If you experience frequent connection errors, check your network, firewall, and 
 
 Press `Ctrl+2` or `Ctrl+Y` to move focus to the main folder tree (when no tabs are open). Use **Up/Down** to choose a folder, **Right/Left** to expand or collapse account and folder nodes, and **Enter** to open the selected folder.
 
-### Search folders (Ctrl+Shift+F)
+### Search folders
 
-Press `Ctrl+Shift+F` or activate **View > Search Folders...** to open the flat folder list. Focus starts on the folder list, so you can use **Up/Down** and **Enter** immediately. Press `/` to move to the search field, type to filter folders, and press **Enter** to open the selected folder.
+Activate **View > Search Folders...** to open the flat folder list. Focus starts on the folder list, so you can use **Up/Down** and **Enter** immediately. Press `/` to move to the search field, type to filter folders, and press **Enter** to open the selected folder.
 
 ### Load More (Ctrl+M)
 
@@ -616,8 +616,10 @@ The Rules Manager shows your rule list on the left and the editor for the select
 You can quickly create a rule based on a message you're looking at:
 
 1. Select a message in the message list.
-2. Right-click (or press **Shift+F10**) and choose **Create Rule from Message…**, or press **Ctrl+Shift+T**.
-3. The Rules Manager opens with the sender and subject pre-filled. Choose an action and save.
+2. Right-click (or press **Shift+F10**) and choose **Create Rule from Message…**, or press **Ctrl+Shift+F**.
+3. If a rule already matches the message, the Rules Manager selects its first match. Otherwise it opens with the sender and subject pre-filled so you can finish and save a new rule.
+
+Choose **Filter All Like This** or press **Ctrl+Shift+A** to find every enabled rule that matches the selected message and apply those rules to the current folder.
 
 ### Testing a rule
 
@@ -1343,10 +1345,11 @@ To skip the confirmation, open **File → Settings**, select the **General** tab
 | K | Toggle flag on selected message or group |
 | Ctrl+Shift+K | Open flag picker |
 | Ctrl+Shift+L | Manage Rules |
-| Ctrl+Shift+T | Create Rule from Message |
+| Ctrl+Shift+F | Create Rule from Message |
+| Ctrl+Shift+A | Filter All Like This |
 | Ctrl+Shift+V | Cycle view mode (Messages / From / To / Conversations) |
 | Ctrl+Shift+C | Toggle conversation view |
-| Ctrl+Shift+F | Search folders |
+| *(unassigned)* | Search folders (View menu) |
 | Ctrl+Shift+P | Open command palette |
 | Ctrl+, | Open Settings |
 | Ctrl+M | Load more messages |

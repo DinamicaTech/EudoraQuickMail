@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -21,8 +22,651 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
         _connectionString = $"Data Source={_dbPath};Mode=ReadWriteCreate;";
     }
 
+    public async Task<CanonicalLocalFolderTree?> LoadCanonicalLocalFolderTreeAsync()
+    {
+        await using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync();
+        await using var exists = connection.CreateCommand();
+        exists.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('LocalFolderNode_shadow','LocalFolderBinding_shadow');";
+        if (Convert.ToInt32(await exists.ExecuteScalarAsync()) != 2) return null;
+
+        var bindings = new Dictionary<Guid, List<CanonicalLocalFolderBinding>>();
+        await using (var bindingCommand = connection.CreateCommand())
+        {
+            bindingCommand.CommandText = "SELECT folder_id,account_id,legacy_full_name FROM LocalFolderBinding_shadow;";
+            await using var reader = await bindingCommand.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                var folderId = Guid.Parse(reader.GetString(0));
+                if (!bindings.TryGetValue(folderId, out var list)) bindings[folderId] = list = [];
+                list.Add(new CanonicalLocalFolderBinding(Guid.Parse(reader.GetString(1)), reader.GetString(2)));
+            }
+        }
+
+        var folders = new List<CanonicalLocalFolder>();
+        await using var command = connection.CreateCommand();
+        // Folder already stores transactionally-maintained counters. Reading those cached values
+        // keeps startup and ordinary tree refreshes proportional to the number of folders instead
+        // of scanning/grouping the entire MessageSummary table (which can be tens of gigabytes).
+        // Tools > Recalculate Folder Counts remains the authoritative repair path if required.
+        command.CommandText = """
+            SELECT n.folder_id,n.root_id,n.parent_folder_id,n.name,n.canonical_path,n.kind,
+                   CASE WHEN n.is_container=1 OR EXISTS(
+                       SELECT 1 FROM LocalFolderNode_shadow child WHERE child.parent_folder_id=n.folder_id)
+                        THEN 1 ELSE 0 END,
+                   COALESCE(SUM(f.unread_count),0),COALESCE(SUM(f.message_count),0)
+              FROM LocalFolderNode_shadow n
+              LEFT JOIN LocalFolderBinding_shadow b ON b.folder_id=n.folder_id
+              LEFT JOIN Folder f ON f.account_id=b.account_id AND f.full_name=b.legacy_full_name
+             GROUP BY n.folder_id ORDER BY n.canonical_path;
+            """;
+        await using (var reader = await command.ExecuteReaderAsync())
+            while (await reader.ReadAsync())
+            {
+                var id = Guid.Parse(reader.GetString(0));
+                folders.Add(new CanonicalLocalFolder(id, Guid.Parse(reader.GetString(1)),
+                    reader.IsDBNull(2) ? null : Guid.Parse(reader.GetString(2)), reader.GetString(3),
+                    reader.GetString(4), (SpecialFolderKind)reader.GetInt32(5), reader.GetInt32(6) != 0,
+                    reader.GetInt32(7), reader.GetInt32(8),
+                    bindings.GetValueOrDefault(id) ?? []));
+            }
+        return new CanonicalLocalFolderTree(folders);
+    }
+
+    public async Task<string> EnsureCanonicalFolderBindingAsync(Guid folderId, Guid accountId)
+    {
+        await using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync();
+        await using var tx = await connection.BeginTransactionAsync();
+        await using var lookup = connection.CreateCommand();
+        lookup.Transaction = (SqliteTransaction)tx;
+        lookup.CommandText = """
+            SELECT n.canonical_path,n.name,n.kind,n.is_container,b.legacy_full_name
+              FROM LocalFolderNode_shadow n
+              LEFT JOIN LocalFolderBinding_shadow b ON b.folder_id=n.folder_id AND b.account_id=$account
+             WHERE n.folder_id=$folder;
+            """;
+        lookup.Parameters.AddWithValue("$folder", folderId.ToString("D"));
+        lookup.Parameters.AddWithValue("$account", accountId.ToString("D"));
+        string path;
+        string name;
+        int kind;
+        int container;
+        await using (var reader = await lookup.ExecuteReaderAsync())
+        {
+            if (!await reader.ReadAsync()) throw new InvalidOperationException("The destination folder no longer exists.");
+            path = reader.GetString(0);
+            name = reader.GetString(1);
+            kind = reader.GetInt32(2);
+            container = reader.GetInt32(3);
+            if (!reader.IsDBNull(4)) return reader.GetString(4);
+        }
+        if (path.Length == 0) throw new InvalidOperationException("Messages cannot be stored directly in the tree root.");
+
+        var slash = path.LastIndexOf('/');
+        var parent = slash < 0 ? null : path[..slash];
+        await using var insert = connection.CreateCommand();
+        insert.Transaction = (SqliteTransaction)tx;
+        insert.CommandText = """
+            INSERT OR IGNORE INTO Folder(account_id,full_name,display_name,parent_id,kind,
+                exclude_from_all_mail,unread_count,message_count,sort_order,is_container)
+            VALUES($account,$path,$name,$parent,$kind,0,0,0,0,$container);
+            INSERT OR IGNORE INTO LocalFolderBinding_shadow(account_id,legacy_full_name,folder_id)
+            VALUES($account,$path,$folder);
+            """;
+        insert.Parameters.AddWithValue("$account", accountId.ToString("D"));
+        insert.Parameters.AddWithValue("$path", path);
+        insert.Parameters.AddWithValue("$name", name);
+        insert.Parameters.AddWithValue("$parent", (object?)parent ?? DBNull.Value);
+        insert.Parameters.AddWithValue("$kind", kind);
+        insert.Parameters.AddWithValue("$container", container);
+        insert.Parameters.AddWithValue("$folder", folderId.ToString("D"));
+        await insert.ExecuteNonQueryAsync();
+        await tx.CommitAsync();
+        return path;
+    }
+
+    public async Task<Guid> CreateCanonicalFolderAsync(Guid parentFolderId, string name, Guid ownerAccountId,
+        bool isContainer = true)
+    {
+        name = name.Trim();
+        if (name.Length == 0 || name.IndexOfAny(['/', '\\']) >= 0)
+            throw new ArgumentException("Folder names cannot be empty or contain path separators.", nameof(name));
+        await using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync();
+        await using var tx = (SqliteTransaction)await connection.BeginTransactionAsync();
+        await using var parent = connection.CreateCommand();
+        parent.Transaction = tx;
+        parent.CommandText = "SELECT root_id,canonical_path FROM LocalFolderNode_shadow WHERE folder_id=$id;";
+        parent.Parameters.AddWithValue("$id", parentFolderId.ToString("D"));
+        string root;
+        string parentPath;
+        await using (var reader = await parent.ExecuteReaderAsync())
+        {
+            if (!await reader.ReadAsync()) throw new InvalidOperationException("The parent folder no longer exists.");
+            root = reader.GetString(0);
+            parentPath = reader.GetString(1);
+        }
+        var path = parentPath.Length == 0 ? name : parentPath + "/" + name;
+        await using var existing = connection.CreateCommand();
+        existing.Transaction = tx;
+        existing.CommandText = "SELECT folder_id FROM LocalFolderNode_shadow WHERE root_id=$root AND canonical_path=$path COLLATE NOCASE;";
+        existing.Parameters.AddWithValue("$root", root);
+        existing.Parameters.AddWithValue("$path", path);
+        var existingId = await existing.ExecuteScalarAsync();
+        if (existingId is string value)
+        {
+            if (!isContainer)
+            {
+                // A previous failed Ctrl+Shift+Drop build could leave the canonical node behind as
+                // an empty container before its physical binding was created. A retry with the same
+                // name should finish the requested leaf, not keep returning an unusable container.
+                await using var makeLeaf = connection.CreateCommand();
+                makeLeaf.Transaction = tx;
+                makeLeaf.CommandText = """
+                    UPDATE LocalFolderNode_shadow SET is_container=0
+                     WHERE folder_id=$id AND NOT EXISTS(
+                           SELECT 1 FROM LocalFolderNode_shadow child
+                            WHERE child.parent_folder_id=$id);
+                    """;
+                makeLeaf.Parameters.AddWithValue("$id", value);
+                await makeLeaf.ExecuteNonQueryAsync();
+            }
+            await MarkCanonicalContainerAsync(connection, tx, parentFolderId);
+            await tx.CommitAsync();
+            var parsed = Guid.Parse(value);
+            await EnsureCanonicalFolderBindingAsync(parsed, ownerAccountId);
+            return parsed;
+        }
+        var id = Guid.NewGuid();
+        await using var insert = connection.CreateCommand();
+        insert.Transaction = tx;
+        insert.CommandText = """
+            INSERT INTO LocalFolderNode_shadow(folder_id,root_id,parent_folder_id,name,canonical_path,kind,is_container)
+            VALUES($id,$root,$parent,$name,$path,0,$container);
+            """;
+        insert.Parameters.AddWithValue("$id", id.ToString("D"));
+        insert.Parameters.AddWithValue("$root", root);
+        insert.Parameters.AddWithValue("$parent", parentFolderId.ToString("D"));
+        insert.Parameters.AddWithValue("$name", name);
+        insert.Parameters.AddWithValue("$path", path);
+        insert.Parameters.AddWithValue("$container", isContainer ? 1 : 0);
+        await insert.ExecuteNonQueryAsync();
+        await MarkCanonicalContainerAsync(connection, tx, parentFolderId);
+        await tx.CommitAsync();
+        await EnsureCanonicalFolderBindingAsync(id, ownerAccountId);
+        return id;
+    }
+
+    private static async Task MarkCanonicalContainerAsync(SqliteConnection connection,
+        SqliteTransaction transaction, Guid folderId)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "UPDATE LocalFolderNode_shadow SET is_container=1 WHERE folder_id=$id;";
+        command.Parameters.AddWithValue("$id", folderId.ToString("D"));
+        await command.ExecuteNonQueryAsync();
+    }
+
+    public async Task<CanonicalFolderMoveResult> MoveCanonicalFolderAsync(Guid folderId, Guid newParentFolderId)
+    {
+        await using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync();
+
+        var nodes = new Dictionary<Guid, (Guid Root, Guid? Parent, string Name, string Path)>();
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = "SELECT folder_id,root_id,parent_folder_id,name,canonical_path FROM LocalFolderNode_shadow;";
+            await using var reader = await command.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                var id = Guid.Parse(reader.GetString(0));
+                nodes[id] = (Guid.Parse(reader.GetString(1)),
+                    reader.IsDBNull(2) ? null : Guid.Parse(reader.GetString(2)), reader.GetString(3), reader.GetString(4));
+            }
+        }
+        if (!nodes.TryGetValue(folderId, out var source) || !nodes.TryGetValue(newParentFolderId, out var parent))
+            throw new InvalidOperationException("The source or destination folder no longer exists.");
+        if (source.Parent == null) throw new InvalidOperationException("The tree root cannot be moved.");
+        if (source.Root != parent.Root) throw new InvalidOperationException("Folders cannot be moved between different roots.");
+        if (folderId == newParentFolderId || parent.Path.StartsWith(source.Path + "/", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("A folder cannot be moved into itself or one of its subfolders.");
+
+        var newPath = parent.Path.Length == 0 ? source.Name : parent.Path + "/" + source.Name;
+        if (string.Equals(source.Path, newPath, StringComparison.OrdinalIgnoreCase))
+            return new CanonicalFolderMoveResult(source.Path, newPath, false);
+        var collision = nodes.FirstOrDefault(pair => pair.Key != folderId && pair.Value.Root == source.Root &&
+            pair.Value.Path.Equals(newPath, StringComparison.OrdinalIgnoreCase));
+        if (collision.Key != Guid.Empty)
+            return await MergeCanonicalFolderAsync(folderId, collision.Key, source.Path, newPath);
+
+        var bindings = new List<(Guid Account, string CanonicalPath, string OldPath)>();
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = """
+                SELECT b.account_id,n.canonical_path,b.legacy_full_name
+                  FROM LocalFolderNode_shadow n JOIN LocalFolderBinding_shadow b ON b.folder_id=n.folder_id
+                 WHERE n.root_id=$root AND (n.canonical_path=$old OR n.canonical_path LIKE $prefix ESCAPE '\')
+                 ORDER BY length(n.canonical_path);
+                """;
+            command.Parameters.AddWithValue("$root", source.Root.ToString("D"));
+            command.Parameters.AddWithValue("$old", source.Path);
+            command.Parameters.AddWithValue("$prefix", source.Path.Replace("%", "\\%").Replace("_", "\\_") + "/%");
+            await using var reader = await command.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+                bindings.Add((Guid.Parse(reader.GetString(0)), reader.GetString(1), reader.GetString(2)));
+        }
+
+        // Rename the physical projections first. If one fails, canonical metadata remains unchanged
+        // and the operation can safely be retried after the offending account is inspected.
+        foreach (var binding in bindings.Where(candidate => !bindings.Any(ancestor =>
+                     ancestor.Account == candidate.Account && ancestor.CanonicalPath.Length < candidate.CanonicalPath.Length &&
+                     candidate.CanonicalPath.StartsWith(ancestor.CanonicalPath + "/", StringComparison.OrdinalIgnoreCase))))
+            await RenameFolderPathAsync(binding.Account, binding.OldPath,
+                newPath + binding.CanonicalPath[source.Path.Length..]);
+
+        await using var tx = (SqliteTransaction)await connection.BeginTransactionAsync();
+        await using var updateNodes = connection.CreateCommand();
+        updateNodes.Transaction = tx;
+        updateNodes.CommandText = """
+            UPDATE LocalFolderNode_shadow SET
+                canonical_path=$new || substr(canonical_path,length($old)+1),
+                parent_folder_id=CASE WHEN folder_id=$id THEN $parent ELSE parent_folder_id END
+            WHERE root_id=$root AND (canonical_path=$old OR canonical_path LIKE $prefix ESCAPE '\');
+            """;
+        updateNodes.Parameters.AddWithValue("$new", newPath);
+        updateNodes.Parameters.AddWithValue("$old", source.Path);
+        updateNodes.Parameters.AddWithValue("$id", folderId.ToString("D"));
+        updateNodes.Parameters.AddWithValue("$parent", newParentFolderId.ToString("D"));
+        updateNodes.Parameters.AddWithValue("$root", source.Root.ToString("D"));
+        updateNodes.Parameters.AddWithValue("$prefix", source.Path.Replace("%", "\\%").Replace("_", "\\_") + "/%");
+        await updateNodes.ExecuteNonQueryAsync();
+
+        await using var markDestinationContainer = connection.CreateCommand();
+        markDestinationContainer.Transaction = tx;
+        markDestinationContainer.CommandText = "UPDATE LocalFolderNode_shadow SET is_container=1 WHERE folder_id=$parent;";
+        markDestinationContainer.Parameters.AddWithValue("$parent", newParentFolderId.ToString("D"));
+        await markDestinationContainer.ExecuteNonQueryAsync();
+
+        // Do not derive this from legacy_full_name: canonical aliases deliberately allow a binding
+        // such as canonical "In" -> physical "Inbox". Use the canonical node path captured above.
+        await using var updateBinding = connection.CreateCommand();
+        updateBinding.Transaction = tx;
+        updateBinding.CommandText = """
+            UPDATE LocalFolderBinding_shadow SET legacy_full_name=$new
+             WHERE account_id=$account AND legacy_full_name=$old;
+            """;
+        var bindingNew = updateBinding.Parameters.Add("$new", SqliteType.Text);
+        var bindingAccount = updateBinding.Parameters.Add("$account", SqliteType.Text);
+        var bindingOld = updateBinding.Parameters.Add("$old", SqliteType.Text);
+        foreach (var binding in bindings)
+        {
+            bindingNew.Value = newPath + binding.CanonicalPath[source.Path.Length..];
+            bindingAccount.Value = binding.Account.ToString("D");
+            bindingOld.Value = binding.OldPath;
+            await updateBinding.ExecuteNonQueryAsync();
+        }
+        await tx.CommitAsync();
+        return new CanonicalFolderMoveResult(source.Path, newPath, false);
+    }
+
+    private async Task<CanonicalFolderMoveResult> MergeCanonicalFolderAsync(
+        Guid sourceFolderId, Guid destinationFolderId, string oldPath, string newPath)
+    {
+        var tree = await LoadCanonicalLocalFolderTreeAsync()
+            ?? throw new InvalidOperationException("The canonical folder tree is unavailable.");
+        var sourceNodes = tree.Folders
+            .Where(folder => folder.FolderId == sourceFolderId ||
+                folder.CanonicalPath.StartsWith(oldPath + "/", StringComparison.OrdinalIgnoreCase))
+            .OrderBy(folder => folder.CanonicalPath.Length)
+            .ToList();
+        if (sourceNodes.Count == 0) throw new InvalidOperationException("The source folder no longer exists.");
+        var sourceIds = sourceNodes.Select(folder => folder.FolderId).ToHashSet();
+        var destinationNodes = tree.Folders
+            .Where(folder => !sourceIds.Contains(folder.FolderId))
+            .ToDictionary(folder => folder.CanonicalPath, StringComparer.OrdinalIgnoreCase);
+        if (!destinationNodes.TryGetValue(newPath, out var destinationRoot) ||
+            destinationRoot.FolderId != destinationFolderId)
+            throw new InvalidOperationException("The destination folder no longer exists.");
+
+        var targetIds = new Dictionary<Guid, Guid>();
+        foreach (var source in sourceNodes)
+        {
+            var targetPath = newPath + source.CanonicalPath[oldPath.Length..];
+            targetIds[source.FolderId] = destinationNodes.TryGetValue(targetPath, out var existing)
+                ? existing.FolderId : source.FolderId;
+        }
+
+        // A physical merge at an ancestor also moves all descendant paths. Record those mappings
+        // so descendant shadow bindings can be rewritten without attempting the same move twice.
+        var physicalMoves = new List<(Guid Account, string OldRoot, string NewRoot)>();
+        foreach (var source in sourceNodes)
+        {
+            if (targetIds[source.FolderId] == source.FolderId) continue;
+            var target = tree.Folders.Single(folder => folder.FolderId == targetIds[source.FolderId]);
+            foreach (var binding in source.Bindings)
+            {
+                if (physicalMoves.Any(move => move.Account == binding.AccountId &&
+                    (binding.LegacyFullName.Equals(move.OldRoot, StringComparison.OrdinalIgnoreCase) ||
+                     binding.LegacyFullName.StartsWith(move.OldRoot + "/", StringComparison.OrdinalIgnoreCase))))
+                    continue;
+                var destinationBinding = target.Bindings.FirstOrDefault(candidate =>
+                    candidate.AccountId == binding.AccountId);
+                if (destinationBinding == null || destinationBinding.LegacyFullName.Equals(
+                        binding.LegacyFullName, StringComparison.OrdinalIgnoreCase)) continue;
+                await MergeFolderPathAsync(binding.AccountId, binding.LegacyFullName,
+                    destinationBinding.LegacyFullName);
+                physicalMoves.Add((binding.AccountId, binding.LegacyFullName,
+                    destinationBinding.LegacyFullName));
+            }
+        }
+
+        string RewrittenPhysicalPath(CanonicalLocalFolderBinding binding)
+        {
+            var move = physicalMoves
+                .Where(candidate => candidate.Account == binding.AccountId &&
+                    (binding.LegacyFullName.Equals(candidate.OldRoot, StringComparison.OrdinalIgnoreCase) ||
+                     binding.LegacyFullName.StartsWith(candidate.OldRoot + "/", StringComparison.OrdinalIgnoreCase)))
+                .OrderByDescending(candidate => candidate.OldRoot.Length)
+                .FirstOrDefault();
+            return move.OldRoot == null
+                ? binding.LegacyFullName
+                : move.NewRoot + binding.LegacyFullName[move.OldRoot.Length..];
+        }
+
+        await using var connection = await OpenAsync();
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync();
+        foreach (var source in sourceNodes)
+        {
+            var targetId = targetIds[source.FolderId];
+            var targetPath = newPath + source.CanonicalPath[oldPath.Length..];
+            var mappedParentId = source.FolderId == sourceFolderId
+                ? destinationRoot.ParentFolderId
+                : source.ParentFolderId is { } parentId && targetIds.TryGetValue(parentId, out var mapped)
+                    ? mapped : source.ParentFolderId;
+
+            foreach (var binding in source.Bindings)
+            {
+                var physicalPath = RewrittenPhysicalPath(binding);
+                if (targetId != source.FolderId)
+                {
+                    await using var collision = connection.CreateCommand();
+                    collision.Transaction = transaction;
+                    collision.CommandText = """
+                        DELETE FROM LocalFolderBinding_shadow
+                         WHERE folder_id=$source AND account_id=$account AND legacy_full_name=$old
+                           AND EXISTS(SELECT 1 FROM LocalFolderBinding_shadow
+                                       WHERE folder_id=$target AND account_id=$account AND legacy_full_name=$new);
+                        UPDATE LocalFolderBinding_shadow SET folder_id=$target,legacy_full_name=$new
+                         WHERE folder_id=$source AND account_id=$account AND legacy_full_name=$old;
+                        """;
+                    collision.Parameters.AddWithValue("$source", source.FolderId.ToString("D"));
+                    collision.Parameters.AddWithValue("$target", targetId.ToString("D"));
+                    collision.Parameters.AddWithValue("$account", binding.AccountId.ToString("D"));
+                    collision.Parameters.AddWithValue("$old", binding.LegacyFullName);
+                    collision.Parameters.AddWithValue("$new", physicalPath);
+                    await collision.ExecuteNonQueryAsync();
+                }
+                else if (!physicalPath.Equals(binding.LegacyFullName, StringComparison.OrdinalIgnoreCase))
+                {
+                    await using var updateBinding = connection.CreateCommand();
+                    updateBinding.Transaction = transaction;
+                    updateBinding.CommandText = """
+                        UPDATE LocalFolderBinding_shadow SET legacy_full_name=$new
+                         WHERE folder_id=$folder AND account_id=$account AND legacy_full_name=$old;
+                        """;
+                    updateBinding.Parameters.AddWithValue("$folder", source.FolderId.ToString("D"));
+                    updateBinding.Parameters.AddWithValue("$account", binding.AccountId.ToString("D"));
+                    updateBinding.Parameters.AddWithValue("$old", binding.LegacyFullName);
+                    updateBinding.Parameters.AddWithValue("$new", physicalPath);
+                    await updateBinding.ExecuteNonQueryAsync();
+                }
+            }
+
+            if (targetId == source.FolderId)
+            {
+                await using var moveNode = connection.CreateCommand();
+                moveNode.Transaction = transaction;
+                moveNode.CommandText = """
+                    UPDATE LocalFolderNode_shadow SET canonical_path=$path,parent_folder_id=$parent
+                     WHERE folder_id=$folder;
+                    """;
+                moveNode.Parameters.AddWithValue("$path", targetPath);
+                moveNode.Parameters.AddWithValue("$parent", (object?)mappedParentId?.ToString("D") ?? DBNull.Value);
+                moveNode.Parameters.AddWithValue("$folder", source.FolderId.ToString("D"));
+                await moveNode.ExecuteNonQueryAsync();
+            }
+        }
+
+        // Colliding source nodes are now empty aliases. Repoint any remaining child references and
+        // remove them deepest-first, retaining the pre-existing destination nodes.
+        foreach (var source in sourceNodes.OrderByDescending(folder => folder.CanonicalPath.Length))
+        {
+            var targetId = targetIds[source.FolderId];
+            if (targetId == source.FolderId) continue;
+            await using var reparent = connection.CreateCommand();
+            reparent.Transaction = transaction;
+            reparent.CommandText = """
+                UPDATE LocalFolderNode_shadow SET parent_folder_id=$target WHERE parent_folder_id=$source;
+                DELETE FROM LocalFolderBinding_shadow WHERE folder_id=$source;
+                DELETE FROM LocalFolderNode_shadow WHERE folder_id=$source;
+                UPDATE LocalFolderNode_shadow SET is_container=1 WHERE folder_id=$target;
+                """;
+            reparent.Parameters.AddWithValue("$source", source.FolderId.ToString("D"));
+            reparent.Parameters.AddWithValue("$target", targetId.ToString("D"));
+            await reparent.ExecuteNonQueryAsync();
+        }
+        await transaction.CommitAsync();
+        return new CanonicalFolderMoveResult(oldPath, newPath, true);
+    }
+
+    public async Task<CanonicalFolderMoveResult> RenameCanonicalFolderAsync(Guid folderId, string newName)
+    {
+        newName = newName.Trim();
+        if (newName.Length == 0 || newName.IndexOfAny(['/', '\\']) >= 0)
+            throw new ArgumentException("Folder names cannot be empty or contain path separators.", nameof(newName));
+
+        await using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync();
+
+        Guid rootId;
+        Guid? parentId;
+        string oldName;
+        string oldPath;
+        await using (var lookup = connection.CreateCommand())
+        {
+            lookup.CommandText = "SELECT root_id,parent_folder_id,name,canonical_path FROM LocalFolderNode_shadow WHERE folder_id=$id;";
+            lookup.Parameters.AddWithValue("$id", folderId.ToString("D"));
+            await using var reader = await lookup.ExecuteReaderAsync();
+            if (!await reader.ReadAsync()) throw new InvalidOperationException("The folder no longer exists.");
+            rootId = Guid.Parse(reader.GetString(0));
+            parentId = reader.IsDBNull(1) ? null : Guid.Parse(reader.GetString(1));
+            oldName = reader.GetString(2);
+            oldPath = reader.GetString(3);
+        }
+        if (parentId == null) throw new InvalidOperationException("The tree root cannot be renamed here.");
+        if (string.Equals(oldName, newName, StringComparison.Ordinal))
+            return new CanonicalFolderMoveResult(oldPath, oldPath, false);
+
+        var slash = oldPath.LastIndexOf('/');
+        var parentPath = slash < 0 ? string.Empty : oldPath[..slash];
+        var newPath = parentPath.Length == 0 ? newName : parentPath + "/" + newName;
+        await using (var collision = connection.CreateCommand())
+        {
+            collision.CommandText = "SELECT 1 FROM LocalFolderNode_shadow WHERE root_id=$root AND folder_id<>$id AND canonical_path=$path COLLATE NOCASE LIMIT 1;";
+            collision.Parameters.AddWithValue("$root", rootId.ToString("D"));
+            collision.Parameters.AddWithValue("$id", folderId.ToString("D"));
+            collision.Parameters.AddWithValue("$path", newPath);
+            if (await collision.ExecuteScalarAsync() != null)
+                throw new InvalidOperationException($"A folder named '{newName}' already exists here.");
+        }
+
+        var bindings = new List<(Guid Account, string CanonicalPath, string OldPath)>();
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = """
+                SELECT b.account_id,n.canonical_path,b.legacy_full_name
+                  FROM LocalFolderNode_shadow n JOIN LocalFolderBinding_shadow b ON b.folder_id=n.folder_id
+                 WHERE n.root_id=$root AND (n.canonical_path=$old OR n.canonical_path LIKE $prefix ESCAPE '\')
+                 ORDER BY length(n.canonical_path);
+                """;
+            command.Parameters.AddWithValue("$root", rootId.ToString("D"));
+            command.Parameters.AddWithValue("$old", oldPath);
+            command.Parameters.AddWithValue("$prefix", oldPath.Replace("%", "\\%").Replace("_", "\\_") + "/%");
+            await using var reader = await command.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+                bindings.Add((Guid.Parse(reader.GetString(0)), reader.GetString(1), reader.GetString(2)));
+        }
+
+        string PhysicalNewPath((Guid Account, string CanonicalPath, string OldPath) binding)
+        {
+            var suffix = binding.CanonicalPath[oldPath.Length..];
+            var oldPhysicalRoot = suffix.Length > 0 && binding.OldPath.EndsWith(suffix, StringComparison.OrdinalIgnoreCase)
+                ? binding.OldPath[..^suffix.Length]
+                : binding.OldPath;
+            var cut = Math.Max(oldPhysicalRoot.LastIndexOf('/'), oldPhysicalRoot.LastIndexOf('\\'));
+            var newPhysicalRoot = cut < 0
+                ? newName
+                : oldPhysicalRoot[..(cut + 1)] + newName;
+            return newPhysicalRoot + suffix;
+        }
+
+        // Rename each physical projection first. Preserve its actual parent/prefix: imported
+        // Eudora bindings are allowed to differ from the visible canonical path.
+        foreach (var binding in bindings.Where(candidate => !bindings.Any(ancestor =>
+                     ancestor.Account == candidate.Account && ancestor.CanonicalPath.Length < candidate.CanonicalPath.Length &&
+                     candidate.CanonicalPath.StartsWith(ancestor.CanonicalPath + "/", StringComparison.OrdinalIgnoreCase))))
+            await RenameFolderPathAsync(binding.Account, binding.OldPath, PhysicalNewPath(binding));
+
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync();
+        await using (var updateNodes = connection.CreateCommand())
+        {
+            updateNodes.Transaction = transaction;
+            updateNodes.CommandText = """
+                UPDATE LocalFolderNode_shadow SET
+                    canonical_path=$new || substr(canonical_path,length($old)+1),
+                    name=CASE WHEN folder_id=$id THEN $name ELSE name END
+                WHERE root_id=$root AND (canonical_path=$old OR canonical_path LIKE $prefix ESCAPE '\');
+                """;
+            updateNodes.Parameters.AddWithValue("$new", newPath);
+            updateNodes.Parameters.AddWithValue("$old", oldPath);
+            updateNodes.Parameters.AddWithValue("$id", folderId.ToString("D"));
+            updateNodes.Parameters.AddWithValue("$name", newName);
+            updateNodes.Parameters.AddWithValue("$root", rootId.ToString("D"));
+            updateNodes.Parameters.AddWithValue("$prefix", oldPath.Replace("%", "\\%").Replace("_", "\\_") + "/%");
+            await updateNodes.ExecuteNonQueryAsync();
+        }
+        await using (var updateBinding = connection.CreateCommand())
+        {
+            updateBinding.Transaction = transaction;
+            updateBinding.CommandText = """
+                UPDATE LocalFolderBinding_shadow SET legacy_full_name=$new
+                 WHERE account_id=$account AND legacy_full_name=$old;
+                """;
+            var bindingNew = updateBinding.Parameters.Add("$new", SqliteType.Text);
+            var bindingAccount = updateBinding.Parameters.Add("$account", SqliteType.Text);
+            var bindingOld = updateBinding.Parameters.Add("$old", SqliteType.Text);
+            foreach (var binding in bindings)
+            {
+                bindingNew.Value = PhysicalNewPath(binding);
+                bindingAccount.Value = binding.Account.ToString("D");
+                bindingOld.Value = binding.OldPath;
+                await updateBinding.ExecuteNonQueryAsync();
+            }
+        }
+        await transaction.CommitAsync();
+        return new CanonicalFolderMoveResult(oldPath, newPath, false);
+    }
+
+    public async Task DeleteCanonicalFolderTreeAsync(Guid folderId)
+    {
+        await using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync();
+
+        string root;
+        string path;
+        string? parent;
+        await using (var lookup = connection.CreateCommand())
+        {
+            lookup.CommandText = "SELECT root_id,canonical_path,parent_folder_id FROM LocalFolderNode_shadow WHERE folder_id=$id;";
+            lookup.Parameters.AddWithValue("$id", folderId.ToString("D"));
+            await using var reader = await lookup.ExecuteReaderAsync();
+            if (!await reader.ReadAsync()) return;
+            root = reader.GetString(0);
+            path = reader.GetString(1);
+            parent = reader.IsDBNull(2) ? null : reader.GetString(2);
+        }
+        if (parent == null) throw new InvalidOperationException("The tree root cannot be deleted.");
+
+        var nodeIds = new List<string>();
+        var bindings = new List<(string Account, string Path)>();
+        var prefix = path.Replace("%", "\\%").Replace("_", "\\_") + "/%";
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = """
+                SELECT n.folder_id,b.account_id,b.legacy_full_name
+                  FROM LocalFolderNode_shadow n
+                  LEFT JOIN LocalFolderBinding_shadow b ON b.folder_id=n.folder_id
+                 WHERE n.root_id=$root AND (n.canonical_path=$path OR n.canonical_path LIKE $prefix ESCAPE '\')
+                 ORDER BY length(n.canonical_path) DESC;
+                """;
+            command.Parameters.AddWithValue("$root", root);
+            command.Parameters.AddWithValue("$path", path);
+            command.Parameters.AddWithValue("$prefix", prefix);
+            await using var reader = await command.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                var id = reader.GetString(0);
+                if (!nodeIds.Contains(id, StringComparer.OrdinalIgnoreCase)) nodeIds.Add(id);
+                if (!reader.IsDBNull(1)) bindings.Add((reader.GetString(1), reader.GetString(2)));
+            }
+        }
+
+        await using var tx = (SqliteTransaction)await connection.BeginTransactionAsync();
+        foreach (var id in nodeIds)
+        {
+            await using var deleteBinding = connection.CreateCommand();
+            deleteBinding.Transaction = tx;
+            deleteBinding.CommandText = "DELETE FROM LocalFolderBinding_shadow WHERE folder_id=$id;";
+            deleteBinding.Parameters.AddWithValue("$id", id);
+            await deleteBinding.ExecuteNonQueryAsync();
+
+            await using var deleteNode = connection.CreateCommand();
+            deleteNode.Transaction = tx;
+            deleteNode.CommandText = "DELETE FROM LocalFolderNode_shadow WHERE folder_id=$id;";
+            deleteNode.Parameters.AddWithValue("$id", id);
+            await deleteNode.ExecuteNonQueryAsync();
+        }
+        foreach (var binding in bindings)
+        {
+            await using var deleteFolder = connection.CreateCommand();
+            deleteFolder.Transaction = tx;
+            deleteFolder.CommandText = """
+                DELETE FROM Folder WHERE account_id=$account AND full_name=$path
+                  AND NOT EXISTS(SELECT 1 FROM LocalFolderBinding_shadow
+                                  WHERE account_id=$account AND legacy_full_name=$path);
+                """;
+            deleteFolder.Parameters.AddWithValue("$account", binding.Account);
+            deleteFolder.Parameters.AddWithValue("$path", binding.Path);
+            await deleteFolder.ExecuteNonQueryAsync();
+        }
+        await tx.CommitAsync();
+    }
+
     public void Initialize()
     {
+        var initializeStarted = Stopwatch.GetTimestamp();
+        var checkpoint = initializeStarted;
+        void RecordStage(string stage, string? details = null)
+        {
+            var now = Stopwatch.GetTimestamp();
+            PerformanceLogService.Record($"SQLite initialization: {stage}",
+                Stopwatch.GetElapsedTime(checkpoint, now), details);
+            checkpoint = now;
+        }
+
+        var initialSize = File.Exists(_dbPath) ? new FileInfo(_dbPath).Length : 0L;
+        var initialVersion = 0;
         // Pre-migration backup: if we're upgrading from a pre-v2 (INTEGER unique_id) database,
         // copy mail.db to mail.db.pre-v2 before touching it. The v2 migration is one-way, so the
         // backup is the safety net. Preserved indefinitely; the user can delete it manually.
@@ -30,15 +674,19 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
         {
             using var probe = new SqliteConnection($"Data Source={_dbPath};Mode=ReadOnly;");
             probe.Open();
-            if (GetUserVersion(probe) < 2)
+            initialVersion = GetUserVersion(probe);
+            if (initialVersion < 2)
             {
                 var backupPath = _dbPath + ".pre-v2";
                 File.Copy(_dbPath, backupPath, overwrite: true);
                 LogService.Log($"LocalStoreService: backed up mail.db to {backupPath} before v2 migration");
             }
         }
+        RecordStage("read schema version and check backup",
+            $"sizeBytes={initialSize}; userVersion={initialVersion}");
 
         using var conn = Open();
+        RecordStage("open read/write connection");
         using var cmd = conn.CreateCommand();
         cmd.CommandText = """
             PRAGMA journal_mode=WAL;
@@ -55,6 +703,7 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
                 preview_text TEXT    NOT NULL DEFAULT '',
                 is_replied   INTEGER NOT NULL DEFAULT 0,
                 is_forwarded INTEGER NOT NULL DEFAULT 0,
+                message_direction INTEGER NOT NULL DEFAULT 0,
                 PRIMARY KEY (unique_id, account_id, folder_name)
             );
             CREATE INDEX IF NOT EXISTS idx_summary_date
@@ -75,6 +724,7 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
             );
             """;
         cmd.ExecuteNonQuery();
+        RecordStage("base message tables and indexes");
 
         // Migration: add columns added after initial release.
         RunMigration(conn, "ALTER TABLE MessageSummary ADD COLUMN to_addr        TEXT    NOT NULL DEFAULT '';");
@@ -85,7 +735,15 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
         RunMigration(conn, "ALTER TABLE MessageSummary ADD COLUMN is_mailing_list INTEGER NOT NULL DEFAULT 0;");
         RunMigration(conn, "ALTER TABLE MessageDetail ADD COLUMN attachments_json TEXT DEFAULT NULL;");
         RunMigration(conn, "ALTER TABLE MessageSummary ADD COLUMN flag_id TEXT DEFAULT NULL;");
-        cmd.CommandText = "CREATE INDEX IF NOT EXISTS idx_summary_flag_date ON MessageSummary(flag_id, date_ticks DESC) WHERE flag_id IS NOT NULL;";
+        RunMigration(conn, "ALTER TABLE MessageSummary ADD COLUMN message_direction INTEGER NOT NULL DEFAULT 0;");
+        cmd.CommandText = """
+            CREATE INDEX IF NOT EXISTS idx_summary_flag_date
+                ON MessageSummary(flag_id, date_ticks DESC) WHERE flag_id IS NOT NULL;
+            CREATE INDEX IF NOT EXISTS idx_summary_flag_scope_date
+                ON MessageSummary(account_id, folder_name, date_ticks DESC) WHERE flag_id IS NOT NULL;
+            CREATE INDEX IF NOT EXISTS idx_summary_direction_date
+                ON MessageSummary(message_direction, date_ticks DESC);
+            """;
         cmd.ExecuteNonQuery();
         RunMigration(conn, "ALTER TABLE MessageDetail ADD COLUMN calendar_ics TEXT DEFAULT NULL;");
         RunMigration(conn, "ALTER TABLE MessageDetail ADD COLUMN raw_headers TEXT NOT NULL DEFAULT '';");
@@ -96,6 +754,7 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
         // rebuild's schema below. No index: deduplication runs in memory (MessageDeduplicator), so
         // nothing queries this column — an index would only add upsert write cost.
         RunMigration(conn, "ALTER TABLE MessageSummary ADD COLUMN internet_message_id TEXT NOT NULL DEFAULT '';");
+        RecordStage("message additive migrations and flag indexes");
 
         // CalendarEvent table (schema v4). Additive — no existing table touched.
         cmd.CommandText = """
@@ -148,6 +807,7 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
         // target it instead of a reconstructed {collection}/{uid}.ics. Empty for Graph/Google/local/
         // invite rows. Unversioned idempotent ALTER, like calendar_id/calendar_name above.
         RunMigration(conn, "ALTER TABLE CalendarEvent ADD COLUMN resource_url TEXT NOT NULL DEFAULT '';");
+        RecordStage("calendar table, index and additive migrations");
 
         // Folder table (#516). The folder list used to live only in MainViewModel._cachedFolders,
         // filled by GetFoldersAsync after connect — so at launch nothing knew which folders existed,
@@ -239,11 +899,17 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
             );
             """;
         cmd.ExecuteNonQuery();
+        RecordStage("folder, search and attachment schemas");
 
         // Repair messages written by older builds before their local Draft/Scheduled folder was
-        // catalogued. INSERT OR IGNORE is cheap on normal startups and leaves complete folder
-        // metadata imported from Eudora or fetched from a server untouched.
-        cmd.CommandText = """
+        // catalogued. The GROUP BY scans the complete message table (very expensive on a large
+        // Eudora import), so only run it when the newly-created/legacy Folder table is empty.
+        // Current write/import paths maintain Folder themselves.
+        cmd.CommandText = "SELECT EXISTS(SELECT 1 FROM Folder LIMIT 1);";
+        var folderCatalogueAlreadyPopulated = Convert.ToInt64(cmd.ExecuteScalar() ?? 0) != 0;
+        if (!folderCatalogueAlreadyPopulated)
+        {
+            cmd.CommandText = """
             INSERT OR IGNORE INTO Folder
                 (account_id,full_name,display_name,parent_id,kind,exclude_from_all_mail,
                  unread_count,message_count,sort_order,is_container)
@@ -260,7 +926,10 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
             WHERE folder_name<>''
             GROUP BY account_id,folder_name;
             """;
-        cmd.ExecuteNonQuery();
+            cmd.ExecuteNonQuery();
+        }
+        RecordStage("repair folder catalogue from message summaries",
+            folderCatalogueAlreadyPopulated ? "skipped=already-populated" : "performed=true");
 
         // Existing databases need one backfill. Once populated, all write paths maintain
         // the map and subsequent startups only perform the indexed existence check.
@@ -273,10 +942,52 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
                 """;
             cmd.ExecuteNonQuery();
         }
+        RecordStage("check/backfill local FTS key map");
 
         RunMigration(conn, "ALTER TABLE Folder ADD COLUMN is_container INTEGER NOT NULL DEFAULT 0;");
+        RecordStage("final folder additive migration");
 
         RunDataMigrations(conn);
+        RecordStage("versioned data migrations", $"finalUserVersion={GetUserVersion(conn)}");
+
+        // Run after versioned migrations because the v1→v2 conversion rebuilds MessageSummary and
+        // consequently drops every index created against the original table. Every column exposed
+        // as a message-grid sort gets both a global and an exact-folder ordering index.
+        cmd.CommandText = """
+            CREATE INDEX IF NOT EXISTS idx_summary_flag_date
+                ON MessageSummary(flag_id, date_ticks DESC) WHERE flag_id IS NOT NULL;
+            CREATE INDEX IF NOT EXISTS idx_summary_flag_scope_date
+                ON MessageSummary(account_id, folder_name, date_ticks DESC) WHERE flag_id IS NOT NULL;
+            CREATE INDEX IF NOT EXISTS idx_summary_from_date
+                ON MessageSummary(from_disp COLLATE NOCASE, date_ticks DESC);
+            CREATE INDEX IF NOT EXISTS idx_summary_to_date
+                ON MessageSummary(to_addr COLLATE NOCASE, date_ticks DESC);
+            CREATE INDEX IF NOT EXISTS idx_summary_subject_date
+                ON MessageSummary(subject COLLATE NOCASE, date_ticks DESC);
+            CREATE INDEX IF NOT EXISTS idx_summary_read_date
+                ON MessageSummary(is_read, date_ticks DESC);
+            CREATE INDEX IF NOT EXISTS idx_summary_attachments_date
+                ON MessageSummary(has_attachments, date_ticks DESC);
+            CREATE INDEX IF NOT EXISTS idx_summary_direction_date
+                ON MessageSummary(message_direction, date_ticks DESC);
+            CREATE INDEX IF NOT EXISTS idx_summary_account_folder_from_date
+                ON MessageSummary(account_id, folder_name, from_disp COLLATE NOCASE, date_ticks DESC);
+            CREATE INDEX IF NOT EXISTS idx_summary_account_folder_to_date
+                ON MessageSummary(account_id, folder_name, to_addr COLLATE NOCASE, date_ticks DESC);
+            CREATE INDEX IF NOT EXISTS idx_summary_account_folder_subject_date
+                ON MessageSummary(account_id, folder_name, subject COLLATE NOCASE, date_ticks DESC);
+            CREATE INDEX IF NOT EXISTS idx_summary_account_folder_read_date
+                ON MessageSummary(account_id, folder_name, is_read, date_ticks DESC);
+            CREATE INDEX IF NOT EXISTS idx_summary_account_folder_attachments_date
+                ON MessageSummary(account_id, folder_name, has_attachments, date_ticks DESC);
+            CREATE INDEX IF NOT EXISTS idx_summary_account_folder_direction_date
+                ON MessageSummary(account_id, folder_name, message_direction, date_ticks DESC);
+            """;
+        cmd.ExecuteNonQuery();
+        RecordStage("message-grid ordering indexes");
+        PerformanceLogService.Record("SQLite initialization: total",
+            Stopwatch.GetElapsedTime(initializeStarted),
+            $"sizeBytes={initialSize}");
     }
 
     // SQLite's PRAGMA user_version stores a single integer per database. We use it as a
@@ -294,11 +1005,11 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
     //           duplicate-collapse). The Message-ID can't be reconstructed from cached rows, and
     //           the cache repopulates automatically on the next launch's sync. MessageDetail (bodies)
     //           is left intact — same key, still valid.
-    //   (no 5 → 6 data migration: the Graph immutable-id cache rebuild (#366) is account-scoped, so
-    //    it runs at the app layer against Graph accounts only — see ClearCachedMailAsync — not as a
-    //    blanket DB wipe that would also drop IMAP bodies and break IMAP calendar-invite source links.)
-    // Add new migrations as: if (version < 5) { ...; }
-    private const int CurrentSchemaVersion = 5;
+    //   5 → 6   persist message direction. The one-time path backfill recognises Out/Sent (including
+    //           historical Eudora _Out trees) before the user starts filing sent mail elsewhere.
+    //           Future writes carry direction explicitly; this scan must never repeat at startup.
+    // Add new migrations as: if (version < 7) { ...; }
+    private const int CurrentSchemaVersion = 6;
 
     private static void RunDataMigrations(SqliteConnection conn)
     {
@@ -348,12 +1059,14 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
                     is_mailing_list INTEGER NOT NULL DEFAULT 0,
                     flag_id      TEXT    DEFAULT NULL,
                     internet_message_id TEXT NOT NULL DEFAULT '',
+                    message_direction INTEGER NOT NULL DEFAULT 0,
                     PRIMARY KEY (unique_id, account_id, folder_name)
                 );
                 INSERT INTO MessageSummary_v2
                 SELECT CAST(unique_id AS TEXT), account_id, folder_name, from_disp, to_addr,
                        subject, date_ticks, is_read, preview_text, is_replied, is_forwarded,
-                       has_attachments, is_mailing_list, flag_id, internet_message_id
+                       has_attachments, is_mailing_list, flag_id, internet_message_id,
+                       message_direction
                 FROM MessageSummary;
                 DROP TABLE MessageSummary;
                 ALTER TABLE MessageSummary_v2 RENAME TO MessageSummary;
@@ -427,6 +1140,25 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
             clearCmd.ExecuteNonQuery();
         }
 
+        if (version < 6)
+        {
+            using var directionCmd = conn.CreateCommand();
+            directionCmd.CommandText = """
+                UPDATE MessageSummary
+                   SET message_direction = CASE
+                       WHEN instr('/'||lower(replace(folder_name,'\','/'))||'/', '/out/') > 0
+                         OR instr('/'||lower(replace(folder_name,'\','/'))||'/', '/_out/') > 0
+                         OR instr('/'||lower(replace(folder_name,'\','/'))||'/', '/sent/') > 0
+                         OR instr('/'||lower(replace(folder_name,'\','/'))||'/', '/sent items/') > 0
+                         OR instr('/'||lower(replace(folder_name,'\','/'))||'/', '/draft/') > 0
+                         OR instr('/'||lower(replace(folder_name,'\','/'))||'/', '/drafts/') > 0
+                         OR instr('/'||lower(replace(folder_name,'\','/'))||'/', '/scheduled/') > 0
+                       THEN 2 ELSE 1 END
+                 WHERE message_direction=0;
+                """;
+            directionCmd.ExecuteNonQuery();
+        }
+
         SetUserVersion(conn, CurrentSchemaVersion);
     }
 
@@ -462,29 +1194,27 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
         await using var tx = await conn.BeginTransactionAsync();
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = """
-            INSERT INTO MessageSummary(unique_id, account_id, folder_name, from_disp, to_addr, subject, date_ticks, is_read, preview_text, is_replied, is_forwarded, is_mailing_list, flag_id, internet_message_id)
-            VALUES($uid, $aid, $fn, $from, $to, $subj, $dt, $read, $preview, $replied, $forwarded, $ml, $flag_id, $imid)
+            INSERT INTO MessageSummary(unique_id, account_id, folder_name, from_disp, to_addr, subject, date_ticks, is_read, preview_text, is_replied, is_forwarded, is_mailing_list, flag_id, internet_message_id, message_direction)
+            VALUES($uid, $aid, $fn, $from, $to, $subj, $dt, $read, $preview, $replied, $forwarded, $ml, $flag_id, $imid, $direction)
             ON CONFLICT(unique_id, account_id, folder_name) DO UPDATE SET
                 from_disp       = excluded.from_disp,
                 to_addr         = excluded.to_addr,
                 subject         = excluded.subject,
                 date_ticks      = excluded.date_ticks,
                 is_read         = excluded.is_read,
-                is_replied      = excluded.is_replied,
+                is_replied      = CASE WHEN is_replied = 1 THEN 1 ELSE excluded.is_replied END,
                 is_forwarded    = excluded.is_forwarded,
                 is_mailing_list = excluded.is_mailing_list,
                 internet_message_id = CASE WHEN excluded.internet_message_id = '' THEN internet_message_id ELSE excluded.internet_message_id END,
+                message_direction = CASE WHEN excluded.message_direction=0 THEN message_direction ELSE excluded.message_direction END,
                 preview_text    = CASE WHEN excluded.preview_text = '' THEN preview_text ELSE excluded.preview_text END,
                 flag_id         = CASE
-                    WHEN excluded.flag_id IS NULL THEN NULL
-                    WHEN flag_id IS NULL           THEN excluded.flag_id
-                    ELSE                                flag_id
+                    WHEN flag_id IS NULL AND excluded.flag_id IS NOT NULL THEN excluded.flag_id
+                    ELSE flag_id
                     END;
             """;
-            // flag_id reconciliation on DO UPDATE (§9.3):
-            //   server unflagged (excluded.flag_id NULL)  → clear any local flag (external unflag)
-            //   server flagged, no local flag             → apply built-in default flag id
-            //   server flagged, local named flag present  → preserve the user's named flag
+            // Local flags are authoritative. A server \Flagged value can seed the built-in flag,
+            // but an ordinary refresh with no server flag must never erase a named local flag.
         var pUid       = cmd.Parameters.Add("$uid",       SqliteType.Text);
         var pAid       = cmd.Parameters.Add("$aid",       SqliteType.Text);
         var pFn        = cmd.Parameters.Add("$fn",        SqliteType.Text);
@@ -499,6 +1229,7 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
         var pMl        = cmd.Parameters.Add("$ml",        SqliteType.Integer);
         var pFlagId    = cmd.Parameters.Add("$flag_id",   SqliteType.Text);
         var pImid      = cmd.Parameters.Add("$imid",      SqliteType.Text);
+        var pDirection = cmd.Parameters.Add("$direction", SqliteType.Integer);
 
         foreach (var s in summaries)
         {
@@ -518,6 +1249,7 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
                 ? (object)FlagDefinition.BuiltInFlagId.ToString()
                 : DBNull.Value;
             pImid.Value      = s.InternetMessageId ?? string.Empty;
+            pDirection.Value = (int)s.Direction;
             await cmd.ExecuteNonQueryAsync();
         }
         await tx.CommitAsync();
@@ -528,7 +1260,7 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
         await using var conn = await OpenAsync();
         await using var cmd = conn.CreateCommand();
         cmd.CommandText =
-            "SELECT unique_id, account_id, folder_name, from_disp, to_addr, subject, date_ticks, is_read, preview_text, is_replied, is_forwarded, has_attachments, is_mailing_list, flag_id, internet_message_id " +
+            "SELECT unique_id, account_id, folder_name, from_disp, to_addr, subject, date_ticks, is_read, preview_text, is_replied, is_forwarded, has_attachments, is_mailing_list, flag_id, internet_message_id, message_direction " +
             "FROM MessageSummary ORDER BY date_ticks DESC;";
         return await ReadSummariesAsync(cmd);
     }
@@ -538,7 +1270,7 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
         await using var conn = await OpenAsync();
         await using var cmd = conn.CreateCommand();
         cmd.CommandText =
-            "SELECT unique_id, account_id, folder_name, from_disp, to_addr, subject, date_ticks, is_read, preview_text, is_replied, is_forwarded, has_attachments, is_mailing_list, flag_id, internet_message_id " +
+            "SELECT unique_id, account_id, folder_name, from_disp, to_addr, subject, date_ticks, is_read, preview_text, is_replied, is_forwarded, has_attachments, is_mailing_list, flag_id, internet_message_id, message_direction " +
             "FROM MessageSummary WHERE account_id=$aid ORDER BY date_ticks DESC;";
         cmd.Parameters.AddWithValue("$aid", accountId.ToString());
         return await ReadSummariesAsync(cmd);
@@ -549,7 +1281,7 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
         await using var conn = await OpenAsync();
         await using var cmd = conn.CreateCommand();
         cmd.CommandText =
-            "SELECT unique_id, account_id, folder_name, from_disp, to_addr, subject, date_ticks, is_read, preview_text, is_replied, is_forwarded, has_attachments, is_mailing_list, flag_id, internet_message_id " +
+            "SELECT unique_id, account_id, folder_name, from_disp, to_addr, subject, date_ticks, is_read, preview_text, is_replied, is_forwarded, has_attachments, is_mailing_list, flag_id, internet_message_id, message_direction " +
             "FROM MessageSummary WHERE account_id=$aid AND folder_name=$fn ORDER BY date_ticks DESC" +
             (limit.HasValue ? " LIMIT $limit;" : ";");
         cmd.Parameters.AddWithValue("$aid", accountId.ToString());
@@ -702,6 +1434,388 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
         await tx.CommitAsync();
     }
 
+    public async Task RenameFolderPathAsync(Guid accountId, string oldPath, string newPath)
+    {
+        using var timing = PerformanceLogService.Measure("Folder move: local database",
+            $"account={accountId}; from={oldPath}; to={newPath}");
+        if (string.IsNullOrWhiteSpace(oldPath) || string.IsNullOrWhiteSpace(newPath))
+            throw new ArgumentException("Folder paths cannot be empty.");
+        if (string.Equals(oldPath, newPath, StringComparison.OrdinalIgnoreCase)) return;
+
+        await using var conn = await OpenAsync();
+        await using var tx = await conn.BeginTransactionAsync();
+
+        await using (var exists = conn.CreateCommand())
+        {
+            exists.Transaction = (Microsoft.Data.Sqlite.SqliteTransaction)tx;
+            exists.CommandText = "SELECT 1 FROM Folder WHERE account_id=$aid AND full_name=$new LIMIT 1;";
+            exists.Parameters.AddWithValue("$aid", accountId.ToString());
+            exists.Parameters.AddWithValue("$new", newPath);
+            if (await exists.ExecuteScalarAsync() != null)
+                throw new InvalidOperationException($"A folder named '{newPath}' already exists.");
+        }
+
+        var paths = new List<(string OldPath, string NewPath, string NewParent)>();
+        await using (var folders = conn.CreateCommand())
+        {
+            folders.Transaction = (Microsoft.Data.Sqlite.SqliteTransaction)tx;
+            folders.CommandText = """
+                SELECT full_name, parent_id FROM Folder
+                WHERE account_id=$aid
+                  AND (full_name=$old OR substr(full_name,1,length($old)+1)=$prefix)
+                ORDER BY length(full_name);
+                """;
+            folders.Parameters.AddWithValue("$aid", accountId.ToString());
+            folders.Parameters.AddWithValue("$old", oldPath);
+            folders.Parameters.AddWithValue("$prefix", oldPath + "/");
+            await using var reader = await folders.ExecuteReaderAsync();
+            var rootParent = newPath.Contains('/') ? newPath[..newPath.LastIndexOf('/')] : string.Empty;
+            while (await reader.ReadAsync())
+            {
+                var current = reader.GetString(0);
+                var parent = reader.IsDBNull(1) ? string.Empty : reader.GetString(1);
+                var replacement = newPath + current[oldPath.Length..];
+                var replacementParent = current == oldPath ? rootParent
+                    : parent.StartsWith(oldPath + "/", StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(parent, oldPath, StringComparison.OrdinalIgnoreCase)
+                        ? newPath + parent[oldPath.Length..]
+                        : parent;
+                paths.Add((current, replacement, replacementParent));
+            }
+        }
+        if (paths.Count == 0) throw new InvalidOperationException($"Folder '{oldPath}' was not found.");
+
+        async Task ExecutePathUpdate(string sql, (string OldPath, string NewPath, string NewParent) path)
+        {
+            await using var cmd = conn.CreateCommand();
+            cmd.Transaction = (Microsoft.Data.Sqlite.SqliteTransaction)tx;
+            cmd.CommandText = sql;
+            cmd.Parameters.AddWithValue("$aid", accountId.ToString());
+            cmd.Parameters.AddWithValue("$old", path.OldPath);
+            cmd.Parameters.AddWithValue("$new", path.NewPath);
+            cmd.Parameters.AddWithValue("$parent", path.NewParent);
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        // Every predicate below is an equality lookup backed by an existing index. In particular,
+        // update FTS rows through LocalMessageFtsKey.rowid; filtering the FTS virtual table by its
+        // UNINDEXED account/folder columns scanned the complete message index on every move.
+        foreach (var path in paths)
+        {
+            await ExecutePathUpdate("""
+                UPDATE MessageDetail SET folder_name=$new WHERE rowid IN (
+                    SELECT d.rowid FROM MessageSummary s JOIN MessageDetail d
+                      ON d.unique_id=s.unique_id AND d.account_id=s.account_id AND d.folder_name=s.folder_name
+                    WHERE s.account_id=$aid AND s.folder_name=$old);
+                """, path);
+            await ExecutePathUpdate("""
+                UPDATE LocalMessageFts SET folder_name=$new WHERE rowid IN (
+                    SELECT fts_rowid FROM LocalMessageFtsKey
+                    WHERE account_id=$aid AND folder_name=$old);
+                """, path);
+            await ExecutePathUpdate(
+                "UPDATE LocalMessageFtsKey SET folder_name=$new WHERE account_id=$aid AND folder_name=$old;", path);
+            await ExecutePathUpdate(
+                "UPDATE AttachmentContent SET folder_name=$new WHERE account_id=$aid AND folder_name=$old;", path);
+            await ExecutePathUpdate(
+                "UPDATE CalendarEvent SET source_folder=$new WHERE account_id=$aid AND source_folder=$old;", path);
+            await ExecutePathUpdate(
+                "UPDATE MessageSummary SET folder_name=$new WHERE account_id=$aid AND folder_name=$old;", path);
+            await ExecutePathUpdate(
+                "UPDATE Folder SET full_name=$new,parent_id=$parent WHERE account_id=$aid AND full_name=$old;", path);
+        }
+        await using (var displayName = conn.CreateCommand())
+        {
+            displayName.Transaction = (Microsoft.Data.Sqlite.SqliteTransaction)tx;
+            displayName.CommandText = "UPDATE Folder SET display_name=$display WHERE account_id=$aid AND full_name=$path;";
+            displayName.Parameters.AddWithValue("$display", newPath.Split('/')[^1]);
+            displayName.Parameters.AddWithValue("$aid", accountId.ToString());
+            displayName.Parameters.AddWithValue("$path", newPath);
+            await displayName.ExecuteNonQueryAsync();
+        }
+        await using (var counts = conn.CreateCommand())
+        {
+            counts.Transaction = (Microsoft.Data.Sqlite.SqliteTransaction)tx;
+            counts.CommandText = """
+                UPDATE Folder SET
+                    message_count=(SELECT COUNT(*) FROM MessageSummary s
+                                   WHERE s.account_id=Folder.account_id AND s.folder_name=Folder.full_name),
+                    unread_count=(SELECT COUNT(*) FROM MessageSummary s
+                                  WHERE s.account_id=Folder.account_id AND s.folder_name=Folder.full_name AND s.is_read=0)
+                WHERE account_id=$aid AND (full_name=$path OR substr(full_name,1,length($path)+1)=$prefix);
+                """;
+            counts.Parameters.AddWithValue("$aid", accountId.ToString());
+            counts.Parameters.AddWithValue("$path", newPath);
+            counts.Parameters.AddWithValue("$prefix", newPath + "/");
+            await counts.ExecuteNonQueryAsync();
+        }
+        await tx.CommitAsync();
+    }
+
+    /// <summary>
+    /// Physically merges the obsolete local POP3 folder name <c>Inbox</c> into Eudora's canonical
+    /// <c>In</c>. The caller supplies local-account ids deliberately: an IMAP account's INBOX is a
+    /// server-owned name and must never be rewritten. Idempotent and safe to run at every startup;
+    /// after the one-time conversion each account costs only indexed existence probes.
+    /// </summary>
+    public int NormalizeLocalInboxFolders(IEnumerable<Guid> localAccountIds)
+    {
+        var accounts = localAccountIds.Distinct().ToList();
+        if (accounts.Count == 0) return 0;
+
+        const string oldPath = "Inbox";
+        const string newPath = "In";
+        using var timing = PerformanceLogService.Measure("SQLite migration: normalize local Inbox to In",
+            $"accounts={accounts.Count}");
+        using var connection = Open();
+        using var transaction = connection.BeginTransaction();
+        var hasCanonicalBindings = TableExists(connection, transaction, "LocalFolderBinding_shadow");
+        var migratedMessages = 0;
+
+        foreach (var accountId in accounts)
+        {
+            using var exists = connection.CreateCommand();
+            exists.Transaction = transaction;
+            exists.CommandText = """
+                SELECT EXISTS(
+                    SELECT 1 FROM Folder WHERE account_id=$aid AND full_name=$old
+                    UNION ALL SELECT 1 FROM MessageSummary WHERE account_id=$aid AND folder_name=$old
+                    LIMIT 1);
+                """;
+            exists.Parameters.AddWithValue("$aid", accountId.ToString("D"));
+            exists.Parameters.AddWithValue("$old", oldPath);
+            if (Convert.ToInt32(exists.ExecuteScalar() ?? 0) == 0)
+            {
+                // A previous build may already have moved all mail but left only the old shadow
+                // binding. Repair that cheap metadata residue below if the table exists.
+                if (hasCanonicalBindings)
+                    NormalizeInboxBinding(connection, transaction, accountId, oldPath, newPath);
+                continue;
+            }
+
+            using (var count = connection.CreateCommand())
+            {
+                count.Transaction = transaction;
+                count.CommandText = "SELECT COUNT(*) FROM MessageSummary WHERE account_id=$aid AND folder_name=$old;";
+                count.Parameters.AddWithValue("$aid", accountId.ToString("D"));
+                count.Parameters.AddWithValue("$old", oldPath);
+                migratedMessages += Convert.ToInt32(count.ExecuteScalar() ?? 0);
+            }
+
+            using var command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.Parameters.AddWithValue("$aid", accountId.ToString("D"));
+            command.Parameters.AddWithValue("$old", oldPath);
+            command.Parameters.AddWithValue("$new", newPath);
+            command.Parameters.AddWithValue("$inboxKind", (int)SpecialFolderKind.Inbox);
+            command.CommandText = """
+                -- Preserve an existing In row when both aliases are present, otherwise clone the
+                -- Inbox catalogue entry before moving keyed message rows.
+                INSERT OR IGNORE INTO Folder(account_id,full_name,display_name,parent_id,kind,
+                    exclude_from_all_mail,unread_count,message_count,sort_order,is_container)
+                SELECT account_id,$new,$new,parent_id,$inboxKind,exclude_from_all_mail,
+                       unread_count,message_count,sort_order,is_container
+                  FROM Folder WHERE account_id=$aid AND full_name=$old;
+
+                -- Remove only source index rows whose message already exists at the destination.
+                -- Each ordinary key table is handled before its parent virtual-FTS row is changed.
+                DELETE FROM LocalMessageFts WHERE rowid IN (
+                    SELECT source.fts_rowid FROM LocalMessageFtsKey source
+                     WHERE source.account_id=$aid AND source.folder_name=$old AND EXISTS(
+                           SELECT 1 FROM LocalMessageFtsKey target
+                            WHERE target.account_id=$aid AND target.folder_name=$new
+                              AND target.unique_id=source.unique_id));
+                DELETE FROM LocalMessageFtsKey
+                 WHERE account_id=$aid AND folder_name=$old AND EXISTS(
+                       SELECT 1 FROM LocalMessageFtsKey target
+                        WHERE target.account_id=$aid AND target.folder_name=$new
+                          AND target.unique_id=LocalMessageFtsKey.unique_id);
+
+                DELETE FROM AttachmentContentFts WHERE rowid IN (
+                    SELECT source.fts_rowid FROM AttachmentContent source
+                     WHERE source.account_id=$aid AND source.folder_name=$old
+                       AND source.fts_rowid IS NOT NULL AND EXISTS(
+                           SELECT 1 FROM AttachmentContent target
+                            WHERE target.account_id=$aid AND target.folder_name=$new
+                              AND target.unique_id=source.unique_id
+                              AND target.attachment_name=source.attachment_name
+                              AND target.entry_path=source.entry_path));
+                DELETE FROM AttachmentContent
+                 WHERE account_id=$aid AND folder_name=$old AND EXISTS(
+                       SELECT 1 FROM AttachmentContent target
+                        WHERE target.account_id=$aid AND target.folder_name=$new
+                          AND target.unique_id=AttachmentContent.unique_id
+                          AND target.attachment_name=AttachmentContent.attachment_name
+                          AND target.entry_path=AttachmentContent.entry_path);
+
+                DELETE FROM MessageDetail
+                 WHERE account_id=$aid AND folder_name=$old AND EXISTS(
+                       SELECT 1 FROM MessageDetail target
+                        WHERE target.account_id=$aid AND target.folder_name=$new
+                          AND target.unique_id=MessageDetail.unique_id);
+                DELETE FROM MessageSummary
+                 WHERE account_id=$aid AND folder_name=$old AND EXISTS(
+                       SELECT 1 FROM MessageSummary target
+                        WHERE target.account_id=$aid AND target.folder_name=$new
+                          AND target.unique_id=MessageSummary.unique_id);
+
+                UPDATE MessageDetail SET folder_name=$new
+                 WHERE account_id=$aid AND folder_name=$old;
+                UPDATE LocalMessageFts SET folder_name=$new WHERE rowid IN (
+                    SELECT fts_rowid FROM LocalMessageFtsKey
+                     WHERE account_id=$aid AND folder_name=$old);
+                UPDATE LocalMessageFtsKey SET folder_name=$new
+                 WHERE account_id=$aid AND folder_name=$old;
+                UPDATE AttachmentContent SET folder_name=$new
+                 WHERE account_id=$aid AND folder_name=$old;
+                UPDATE CalendarEvent SET source_folder=$new
+                 WHERE account_id=$aid AND source_folder=$old;
+                UPDATE MessageSummary SET folder_name=$new
+                 WHERE account_id=$aid AND folder_name=$old;
+
+                DELETE FROM Folder WHERE account_id=$aid AND full_name=$old;
+                UPDATE Folder SET display_name=$new,kind=$inboxKind,
+                    message_count=(SELECT COUNT(*) FROM MessageSummary
+                                    WHERE account_id=$aid AND folder_name=$new),
+                    unread_count=(SELECT COUNT(*) FROM MessageSummary
+                                   WHERE account_id=$aid AND folder_name=$new AND is_read=0)
+                 WHERE account_id=$aid AND full_name=$new;
+                """;
+            command.ExecuteNonQuery();
+
+            if (hasCanonicalBindings)
+                NormalizeInboxBinding(connection, transaction, accountId, oldPath, newPath);
+        }
+
+        transaction.Commit();
+        if (migratedMessages > 0)
+            LogService.Log($"Local Inbox normalization: migrated {migratedMessages:N0} message rows from Inbox to In.");
+        return migratedMessages;
+    }
+
+    private static bool TableExists(SqliteConnection connection, SqliteTransaction transaction, string name)
+    {
+        using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=$name);";
+        command.Parameters.AddWithValue("$name", name);
+        return Convert.ToInt32(command.ExecuteScalar() ?? 0) != 0;
+    }
+
+    private static void NormalizeInboxBinding(SqliteConnection connection, SqliteTransaction transaction,
+        Guid accountId, string oldPath, string newPath)
+    {
+        using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            INSERT OR IGNORE INTO LocalFolderBinding_shadow(account_id,legacy_full_name,folder_id)
+            SELECT account_id,$new,folder_id FROM LocalFolderBinding_shadow
+             WHERE account_id=$aid AND legacy_full_name=$old;
+            DELETE FROM LocalFolderBinding_shadow
+             WHERE account_id=$aid AND legacy_full_name=$old;
+            """;
+        command.Parameters.AddWithValue("$aid", accountId.ToString("D"));
+        command.Parameters.AddWithValue("$old", oldPath);
+        command.Parameters.AddWithValue("$new", newPath);
+        command.ExecuteNonQuery();
+    }
+
+    public async Task MergeFolderPathAsync(Guid accountId, string oldPath, string existingPath,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(oldPath) || string.IsNullOrWhiteSpace(existingPath))
+            throw new ArgumentException("Folder paths cannot be empty.");
+        if (string.Equals(oldPath, existingPath, StringComparison.OrdinalIgnoreCase)) return;
+
+        await using var conn = await OpenAsync();
+        await using var tx = (Microsoft.Data.Sqlite.SqliteTransaction)await conn.BeginTransactionAsync(ct);
+        var paths = new List<(string Old, string New)>();
+        await using (var find = conn.CreateCommand())
+        {
+            find.Transaction = tx;
+            find.CommandText = """
+                SELECT full_name FROM Folder
+                WHERE account_id=$aid AND (full_name=$old OR (full_name >= $prefix AND full_name < $end))
+                ORDER BY length(full_name) DESC;
+                """;
+            find.Parameters.AddWithValue("$aid", accountId.ToString());
+            find.Parameters.AddWithValue("$old", oldPath);
+            find.Parameters.AddWithValue("$prefix", oldPath + "/");
+            find.Parameters.AddWithValue("$end", oldPath + "0");
+            await using var reader = await find.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+            {
+                var current = reader.GetString(0);
+                paths.Add((current, existingPath + current[oldPath.Length..]));
+            }
+        }
+        if (paths.Count == 0) throw new InvalidOperationException($"Folder '{oldPath}' was not found.");
+
+        foreach (var path in paths)
+        {
+            await using var command = conn.CreateCommand();
+            command.Transaction = tx;
+            command.Parameters.AddWithValue("$aid", accountId.ToString());
+            command.Parameters.AddWithValue("$old", path.Old);
+            command.Parameters.AddWithValue("$new", path.New);
+            command.Parameters.AddWithValue("$parent", path.New.Contains('/')
+                ? path.New[..path.New.LastIndexOf('/')] : string.Empty);
+            command.CommandText = """
+                -- If the same physical message is already present in the destination, retain that
+                -- copy and discard only the duplicate source rows before changing folder keys.
+                DELETE FROM LocalMessageFts WHERE rowid IN (
+                    SELECT k.fts_rowid FROM LocalMessageFtsKey k
+                    WHERE k.account_id=$aid AND k.folder_name=$old AND EXISTS (
+                        SELECT 1 FROM MessageSummary d WHERE d.account_id=$aid
+                        AND d.folder_name=$new AND d.unique_id=k.unique_id));
+                DELETE FROM LocalMessageFtsKey WHERE account_id=$aid AND folder_name=$old AND EXISTS (
+                    SELECT 1 FROM MessageSummary d WHERE d.account_id=$aid
+                    AND d.folder_name=$new AND d.unique_id=LocalMessageFtsKey.unique_id);
+                DELETE FROM MessageDetail WHERE account_id=$aid AND folder_name=$old AND EXISTS (
+                    SELECT 1 FROM MessageSummary d WHERE d.account_id=$aid
+                    AND d.folder_name=$new AND d.unique_id=MessageDetail.unique_id);
+                DELETE FROM AttachmentContent WHERE account_id=$aid AND folder_name=$old AND EXISTS (
+                    SELECT 1 FROM AttachmentContent d WHERE d.account_id=$aid AND d.folder_name=$new
+                    AND d.unique_id=AttachmentContent.unique_id
+                    AND d.attachment_name=AttachmentContent.attachment_name
+                    AND d.entry_path=AttachmentContent.entry_path);
+                DELETE FROM MessageSummary WHERE account_id=$aid AND folder_name=$old AND EXISTS (
+                    SELECT 1 FROM MessageSummary d WHERE d.account_id=$aid
+                    AND d.folder_name=$new AND d.unique_id=MessageSummary.unique_id);
+
+                UPDATE MessageDetail SET folder_name=$new WHERE account_id=$aid AND folder_name=$old;
+                UPDATE LocalMessageFts SET folder_name=$new WHERE rowid IN (
+                    SELECT fts_rowid FROM LocalMessageFtsKey WHERE account_id=$aid AND folder_name=$old);
+                UPDATE LocalMessageFtsKey SET folder_name=$new WHERE account_id=$aid AND folder_name=$old;
+                UPDATE AttachmentContent SET folder_name=$new WHERE account_id=$aid AND folder_name=$old;
+                UPDATE CalendarEvent SET source_folder=$new WHERE account_id=$aid AND source_folder=$old;
+                UPDATE MessageSummary SET folder_name=$new WHERE account_id=$aid AND folder_name=$old;
+
+                DELETE FROM Folder WHERE account_id=$aid AND full_name=$old
+                    AND EXISTS (SELECT 1 FROM Folder WHERE account_id=$aid AND full_name=$new);
+                UPDATE Folder SET full_name=$new,parent_id=NULLIF($parent,'')
+                    WHERE account_id=$aid AND full_name=$old;
+                """;
+            await command.ExecuteNonQueryAsync(ct);
+        }
+
+        await using (var counts = conn.CreateCommand())
+        {
+            counts.Transaction = tx;
+            counts.Parameters.AddWithValue("$aid", accountId.ToString());
+            counts.CommandText = """
+                UPDATE Folder SET
+                    message_count=(SELECT count(*) FROM MessageSummary s
+                                   WHERE s.account_id=Folder.account_id AND s.folder_name=Folder.full_name),
+                    unread_count=(SELECT count(*) FROM MessageSummary s
+                                  WHERE s.account_id=Folder.account_id AND s.folder_name=Folder.full_name AND s.is_read=0)
+                WHERE account_id=$aid;
+                """;
+            await counts.ExecuteNonQueryAsync(ct);
+        }
+        await tx.CommitAsync(ct);
+    }
+
     public async Task<Dictionary<Guid, List<MailFolderModel>>> LoadFoldersAsync()
     {
         var result = new Dictionary<Guid, List<MailFolderModel>>();
@@ -737,6 +1851,176 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
             });
         }
         return result;
+    }
+
+    public async Task EnsureLocalSystemFoldersAsync(IReadOnlyCollection<AccountModel> accounts)
+    {
+        var localAccounts = accounts
+            .Where(account => account.BackendKind is BackendKind.Pop3Smtp or BackendKind.LocalArchive)
+            .ToList();
+        if (localAccounts.Count == 0) return;
+
+        await using var connection = await OpenAsync();
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync();
+        await using (var schema = connection.CreateCommand())
+        {
+            schema.Transaction = transaction;
+            schema.CommandText = """
+                CREATE TABLE IF NOT EXISTS LocalFolderNode_shadow (
+                    folder_id TEXT PRIMARY KEY, root_id TEXT NOT NULL, parent_folder_id TEXT NULL,
+                    name TEXT NOT NULL, canonical_path TEXT NOT NULL, kind INTEGER NOT NULL DEFAULT 0,
+                    is_container INTEGER NOT NULL DEFAULT 0, UNIQUE(root_id,canonical_path));
+                CREATE TABLE IF NOT EXISTS LocalFolderBinding_shadow (
+                    account_id TEXT NOT NULL, legacy_full_name TEXT NOT NULL, folder_id TEXT NOT NULL,
+                    PRIMARY KEY(account_id,legacy_full_name),
+                    FOREIGN KEY(folder_id) REFERENCES LocalFolderNode_shadow(folder_id));
+                CREATE INDEX IF NOT EXISTS idx_local_folder_shadow_parent
+                    ON LocalFolderNode_shadow(root_id,parent_folder_id,name);
+                CREATE INDEX IF NOT EXISTS idx_local_binding_shadow_folder
+                    ON LocalFolderBinding_shadow(folder_id);
+                """;
+            await schema.ExecuteNonQueryAsync();
+        }
+
+        foreach (var rootGroup in localAccounts.GroupBy(account => account.FolderTreeRootId ?? account.Id))
+        {
+            var rootId = rootGroup.Key;
+            var rootName = rootGroup.Select(account => account.FolderTreeRootName)
+                .FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))
+                ?? rootGroup.First().AccountLabel;
+            var rootNodeId = await FindOrCreateRootAsync(rootId, rootName);
+
+            foreach (var account in rootGroup)
+            {
+                var definitions = new List<(SpecialFolderKind Kind, string Name)>
+                {
+                    (SpecialFolderKind.Drafts, "Draft"),
+                    (SpecialFolderKind.Scheduled, "Scheduled"),
+                    (SpecialFolderKind.Trash, "Trash"),
+                    (SpecialFolderKind.Junk, "Junk"),
+                };
+                if (account.BackendKind == BackendKind.Pop3Smtp)
+                {
+                    definitions.Insert(0, (SpecialFolderKind.Inbox, "In"));
+                    definitions.Insert(3, (SpecialFolderKind.Sent, "Sent"));
+                }
+
+                foreach (var definition in definitions)
+                {
+                    var physicalPath = await FindPhysicalPathAsync(account.Id, definition.Kind)
+                        ?? definition.Name;
+                    var excluded = definition.Kind is SpecialFolderKind.Drafts or SpecialFolderKind.Scheduled;
+
+                    await using (var folder = connection.CreateCommand())
+                    {
+                        folder.Transaction = transaction;
+                        folder.CommandText = """
+                            INSERT INTO Folder(account_id,full_name,display_name,parent_id,kind,
+                                exclude_from_all_mail,unread_count,message_count,sort_order,is_container)
+                            VALUES($account,$path,$name,NULL,$kind,$exclude,
+                                (SELECT count(*) FROM MessageSummary WHERE account_id=$account AND folder_name=$path AND is_read=0),
+                                (SELECT count(*) FROM MessageSummary WHERE account_id=$account AND folder_name=$path),0,0)
+                            ON CONFLICT(account_id,full_name) DO UPDATE SET
+                                kind=excluded.kind,exclude_from_all_mail=excluded.exclude_from_all_mail;
+                            """;
+                        folder.Parameters.AddWithValue("$account", account.Id.ToString("D"));
+                        folder.Parameters.AddWithValue("$path", physicalPath);
+                        folder.Parameters.AddWithValue("$name", definition.Name);
+                        folder.Parameters.AddWithValue("$kind", (int)definition.Kind);
+                        folder.Parameters.AddWithValue("$exclude", excluded ? 1 : 0);
+                        await folder.ExecuteNonQueryAsync();
+                    }
+
+                    var canonicalId = await FindOrCreateSystemNodeAsync(
+                        rootId, rootNodeId, definition.Kind, definition.Name);
+                    await using var binding = connection.CreateCommand();
+                    binding.Transaction = transaction;
+                    binding.CommandText = """
+                        INSERT INTO LocalFolderBinding_shadow(account_id,legacy_full_name,folder_id)
+                        VALUES($account,$path,$folder)
+                        ON CONFLICT(account_id,legacy_full_name) DO UPDATE SET folder_id=excluded.folder_id;
+                        """;
+                    binding.Parameters.AddWithValue("$account", account.Id.ToString("D"));
+                    binding.Parameters.AddWithValue("$path", physicalPath);
+                    binding.Parameters.AddWithValue("$folder", canonicalId.ToString("D"));
+                    await binding.ExecuteNonQueryAsync();
+                }
+            }
+        }
+
+        await transaction.CommitAsync();
+
+        async Task<Guid> FindOrCreateRootAsync(Guid rootId, string name)
+        {
+            await using var lookup = connection.CreateCommand();
+            lookup.Transaction = transaction;
+            lookup.CommandText = "SELECT folder_id FROM LocalFolderNode_shadow WHERE root_id=$root AND canonical_path='' LIMIT 1;";
+            lookup.Parameters.AddWithValue("$root", rootId.ToString("D"));
+            if (await lookup.ExecuteScalarAsync() is string existing) return Guid.Parse(existing);
+
+            var id = Guid.NewGuid();
+            await using var insert = connection.CreateCommand();
+            insert.Transaction = transaction;
+            insert.CommandText = """
+                INSERT INTO LocalFolderNode_shadow(folder_id,root_id,parent_folder_id,name,canonical_path,kind,is_container)
+                VALUES($id,$root,NULL,$name,'',0,1);
+                """;
+            insert.Parameters.AddWithValue("$id", id.ToString("D"));
+            insert.Parameters.AddWithValue("$root", rootId.ToString("D"));
+            insert.Parameters.AddWithValue("$name", name);
+            await insert.ExecuteNonQueryAsync();
+            return id;
+        }
+
+        async Task<string?> FindPhysicalPathAsync(Guid accountId, SpecialFolderKind kind)
+        {
+            await using var lookup = connection.CreateCommand();
+            lookup.Transaction = transaction;
+            lookup.CommandText = "SELECT full_name FROM Folder WHERE account_id=$account AND kind=$kind ORDER BY length(full_name),full_name LIMIT 1;";
+            lookup.Parameters.AddWithValue("$account", accountId.ToString("D"));
+            lookup.Parameters.AddWithValue("$kind", (int)kind);
+            return await lookup.ExecuteScalarAsync() as string;
+        }
+
+        async Task<Guid> FindOrCreateSystemNodeAsync(Guid rootId, Guid parentId,
+            SpecialFolderKind kind, string name)
+        {
+            await using var lookup = connection.CreateCommand();
+            lookup.Transaction = transaction;
+            lookup.CommandText = """
+                SELECT folder_id FROM LocalFolderNode_shadow
+                 WHERE root_id=$root AND (kind=$kind OR canonical_path=$name COLLATE NOCASE)
+                 ORDER BY CASE WHEN kind=$kind THEN 0 ELSE 1 END,length(canonical_path) LIMIT 1;
+                """;
+            lookup.Parameters.AddWithValue("$root", rootId.ToString("D"));
+            lookup.Parameters.AddWithValue("$kind", (int)kind);
+            lookup.Parameters.AddWithValue("$name", name);
+            if (await lookup.ExecuteScalarAsync() is string existing)
+            {
+                await using var repair = connection.CreateCommand();
+                repair.Transaction = transaction;
+                repair.CommandText = "UPDATE LocalFolderNode_shadow SET kind=$kind WHERE folder_id=$id;";
+                repair.Parameters.AddWithValue("$kind", (int)kind);
+                repair.Parameters.AddWithValue("$id", existing);
+                await repair.ExecuteNonQueryAsync();
+                return Guid.Parse(existing);
+            }
+
+            var id = Guid.NewGuid();
+            await using var insert = connection.CreateCommand();
+            insert.Transaction = transaction;
+            insert.CommandText = """
+                INSERT INTO LocalFolderNode_shadow(folder_id,root_id,parent_folder_id,name,canonical_path,kind,is_container)
+                VALUES($id,$root,$parent,$name,$name,$kind,0);
+                """;
+            insert.Parameters.AddWithValue("$id", id.ToString("D"));
+            insert.Parameters.AddWithValue("$root", rootId.ToString("D"));
+            insert.Parameters.AddWithValue("$parent", parentId.ToString("D"));
+            insert.Parameters.AddWithValue("$name", name);
+            insert.Parameters.AddWithValue("$kind", (int)kind);
+            await insert.ExecuteNonQueryAsync();
+            return id;
+        }
     }
 
     public async Task PurgeFoldersForUnknownAccountsAsync(IReadOnlyCollection<Guid> knownAccountIds)
@@ -811,6 +2095,26 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
 
     public Task UpdateIsReadAsync(Guid accountId, string folderName, string messageId, bool isRead) =>
         UpdateIsReadBatchAsync([(accountId, folderName, messageId)], isRead);
+
+    public async Task UpdateIsRepliedAsync(Guid accountId, string folderName, string messageId,
+        string? internetMessageId = null)
+    {
+        await using var conn = await OpenAsync();
+        await using var cmd = conn.CreateCommand();
+        // The folder path can change while a reply is being composed. The exact identity handles
+        // messages without an RFC id; that RFC id also finds a copy moved to another folder.
+        cmd.CommandText = """
+            UPDATE MessageSummary SET is_replied=1
+            WHERE account_id=$aid AND
+                  ((folder_name=$fn AND unique_id=$uid) OR
+                   ($imid<>'' AND internet_message_id=$imid));
+            """;
+        cmd.Parameters.AddWithValue("$aid", accountId.ToString());
+        cmd.Parameters.AddWithValue("$fn", folderName);
+        cmd.Parameters.AddWithValue("$uid", messageId);
+        cmd.Parameters.AddWithValue("$imid", internetMessageId ?? string.Empty);
+        await cmd.ExecuteNonQueryAsync();
+    }
 
     public async Task UpdateIsReadBatchAsync(IEnumerable<(Guid AccountId, string FolderName, string MessageId)> items, bool isRead)
     {
@@ -988,7 +2292,7 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
         cmd.CommandText = """
             SELECT d.to_addr, d.cc, d.reply_to, d.plain_body, d.html_body,
                    s.from_disp, s.subject, s.date_ticks, s.is_read, d.attachments_json, d.calendar_ics, d.raw_headers,
-                   d.draft_compose_mode, d.draft_spell_language
+                   d.draft_compose_mode, d.draft_spell_language, s.message_direction
             FROM MessageDetail d
             LEFT JOIN MessageSummary s USING (unique_id, account_id, folder_name)
             WHERE d.unique_id=$uid AND d.account_id=$aid AND d.folder_name=$fn;
@@ -1049,6 +2353,7 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
             RawHeaders    = r.IsDBNull(11) ? string.Empty : r.GetString(11),
             DraftComposeMode = storedComposeMode,
             DraftSpellLanguage = r.IsDBNull(13) ? string.Empty : r.GetString(13),
+            Direction      = r.IsDBNull(14) ? MessageDirection.Unknown : (MessageDirection)r.GetInt64(14),
             CalendarInvite = string.IsNullOrWhiteSpace(calendarIcs) ? null : IcsModel.Parse(calendarIcs),
         };
     }
@@ -1152,6 +2457,7 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
                 IsMailingList  = r.GetInt64(12) != 0,
                 FlagId         = r.IsDBNull(13) ? null : r.GetString(13),
                 InternetMessageId = r.IsDBNull(14) ? string.Empty : r.GetString(14),
+                Direction     = r.IsDBNull(15) ? MessageDirection.Unknown : (MessageDirection)r.GetInt64(15),
             });
         }
         return list;

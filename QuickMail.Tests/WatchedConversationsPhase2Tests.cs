@@ -473,13 +473,14 @@ public class WatchedConversationsPhase2Tests
     }
 
     private static (MainViewModel Vm, StubWatchService Watch, RecordingNotificationService Toasts, AccountModel Account)
-        MakeNotifyVm(bool notifyNewMail = true, bool notifyWatched = true)
+        MakeNotifyVm(bool notifyNewMail = true, bool notifyWatched = true, bool notifyTray = true)
     {
         var watch  = new StubWatchService();
         var toasts = new RecordingNotificationService();
         var config = new StubConfigService();
         var cfg = config.Load();
         cfg.NotifyOnNewMail             = notifyNewMail;
+        cfg.NotifyTrayIconOnNewMail     = notifyTray;
         cfg.NotifyOnWatchedConversation = notifyWatched;
         config.Save(cfg);
 
@@ -530,6 +531,43 @@ public class WatchedConversationsPhase2Tests
         Assert.Equal(["Re: Budget Review"], toasts.Toasts[0].Subjects);
         Assert.Equal("new", toasts.Toasts[1].Kind);
         Assert.Equal(["Something unrelated"], toasts.Toasts[1].Subjects);
+    }
+
+    [Fact]
+    public void Pop3MailDownloadedNow_NotifiesEvenWhenItsHeaderDatePredatesStartup()
+    {
+        var (vm, _, toasts, account) = MakeNotifyVm();
+        var incoming = new[]
+        {
+            new MailMessageSummary
+            {
+                MessageId = "pop3-1", AccountId = AccountA, FolderName = "In",
+                From = "sender@example.com", Subject = "Delayed delivery",
+                Date = DateTimeOffset.Now.AddDays(-1), IsRead = false,
+            },
+        };
+        var trayCount = 0;
+        vm.NewMailArrived += (_, count) => trayCount += count;
+
+        vm.MaybeNotifyNewMail(account, incoming, receivedNow: true);
+
+        Assert.Equal(1, trayCount);
+        var toast = Assert.Single(toasts.Toasts);
+        Assert.Equal("new", toast.Kind);
+        Assert.Equal(["Delayed delivery"], toast.Subjects);
+    }
+
+    [Fact]
+    public void TrayIndicator_CanBeDisabledWithoutDisablingTheWindowsBanner()
+    {
+        var (vm, _, toasts, account) = MakeNotifyVm(notifyNewMail: true, notifyTray: false);
+        var trayCount = 0;
+        vm.NewMailArrived += (_, count) => trayCount += count;
+
+        vm.MaybeNotifyNewMail(account, [Msg("tray-off", "Quiet tray")], receivedNow: true);
+
+        Assert.Equal(0, trayCount);
+        Assert.Equal("new", Assert.Single(toasts.Toasts).Kind);
     }
 
     [Fact]

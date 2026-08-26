@@ -31,18 +31,21 @@ public partial class RulesManagerWindow : Window
     private readonly IEnumerable<AccountModel> _accounts;
     private readonly IReadOnlyDictionary<Guid, List<MailFolderModel>> _cachedFolders;
     private readonly Func<Guid, string?, string, Task<IReadOnlyList<MailFolderModel>?>>? _folderCreator;
+    private readonly Func<MailFolderModel, string>? _ruleTargetPath;
 
     public RulesManagerWindow(
         RulesManagerViewModel vm,
         IEnumerable<AccountModel> accounts,
         IReadOnlyDictionary<Guid, List<MailFolderModel>> cachedFolders,
-        Func<Guid, string?, string, Task<IReadOnlyList<MailFolderModel>?>>? folderCreator = null)
+        Func<Guid, string?, string, Task<IReadOnlyList<MailFolderModel>?>>? folderCreator = null,
+        Func<MailFolderModel, string>? ruleTargetPath = null)
     {
         InitializeComponent();
         _vm = vm;
         _accounts = accounts;
         _cachedFolders = cachedFolders;
         _folderCreator = folderCreator;
+        _ruleTargetPath = ruleTargetPath;
         DataContext = vm;
 
         // Wire VM events
@@ -106,7 +109,7 @@ public partial class RulesManagerWindow : Window
 
         if (picker.ShowDialog() == true && picker.SelectedFolder is MailFolderModel folder)
         {
-            return folder.FullName;
+            return _ruleTargetPath?.Invoke(folder) ?? folder.FullName;
         }
         return null;
     }
@@ -142,19 +145,42 @@ public partial class RulesManagerWindow : Window
         e.Handled = true;
     }
 
+    private void SearchFilterButton_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new RuleFilterSearchDialog(
+            _vm.SearchFrom, _vm.SearchTo, _vm.SearchSubject, _vm.SearchBody) { Owner = this };
+        if (dialog.ShowDialog() != true) return;
+        _vm.SetFilterSearch(dialog.FromCriteria, dialog.ToCriteria,
+            dialog.SubjectCriteria, dialog.BodyCriteria);
+        FocusFirstRule();
+    }
+
     private void OnCloseRequested()
     {
         Close();
     }
 
     /// <summary>
-    /// Adds a rule prefilled from a message and focuses the list. Called when Ctrl+Shift+T is
+    /// Adds a rule prefilled from a message and focuses the list. Called when Ctrl+Shift+F is
     /// pressed while this (modeless) window is already open, so the template isn't dropped.
     /// </summary>
     public void PrefillFromTemplate(MailRule template)
     {
         _vm.AddPrefilledRule(template);
         RuleListBox.Focus();
+    }
+
+    public void SelectRule(Guid ruleId)
+    {
+        _vm.SelectRule(ruleId);
+        FocusFirstRule();
+    }
+
+    public void SelectRule(Guid ruleId, MailMessageSummary message, string? completeBody)
+    {
+        _vm.SetCompatibilityMessage(message, completeBody);
+        _vm.SelectRule(ruleId);
+        FocusFirstRule();
     }
 
     private bool OnConfirmDeleteRequested(string message, string title)

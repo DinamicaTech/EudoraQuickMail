@@ -456,6 +456,48 @@ public partial class FolderPickerWindow : Window
         return null;
     }
 
+    /// <summary>Move picker backed by the single visible canonical tree rather than account caches.</summary>
+    public static FolderPickerWindow? ForCanonicalFolderMove(
+        IEnumerable<FolderTreeNode> visibleRoots, MailFolderModel source, string title)
+    {
+        var picker = new FolderPickerWindow([], new Dictionary<Guid, List<MailFolderModel>>(),
+            title: title, initialFolder: source, useTreeView: true);
+
+        static FolderTreeNode? CloneContainerTree(FolderTreeNode node)
+        {
+            var children = node.Children.Select(CloneContainerTree).Where(child => child != null).ToList();
+            // Any real canonical folder can become a parent. IsContainer describes its current
+            // storage role in the imported tree; using it as a picker capability hid legitimate
+            // destinations such as Dinamica/ProveedoreSoftware.
+            var selectable = node.Folder is { } folder &&
+                folder.FullName.StartsWith("\u0000LocalFolder:", StringComparison.Ordinal);
+            if (!selectable && children.Count == 0) return null;
+            var clone = new FolderTreeNode
+            {
+                Folder = selectable ? node.Folder : null,
+                Label = node.Label,
+                IsHeader = !selectable,
+                IsExpanded = true,
+            };
+            foreach (var child in children)
+            {
+                child!.Parent = clone;
+                clone.Children.Add(child);
+            }
+            return clone;
+        }
+
+        var roots = visibleRoots.Select(CloneContainerTree).Where(node => node != null)
+            .Cast<FolderTreeNode>().ToList();
+        picker._openingNode = FindParentOfFolder(roots, source);
+        RemoveFolderSubtree(roots, source);
+        PruneEmptySyntheticNodes(roots);
+        picker.FolderTreeView.ItemsSource = roots;
+        if (picker.HasSelectableFolders) return picker;
+        picker.Close();
+        return null;
+    }
+
     /// <summary>
     /// The destination picker for a mail rule's target folder — the Rules Manager's "Choose Target
     /// Folder" and the server-rule editor's move/copy folder. A tree, for the same reason move/copy

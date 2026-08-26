@@ -60,6 +60,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
     // the key set de-dupes across repeated IDLE fires within the session.
     private readonly DateTimeOffset _notifyThresholdUtc = DateTimeOffset.UtcNow;
     private readonly HashSet<string> _notifiedMessageKeys = new();
+    // The tray indicator is independent of the optional Windows toast setting. Keep a separate
+    // de-duplication set because watched-conversation notifications intentionally consume entries
+    // from _notifiedMessageKeys before ordinary inbox notification processing.
+    private readonly HashSet<string> _trayMessageKeys = new();
     // A single evaluation yielding more genuinely-new messages than this is a catch-up backlog
     // (mail that piled up while the machine slept or the connection was down), not real-time
     // arrivals — so it does not raise a toast. See MaybeNotifyNewMail.
@@ -96,6 +100,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     // timer above). Disposed in Dispose; in-flight HTTP is cancelled via _graphCalSyncCts.
     private System.Threading.Timer? _graphCalendarSyncTimer;
     private CancellationTokenSource? _graphCalSyncCts;
+    private int _disposeState;
     private bool _graphCalendarSyncRunning; // UI-thread-owned re-entrancy guard (timer vs. F5)
     private static readonly TimeSpan GraphCalendarSyncInterval = TimeSpan.FromMinutes(15);
 
@@ -103,11 +108,24 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// Cancels and disposes the old CTS, creates a new one, and outputs its token.
     /// Thread-safe: the slot is atomically replaced via Interlocked.Exchange.
     /// </summary>
-    private static void ReplaceCts(ref CancellationTokenSource? slot, out CancellationToken token)
+    private void ReplaceCts(ref CancellationTokenSource? slot, out CancellationToken token)
     {
+        if (Volatile.Read(ref _disposeState) != 0)
+        {
+            token = new CancellationToken(canceled: true);
+            return;
+        }
         var cts = new CancellationTokenSource();
         var previous = Interlocked.Exchange(ref slot, cts);
-        try { previous?.Cancel(); previous?.Dispose(); } catch { /* best effort */ }
+        // CancellationTokenSource.Dispose races with queued Dispatcher continuations which may
+        // still read Token or create a linked source. Cancellation is sufficient here; the old
+        // source becomes collectible as soon as those continuations unwind.
+        try { previous?.Cancel(); } catch { /* best effort */ }
+        if (Volatile.Read(ref _disposeState) != 0)
+        {
+            Interlocked.CompareExchange(ref slot, null, cts);
+            try { cts.Cancel(); } catch { /* shutdown won the race */ }
+        }
         token = cts.Token;
     }
 
@@ -121,6 +139,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     public void Dispose()
     {
+        if (Interlocked.Exchange(ref _disposeState, 1) != 0) return;
         if (_screenshotCapture != null)
             _screenshotCapture.EnabledChanged -= OnScreenshotCaptureEnabledChanged;
         if (_rowLayoutService != null && _onRowLayoutsChanged != null)
@@ -131,13 +150,17 @@ public partial class MainViewModel : ObservableObject, IDisposable
         DrainCts(ref _connectCts);
         DrainCts(ref _folderCts);
         DrainCts(ref _messageLoadCts);
-        try { _messageActionShutdownCts.Cancel(); _messageActionShutdownCts.Dispose(); } catch { /* best effort at shutdown */ }
+        // Do not dispose this application-lifetime CTS while queued UI continuations can still
+        // create a linked token from it. A cancelled CTS remains safe to read until process exit;
+        // disposing it here caused the shutdown-only ObjectDisposedException dialog.
+        try { _messageActionShutdownCts.Cancel(); } catch { /* best effort at shutdown */ }
         DrainCts(ref _flagActionCts);
         DrainCts(ref _prefetchCts);
         DrainCts(ref _bgSyncCts);
+        DrainCts(ref _localSearchCts);
         foreach (var cts in _folderCountCts.Values)
         {
-            try { cts.Cancel(); cts.Dispose(); } catch { /* best effort at shutdown */ }
+            try { cts.Cancel(); } catch { /* best effort at shutdown */ }
         }
         _folderCountCts.Clear();
         _calendarHarvestTimer?.Dispose();
@@ -153,9 +176,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private static void DrainCts(ref CancellationTokenSource? slot)
     {
         var cts = Interlocked.Exchange(ref slot, null);
-        // Cancel before Dispose so in-flight tasks get OperationCanceledException
-        // rather than ObjectDisposedException.
-        try { cts?.Cancel(); cts?.Dispose(); } catch { /* best effort at shutdown */ }
+        // Do not dispose while Dispatcher work may still observe the token during shutdown.
+        // Cancelled sources are cheap and are reclaimed with the view model at process exit.
+        try { cts?.Cancel(); } catch { /* best effort at shutdown */ }
     }
 
     // How many days of mail to sync (0 = all); set via the Sync Range menu
@@ -194,6 +217,16 @@ public partial class MainViewModel : ObservableObject, IDisposable
     // presence here no longer implies the account connected — see _connectedAccountIds below.
     private readonly Dictionary<Guid, List<MailFolderModel>> _cachedFolders = new();
     public IReadOnlyDictionary<Guid, List<MailFolderModel>> CachedFolders => _cachedFolders;
+    private CanonicalLocalFolderTree? _canonicalLocalTree;
+    private readonly Dictionary<Guid, CanonicalLocalFolder> _canonicalFolders = new();
+    private const string CanonicalFolderPrefix = "\u0000LocalFolder:";
+
+    private static bool TryParseCanonicalFolder(string? fullName, out Guid folderId)
+    {
+        folderId = Guid.Empty;
+        return fullName != null && fullName.StartsWith(CanonicalFolderPrefix, StringComparison.Ordinal)
+            && Guid.TryParse(fullName.AsSpan(CanonicalFolderPrefix.Length), out folderId);
+    }
 
     /// <summary>
     /// Accounts that have actually connected this session. Before #516, <c>_cachedFolders.Count</c>
@@ -303,6 +336,185 @@ public partial class MainViewModel : ObservableObject, IDisposable
         rootId = Guid.Empty;
         return fullName != null && fullName.StartsWith(RootMailPrefix, StringComparison.Ordinal)
             && Guid.TryParse(fullName.AsSpan(RootMailPrefix.Length), out rootId);
+    }
+
+    /// <summary>
+    /// Resolves the physical account and parent path used to create a folder below a visible tree
+    /// node. A shared root is synthetic (it has no AccountId and its sentinel is not a real folder
+    /// path), so a child created there belongs at the physical root of the root-owner/default
+    /// account instead.
+    /// </summary>
+    public (Guid AccountId, string? ParentFullName)? ResolveNewFolderLocation(MailFolderModel? parent)
+    {
+        if (parent == null) return null;
+        if (!TryParseRootMail(parent.FullName, out var rootId))
+            return parent.AccountId == Guid.Empty ? null : (parent.AccountId, parent.FullName);
+
+        var members = Accounts
+            .Where(a => (a.FolderTreeRootId ?? a.Id) == rootId)
+            .ToList();
+        var owner = members.FirstOrDefault(a => a.Id == rootId && a.IsActive)
+                    ?? members.FirstOrDefault(a => a.IsDefault && a.IsActive)
+                    ?? members.FirstOrDefault(a => a.IsActive)
+                    ?? members.FirstOrDefault(a => a.Id == rootId)
+                    ?? members.FirstOrDefault();
+        return owner == null ? null : (owner.Id, null);
+    }
+
+    public bool IsCanonicalLocalFolder(MailFolderModel? folder) =>
+        TryParseCanonicalFolder(folder?.FullName, out _);
+
+    public bool CanMoveCanonicalFolder(MailFolderModel? folder) =>
+        TryParseCanonicalFolder(folder?.FullName, out var id) &&
+        _canonicalFolders.TryGetValue(id, out var canonical) &&
+        canonical.ParentFolderId != null;
+
+    /// <summary>
+    /// Resolves the inbox represented by the real folder tree. In a canonical single-tree profile
+    /// this is the physical <c>In</c> node, not the slower global <c>All Inboxes</c> view.
+    /// </summary>
+    public MailFolderModel ResolveInboxShortcutFolder()
+    {
+        var folders = FlattenAllNodes(FolderTree)
+            .Select(node => node.Folder)
+            .Where(folder => folder is { Kind: SpecialFolderKind.Inbox })
+            .Cast<MailFolderModel>()
+            .ToList();
+        return folders.FirstOrDefault(folder => TryParseCanonicalFolder(folder.FullName, out _))
+               ?? folders.FirstOrDefault(folder => folder.DisplayName.Equals("In", StringComparison.OrdinalIgnoreCase))
+               ?? folders.FirstOrDefault()
+               ?? AllInboxesFolder;
+    }
+
+    public string FolderDisplayPath(MailFolderModel folder) =>
+        TryParseCanonicalFolder(folder.FullName, out var id) &&
+        _canonicalFolders.TryGetValue(id, out var canonical)
+            ? canonical.CanonicalPath.Replace('/', '\\')
+            : folder.FullName.Replace('/', '\\');
+
+    /// <summary>A stable, human-readable rule target; the rule service resolves it to an account binding.</summary>
+    public string RuleTargetPath(MailFolderModel folder) =>
+        TryParseCanonicalFolder(folder.FullName, out var id) &&
+        _canonicalFolders.TryGetValue(id, out var canonical)
+            ? canonical.CanonicalPath
+            : folder.FullName;
+
+    /// <summary>Converts obsolete internal canonical ids in persisted rules to visible paths.</summary>
+    public string NormalizeRuleTargetPath(string? target)
+    {
+        if (string.IsNullOrWhiteSpace(target)) return target ?? string.Empty;
+        const string printablePrefix = "LocalFolder:";
+        var prefixLength = target.StartsWith(CanonicalFolderPrefix, StringComparison.Ordinal)
+            ? CanonicalFolderPrefix.Length
+            : target.StartsWith(printablePrefix, StringComparison.OrdinalIgnoreCase)
+                ? printablePrefix.Length
+                : 0;
+        return prefixLength > 0 && Guid.TryParse(target.AsSpan(prefixLength), out var id) &&
+               _canonicalFolders.TryGetValue(id, out var canonical)
+            ? canonical.CanonicalPath
+            : target;
+    }
+
+    /// <summary>Resolves a persisted rule destination to the corresponding visible tree node.</summary>
+    public MailFolderModel? ResolveRuleTargetFolder(string? target)
+    {
+        var normalized = NormalizeRuleTargetPath(target).Replace('\\', '/').Trim('/');
+        if (normalized.Length == 0) return null;
+        return FlattenAllNodes(FolderTree)
+            .Select(node => node.Folder)
+            .Where(folder => folder != null)
+            .Cast<MailFolderModel>()
+            .FirstOrDefault(folder =>
+                RuleTargetPath(folder).Replace('\\', '/').Trim('/')
+                    .Equals(normalized, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>Every persisted destination spelling that denotes the visible canonical folder.</summary>
+    public IReadOnlyCollection<string> RuleTargetAliases(MailFolderModel folder)
+    {
+        var aliases = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { folder.FullName };
+        if (TryParseCanonicalFolder(folder.FullName, out var id) &&
+            _canonicalFolders.TryGetValue(id, out var canonical))
+        {
+            aliases.Add(canonical.CanonicalPath);
+            foreach (var binding in canonical.Bindings) aliases.Add(binding.LegacyFullName);
+        }
+        return aliases;
+    }
+
+    public async Task<MailFolderModel?> CreateCanonicalFolderAndRefreshAsync(
+        MailFolderModel parent, string name, bool? isContainer = null)
+    {
+        Guid parentId;
+        CanonicalLocalFolder canonicalParent;
+        if (TryParseCanonicalFolder(parent.FullName, out parentId))
+        {
+            if (!_canonicalFolders.TryGetValue(parentId, out canonicalParent!)) return null;
+        }
+        else if (TryParseRootMail(parent.FullName, out var rootId))
+        {
+            canonicalParent = _canonicalFolders.Values.FirstOrDefault(folder =>
+                folder.RootId == rootId && folder.ParentFolderId == null)!;
+            if (canonicalParent == null) return null;
+            parentId = canonicalParent.FolderId;
+        }
+        else return null;
+        var owner = Accounts.FirstOrDefault(account => account.Id == canonicalParent.RootId && account.IsActive)
+                    ?? Accounts.FirstOrDefault(account => account.IsDefault && account.IsActive &&
+                        account.BackendKind is BackendKind.Pop3Smtp or BackendKind.LocalArchive)
+                    ?? Accounts.FirstOrDefault(account => account.IsActive &&
+                        account.BackendKind is BackendKind.Pop3Smtp or BackendKind.LocalArchive);
+        if (owner == null) throw new InvalidOperationException("No active local account can own the new folder binding.");
+        StatusText = $"Creating folder '{name}'…";
+        IsBusy = true;
+        try
+        {
+            // A first-level node is organizational by default; a child created below it is a real
+            // mail folder unless the caller explicitly asks for another container.
+            var createAsContainer = isContainer ?? canonicalParent.CanonicalPath.Length == 0;
+            var createdId = await _localStore.CreateCanonicalFolderAsync(
+                parentId, name, owner.Id, createAsContainer);
+            await ReloadCanonicalLocalTreeAsync(rebuildTree: true, refreshPhysicalCache: true);
+            StatusText = $"Folder '{name}' created.";
+            return _canonicalFolders.TryGetValue(createdId, out var created)
+                ? new MailFolderModel
+                {
+                    FullName = CanonicalFolderPrefix + created.FolderId.ToString("D"),
+                    DisplayName = created.Name,
+                    Kind = created.Kind,
+                    IsContainer = created.IsContainer,
+                    UnreadCount = created.UnreadCount,
+                    MessageCount = created.MessageCount,
+                }
+                : null;
+        }
+        catch (Exception ex)
+        {
+            StatusText = $"Failed to create folder: {ex.Message}";
+            LogService.Log("CreateCanonicalFolder", ex);
+            return null;
+        }
+        finally { IsBusy = false; }
+    }
+
+    private async Task ReloadCanonicalLocalTreeAsync(bool rebuildTree, bool refreshPhysicalCache = false)
+    {
+        if (refreshPhysicalCache)
+        {
+            var persisted = await _localStore.LoadFoldersAsync();
+            foreach (var account in Accounts.Where(account =>
+                         account.BackendKind is BackendKind.Pop3Smtp or BackendKind.LocalArchive))
+            {
+                if (!persisted.TryGetValue(account.Id, out var folders)) continue;
+                NormalizePersistedLocalFolderKinds(account.Id, folders);
+                _cachedFolders[account.Id] = folders;
+            }
+        }
+        _canonicalLocalTree = await _localStore.LoadCanonicalLocalFolderTreeAsync();
+        _canonicalFolders.Clear();
+        if (_canonicalLocalTree != null)
+            foreach (var folder in _canonicalLocalTree.Folders) _canonicalFolders[folder.FolderId] = folder;
+        if (rebuildTree) BuildFolderTree();
     }
 
     private static MailFolderModel CreateRootAggregateFolder(Guid rootId, SpecialFolderKind kind, string name) => new()
@@ -467,7 +679,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
             return $"'{node.Label}' is a calendar, not a mail folder, so QuickMail cannot start there.";
 
         var isVirtual = AllVirtualFolders.Any(v =>
-            string.Equals(v.FullName, folder.FullName, StringComparison.Ordinal));
+                string.Equals(v.FullName, folder.FullName, StringComparison.Ordinal))
+            || TryParseRootAggregate(folder.FullName, out _, out _)
+            || TryParseRootMail(folder.FullName, out _);
 
         if (!isVirtual &&
             (folder.AccountId == Guid.Empty || folder.FullName.Length == 0 || folder.FullName[0] == '\0'))
@@ -709,6 +923,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (TryGetAccountIdFromSentinel(folder.FullName, out _)) return true;
         if (TryParseRootAggregate(folder.FullName, out _, out _)) return true;
         if (TryParseRootMail(folder.FullName, out _)) return true;
+        if (TryParseCanonicalFolder(folder.FullName, out _)) return true;
 
         // Saved-view sentinels.
         if (TryGetViewIdFromSentinel(folder.FullName, out _))    return true;
@@ -1090,11 +1305,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private async Task ApplyLocalSearchAsync(string value)
     {
+        if (Volatile.Read(ref _disposeState) != 0) return;
         using var timing = PerformanceLogService.Measure("Search: quick",
             $"queryLength={value?.Length ?? 0}; folder={SelectedFolder?.DisplayName ?? "none"}");
         var previous = Interlocked.Exchange(ref _localSearchCts, new CancellationTokenSource());
-        previous?.Cancel();
-        previous?.Dispose();
+        try { previous?.Cancel(); } catch { /* superseded search */ }
         var cts = _localSearchCts!;
         if (string.IsNullOrWhiteSpace(value))
         {
@@ -1116,9 +1331,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
             var realFolder = SelectedFolder is { IsHeader: false } selected && !IsVirtualFolder(selected)
                 ? selected.FullName : null;
             var rootAccountIds = RootAccountIdsFor(SelectedFolder);
+            var folderScopes = SearchFolderScopesFor(SelectedFolder);
+            var excludedFolderScopes = RootExcludedFolderScopesFor(SelectedFolder);
             var query = new LocalSearchQuery(value, accountScope, realFolder,
                 LocalMailConstants.MaxRenderedMessages, LocalPageOffset, sort,
-                SelectedFolder?.IsContainer == true, rootAccountIds);
+                SelectedFolder?.IsContainer == true, rootAccountIds, folderScopes, excludedFolderScopes);
             var found = await ((ILocalMailboxStore)_localStore).SearchLocalMessagesAsync(query, cts.Token);
             if (cts.IsCancellationRequested) return;
             await ResolveFlagNamesAsync(found.Messages);
@@ -1133,6 +1350,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 MessageSort.FromDescending => visible.OrderByDescending(m => m.From, StringComparer.OrdinalIgnoreCase),
                 MessageSort.ReadStateAscending => visible.OrderBy(m => m.IsRead).ThenByDescending(m => m.Date),
                 MessageSort.ReadStateDescending => visible.OrderByDescending(m => m.IsRead).ThenByDescending(m => m.Date),
+                MessageSort.StatusAscending => visible.OrderBy(m => m.StatusDisplay, StringComparer.CurrentCultureIgnoreCase).ThenByDescending(m => m.Date),
+                MessageSort.StatusDescending => visible.OrderByDescending(m => m.StatusDisplay, StringComparer.CurrentCultureIgnoreCase).ThenByDescending(m => m.Date),
+                MessageSort.DirectionAscending => visible.OrderBy(m => m.Direction).ThenByDescending(m => m.Date),
+                MessageSort.DirectionDescending => visible.OrderByDescending(m => m.Direction).ThenByDescending(m => m.Date),
                 MessageSort.AttachmentsFirst => visible.OrderByDescending(m => m.HasAttachments).ThenByDescending(m => m.Date),
                 MessageSort.AttachmentsLast => visible.OrderBy(m => m.HasAttachments).ThenByDescending(m => m.Date),
                 _ => visible.OrderByDescending(m => m.Date),
@@ -1168,7 +1389,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
         var found = await store.SearchLocalMessagesAdvancedAsync(new AdvancedSearchQuery(
             criteria, accountScope, folderScope, LocalMailConstants.MaxRenderedMessages, 0,
             LocalSortFor(ActiveSort), SelectedFolder?.IsContainer == true,
-            RootAccountIdsFor(SelectedFolder)));
+            RootAccountIdsFor(SelectedFolder), SearchFolderScopesFor(SelectedFolder),
+            RootExcludedFolderScopesFor(SelectedFolder)));
         Messages = new BatchObservableCollection<MailMessageSummary>(found.Messages);
         _advancedSearchCriteria = criteria.ToList();
         LocalPageOffset = 0;
@@ -1235,6 +1457,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
         MessageSort.AlphaDescending => LocalSearchSort.SubjectDescending,
         MessageSort.ReadStateAscending => LocalSearchSort.ReadAscending,
         MessageSort.ReadStateDescending => LocalSearchSort.ReadDescending,
+        // Flag names live in the user configuration rather than SQLite, so the loaded page is
+        // ordered by its exact rendered StatusDisplay after flag names have been resolved.
+        MessageSort.StatusAscending => LocalSearchSort.NewestFirst,
+        MessageSort.StatusDescending => LocalSearchSort.NewestFirst,
+        MessageSort.DirectionAscending => LocalSearchSort.DirectionAscending,
+        MessageSort.DirectionDescending => LocalSearchSort.DirectionDescending,
         MessageSort.AttachmentsFirst => LocalSearchSort.AttachmentsFirst,
         MessageSort.AttachmentsLast => LocalSearchSort.AttachmentsLast,
         _ => LocalSearchSort.NewestFirst,
@@ -1242,9 +1470,84 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private IReadOnlyCollection<Guid>? RootAccountIdsFor(MailFolderModel? folder)
     {
-        if (!TryParseRootMail(folder?.FullName, out var rootId)) return null;
-        return Accounts.Where(a => (a.FolderTreeRootId ?? a.Id) == rootId)
-            .Select(a => a.Id).ToArray();
+        Guid rootId;
+        if (TryParseCanonicalFolder(folder?.FullName, out var canonicalId) &&
+            _canonicalFolders.TryGetValue(canonicalId, out var canonicalRoot) &&
+            canonicalRoot.ParentFolderId == null)
+            rootId = canonicalRoot.RootId;
+        else if (!TryParseRootMail(folder?.FullName, out rootId)) return null;
+
+        // The account manager persists a changed FolderTreeRootId before the asynchronous UI
+        // refresh/connect pass has necessarily replaced every AccountModel in this collection.
+        // During that short (and, for an already connected POP account, potentially long-lived)
+        // mismatch, a root search used only the former root owner and silently omitted mail owned
+        // by accounts that had just been attached to it.  Resolve membership from accounts.json,
+        // which is the authority for the relationship, and retain the live collection as a safe
+        // fallback if the settings file cannot be read.
+        var persisted = _accountService.LoadAccounts()
+            .Where(a => a.IsActive && (a.FolderTreeRootId ?? a.Id) == rootId)
+            .Select(a => a.Id);
+        var live = Accounts
+            .Where(a => (a.FolderTreeRootId ?? a.Id) == rootId)
+            .Select(a => a.Id);
+        return persisted.Concat(live).Distinct().ToArray();
+    }
+
+    private IReadOnlyCollection<LocalFolderScope>? SearchFolderScopesFor(MailFolderModel? folder)
+    {
+        if (folder == null ||
+            (!TryParseRootAggregate(folder.FullName, out _, out _) &&
+             !TryParseCanonicalFolder(folder.FullName, out _))) return null;
+        if (TryParseCanonicalFolder(folder.FullName, out var canonicalId) &&
+            _canonicalFolders.TryGetValue(canonicalId, out var canonical) &&
+            canonical.ParentFolderId == null)
+            return null; // the root is every materialized message in its accounts
+        return FolderScopedAggregateSources(folder.FullName)
+            .Select(source => new LocalFolderScope(source.Account.Id, source.Folder.FullName,
+                source.Folder.IsContainer))
+            .Distinct()
+            .ToArray();
+    }
+
+    private IReadOnlyCollection<LocalFolderScope>? RootExcludedFolderScopesFor(MailFolderModel? folder)
+    {
+        if (!TryParseCanonicalFolder(folder?.FullName, out var canonicalId) ||
+            !_canonicalFolders.TryGetValue(canonicalId, out var root) || root.ParentFolderId != null)
+            return null;
+        return _canonicalFolders.Values
+            .Where(candidate => candidate.RootId == root.RootId &&
+                candidate.Kind is SpecialFolderKind.Drafts or SpecialFolderKind.Scheduled)
+            .SelectMany(candidate => candidate.Bindings)
+            .Select(binding => new LocalFolderScope(binding.AccountId, binding.LegacyFullName))
+            .Distinct()
+            .ToArray();
+    }
+
+    private long? CachedRootMessageTotal(IReadOnlyCollection<Guid>? accountIds,
+        IReadOnlyCollection<LocalFolderScope>? excludedFolders)
+    {
+        if (accountIds is not { Count: > 0 }) return null;
+        var excluded = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (excludedFolders != null)
+            foreach (var scope in excludedFolders)
+                excluded.Add(scope.AccountId.ToString("D") + "\n" + scope.FolderName);
+        long total = 0;
+        foreach (var accountId in accountIds)
+        {
+            var account = Accounts.FirstOrDefault(candidate => candidate.Id == accountId);
+            // IMAP/Graph Folder.MessageCount can describe the complete server folder while the
+            // local MessageSummary cache contains only the synchronized window. It is therefore
+            // not a valid cached total for the local root query.
+            if (account is { BackendKind: not (BackendKind.Pop3Smtp or BackendKind.LocalArchive) })
+                return null;
+            // Never trade correctness for speed when an account has no persisted folder catalogue.
+            // The caller will perform the authoritative SQL count in that unusual case.
+            if (!_cachedFolders.TryGetValue(accountId, out var folders)) return null;
+            foreach (var folder in folders)
+                if (!excluded.Contains(accountId.ToString("D") + "\n" + folder.FullName))
+                    total += folder.MessageCount;
+        }
+        return total;
     }
 
     [ObservableProperty]
@@ -1265,8 +1568,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// True when the calendar virtual folder is the active selection and the
     /// calendar event list is shown in place of the message list.
     /// </summary>
-    public bool IsCalendarView => SelectedFolder != null &&
-        IsCalendarFolderName(SelectedFolder.FullName);
+    public bool IsCalendarView => ActiveTab is CalendarTabViewModel ||
+        (SelectedFolder != null && IsCalendarFolderName(SelectedFolder.FullName));
 
     public ObservableCollection<FlagDefinition> FlagDefinitions { get; } = [];
 
@@ -1541,6 +1844,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [NotifyPropertyChangedFor(nameof(IsComposeTabActive))]
     [NotifyPropertyChangedFor(nameof(IsPrimaryContentAreaVisible))]
     [NotifyPropertyChangedFor(nameof(ActiveComposeContent))]
+    [NotifyPropertyChangedFor(nameof(IsCalendarView))]
     private TabSessionViewModel? _activeTab;
 
     /// <summary>
@@ -1620,7 +1924,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     public void CloseTab(TabSessionViewModel tab)
     {
-        if (tab is MessageListTabViewModel) return; // permanent tab, never closed by user
+        if (tab is MessageListTabViewModel or CalendarTabViewModel) return;
 
         if (tab is ComposeTabViewModel compose)
         {
@@ -1694,9 +1998,20 @@ public partial class MainViewModel : ObservableObject, IDisposable
         return true;
     }
 
+    public async Task ActivateCalendarTabAsync()
+    {
+        if (CalendarVm == null) return;
+        var tab = OpenTabs.OfType<CalendarTabViewModel>().FirstOrDefault();
+        if (tab != null && ActiveTab != tab) ActiveTab = tab;
+        IsMessageOpen = false;
+        MessageDetail = null;
+        await CalendarVm.LoadAsync();
+        CalendarPaneFocusRequested?.Invoke();
+    }
+
     public void ActivateNextTab()
     {
-        var tabs = OpenTabs.Where(t => t is not MessageListTabViewModel).ToList();
+        var tabs = OpenTabs.Where(t => t is not (MessageListTabViewModel or CalendarTabViewModel)).ToList();
         if (tabs.Count == 0) return;
         var idx = ActiveTab == null ? 0 : (tabs.IndexOf(ActiveTab) + 1) % tabs.Count;
         ActiveTab = tabs[idx];
@@ -1705,7 +2020,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     public void ActivatePrevTab()
     {
-        var tabs = OpenTabs.Where(t => t is not MessageListTabViewModel).ToList();
+        var tabs = OpenTabs.Where(t => t is not (MessageListTabViewModel or CalendarTabViewModel)).ToList();
         if (tabs.Count == 0) return;
         var current = ActiveTab is null ? -1 : tabs.IndexOf(ActiveTab);
         var idx = current < 0 ? tabs.Count - 1 : (current - 1 + tabs.Count) % tabs.Count;
@@ -1729,8 +2044,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         if (ActiveTab is not (MessageTabViewModel or ComposeTabViewModel)) return;
         var idx = OpenTabs.IndexOf(ActiveTab);
-        // Don't move before the message list tab (always index 0 in Tab mode).
-        var minIdx = OpenTabs.OfType<MessageListTabViewModel>().Any() ? 1 : 0;
+        var minIdx = OpenTabs.Count(t => t is CalendarTabViewModel or MessageListTabViewModel);
         if (idx <= minIdx) return;
         OpenTabs.Move(idx, idx - 1);
         Announce($"Tab moved to position {idx}.");
@@ -1748,7 +2062,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     public void CloseAllOtherTabs()
     {
         if (ActiveTab == null || OpenTabs.Count <= 1) return;
-        var toClose = OpenTabs.Where(t => t != ActiveTab && t is not MessageListTabViewModel).ToList();
+        var toClose = OpenTabs.Where(t => t != ActiveTab && t is not (MessageListTabViewModel or CalendarTabViewModel)).ToList();
         if (toClose.Count == 0) return;
         foreach (var tab in toClose) CloseTab(tab);
     }
@@ -1767,17 +2081,54 @@ public partial class MainViewModel : ObservableObject, IDisposable
     // ── Message-list tab (Tab mode) ───────────────────────────────────────────────
 
     /// <summary>
-    /// Ensures the permanent message-list tab is first in OpenTabs when Tab mode is active.
-    /// No-op in ReadingPane or Window mode, and no-op if the tab already exists.
+    /// Ensures the permanent Calendar and message-list navigation tabs exist. They remain visible
+    /// in every message-open mode; the mode only controls how individual messages are opened.
     /// </summary>
     public void EnsureMessageListTab(bool force = false)
     {
-        if (!force && MessageOpenMode != MessageOpenMode.Tab) return;
-        if (OpenTabs.OfType<MessageListTabViewModel>().Any()) return;
+        if (CalendarVm != null && _configService.Load().ShowCalendar &&
+            !OpenTabs.OfType<CalendarTabViewModel>().Any())
+            OpenTabs.Insert(0, new CalendarTabViewModel());
 
-        var tab = new MessageListTabViewModel();
-        OpenTabs.Insert(0, tab);
+        var tab = OpenTabs.OfType<MessageListTabViewModel>().FirstOrDefault();
+        if (tab == null)
+        {
+            tab = new MessageListTabViewModel();
+            OpenTabs.Insert(OpenTabs.OfType<CalendarTabViewModel>().Any() ? 1 : 0, tab);
+        }
         if (ActiveTab == null) ActiveTab = tab;
+        OnPropertyChanged(nameof(ShowTabStrip));
+    }
+
+    public void RememberMainMessageListFolder(MailFolderModel? folder)
+    {
+        if (folder == null) return;
+        var tab = OpenTabs.OfType<MessageListTabViewModel>().FirstOrDefault();
+        if (tab != null) tab.Folder = folder;
+    }
+
+    /// <summary>Creates or updates the non-activating destination tab for a successful move rule.</summary>
+    public void ShowLatestFilteredDestination(MailRule rule, MailMessageSummary? movedMessage)
+    {
+        if (!_configService.Load().ShowFilteredDestinationTab ||
+            rule.Action != RuleAction.MoveToFolder) return;
+        var folder = ResolveRuleTargetFolder(rule.TargetFolder);
+        if (folder == null) return;
+
+        EnsureMessageListTab(force: true);
+        var main = OpenTabs.OfType<MessageListTabViewModel>().FirstOrDefault();
+        if (main != null && main.Folder == null) main.Folder = SelectedFolder;
+        var tab = OpenTabs.OfType<FilteredFolderTabViewModel>().FirstOrDefault();
+        if (tab == null)
+        {
+            tab = new FilteredFolderTabViewModel(folder, movedMessage);
+            var mainIndex = main == null ? 0 : OpenTabs.IndexOf(main);
+            OpenTabs.Insert(Math.Min(mainIndex + 1, OpenTabs.Count), tab);
+        }
+        else
+        {
+            tab.Update(folder, movedMessage);
+        }
         OnPropertyChanged(nameof(ShowTabStrip));
     }
 
@@ -1890,6 +2241,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
                                                () => _calendarSources);
             _defaultCalendarSource = cfg.DefaultCalendarSource ?? string.Empty;
             CalendarVm.DefaultCalendar = DefaultCalendarFilter;
+            EnsureMessageListTab();
+            RebuildCalendarSourceChoices();
             RemindersEnabled = cfg.CalendarReminders;
             ReminderLeadMinutes = cfg.CalendarReminderMinutes;
             StartReminderTimer();
@@ -1977,6 +2330,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         foreach (var account in accounts)
             RegisterAccountBackend?.Invoke(account);
         Accounts = new ObservableCollection<AccountModel>(accounts);
+        RebuildCalendarSourceChoices();
 
         // An account deleted while it was showing disconnected never receives a NoteConnected call,
         // so its verification loop would otherwise keep probing a mailbox the user has removed.
@@ -2374,6 +2728,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                                 vf.AccountId, vf.FolderFullName, maxKey, initialCount, ct);
                         }
                     }
+                    StampDirectionFromFolder(vf.AccountId, vf.FolderFullName, msgs);
                     // Aggregate view — stamp each message with the stored view's plain folder name as a
                     // fallback; ApplyFolderDisplayNames below overwrites it with the account-qualified
                     // form for folders known to the cache (#423). Single-folder loads don't come here.
@@ -2474,6 +2829,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
         RemindersEnabled = cfg.CalendarReminders;
         ReminderLeadMinutes = cfg.CalendarReminderMinutes;
         BuildFolderTree();
+        if (!cfg.ShowFilteredDestinationTab)
+        {
+            var filteredTab = OpenTabs.OfType<FilteredFolderTabViewModel>().FirstOrDefault();
+            if (filteredTab != null) CloseTab(filteredTab);
+        }
 
         var newPreviewLines = cfg.PreviewLines;
         var newShowPreview  = newPreviewLines > 0;
@@ -2726,7 +3086,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
         registry.Register(new CommandDefinition(
             id: "mail.createRuleFromMessage", category: "Mail", title: "Create Rule from Message",
             execute: () => CreateRuleFromMessageCommand.Execute(null),
-            defaultKey: Key.T, defaultModifiers: ModifierKeys.Control | ModifierKeys.Shift,
+            defaultKey: Key.F, defaultModifiers: ModifierKeys.Control | ModifierKeys.Shift,
+            isAvailable: () => HasSelectedMessage));
+
+        registry.Register(new CommandDefinition(
+            id: "mail.filterAllLikeThis", category: "Mail", title: "Filter All Like This",
+            execute: () => FilterAllLikeThisCommand.Execute(null),
+            defaultKey: Key.A, defaultModifiers: ModifierKeys.Control | ModifierKeys.Shift,
             isAvailable: () => HasSelectedMessage));
 
         registry.Register(new CommandDefinition(
@@ -2811,14 +3177,49 @@ public partial class MainViewModel : ObservableObject, IDisposable
             // back as "Work" and would otherwise never resolve again — the user would see the
             // fallback notice on every launch with no way to fix it from the UI, since re-picking
             // writes the same untrimmable value.
+            var account = Accounts.First(a => a.Id == accountId);
+            var physicalKey = key.Equals("Inbox", StringComparison.Ordinal) &&
+                              account.BackendKind is BackendKind.Pop3Smtp or BackendKind.LocalArchive
+                ? "In"
+                : key;
             var match = _cachedFolders.TryGetValue(accountId, out var folders)
-                ? folders.FirstOrDefault(f => string.Equals(f.FullName, key, StringComparison.OrdinalIgnoreCase))
-                  ?? folders.FirstOrDefault(f => string.Equals(f.FullName.Trim(), key, StringComparison.OrdinalIgnoreCase))
+                ? folders.FirstOrDefault(f => string.Equals(f.FullName, physicalKey, StringComparison.OrdinalIgnoreCase))
+                  ?? folders.FirstOrDefault(f => string.Equals(f.FullName.Trim(), physicalKey, StringComparison.OrdinalIgnoreCase))
                 : null;
             if (match == null)
             {
                 fallbackReason = $"Startup folder '{label}' was not found — showing All Mail.";
                 return null;
+            }
+            var canonicalMatch = _canonicalFolders.Values.FirstOrDefault(folder => folder.Bindings.Any(binding =>
+                binding.AccountId == accountId && string.Equals(binding.LegacyFullName, match.FullName,
+                    StringComparison.OrdinalIgnoreCase)));
+            if (canonicalMatch != null)
+                return FlattenAllNodes(FolderTree).Select(node => node.Folder).FirstOrDefault(folder =>
+                    folder != null && TryParseCanonicalFolder(folder.FullName, out var id) &&
+                    id == canonicalMatch.FolderId);
+            // In a shared folder tree the visible system node is a root aggregate: its "In" can
+            // unite one account's physical "In" and another account's physical "Inbox". Older
+            // imports stored the dominant account's physical folder as the startup target, which
+            // made the first load show only that account; clicking the visible node moments later
+            // correctly showed the union. Promote a configured physical system folder to the same
+            // root aggregate the tree exposes so startup and click are identical.
+            if (match.Kind != SpecialFolderKind.None)
+            {
+                var rootId = account.FolderTreeRootId ?? account.Id;
+                // Root aggregates are navigation-only nodes created by BuildFolderTree; they are
+                // deliberately not part of the flat Folders collection.  Resolve against the tree
+                // first, otherwise startup falls back to the dominant account's physical "In"
+                // while a later click on the visible node correctly opens In + Inbox.
+                var aggregate = FlattenAllNodes(FolderTree)
+                    .Select(n => n.Folder)
+                    .FirstOrDefault(f => f != null &&
+                        TryParseRootAggregate(f.FullName, out var candidateRoot, out var candidateKind)
+                        && candidateRoot == rootId && candidateKind == match.Kind)
+                    ?? Folders.FirstOrDefault(f =>
+                    TryParseRootAggregate(f.FullName, out var candidateRoot, out var candidateKind)
+                    && candidateRoot == rootId && candidateKind == match.Kind);
+                if (aggregate != null) return aggregate;
             }
             return match;
         }
@@ -3002,16 +3403,25 @@ public partial class MainViewModel : ObservableObject, IDisposable
         try
         {
             await _localStore.PurgeFoldersForUnknownAccountsAsync(knownAccountIds);
+            await _localStore.EnsureLocalSystemFoldersAsync(Accounts);
             foreach (var (accountId, folders) in await _localStore.LoadFoldersAsync())
                 if (folders.Count > 0)
+                {
+                    NormalizePersistedLocalFolderKinds(accountId, folders);
                     _cachedFolders[accountId] = folders;   // NOT SetCachedFolders — nothing has connected yet
+                }
+            _canonicalLocalTree = await _localStore.LoadCanonicalLocalFolderTreeAsync();
+            _canonicalFolders.Clear();
+            if (_canonicalLocalTree != null)
+                foreach (var folder in _canonicalLocalTree.Folders)
+                    _canonicalFolders[folder.FolderId] = folder;
         }
         catch (Exception ex)
         {
             LogService.Log("InitialLoad: restoring cached folder list", ex);
         }
-        RecordInitialStage("restore cached folder metadata",
-            $"accounts={_cachedFolders.Count}; folders={_cachedFolders.Values.Sum(f => f.Count)}");
+        RecordInitialStage("ensure system folders and restore cached folder metadata",
+            $"accounts={_cachedFolders.Count}; folders={_cachedFolders.Values.Sum(f => f.Count)}; canonical={_canonicalFolders.Count}");
 
         // Build the folder list now: ResolveStartupFolder matches virtual sentinels against Folders,
         // and the tree is worth drawing before the message load either way.
@@ -3080,6 +3490,29 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         ConnectionStatusText = "Connecting…";
         StartPrefetchTopOfFolder();
+    }
+
+    private void NormalizePersistedLocalFolderKinds(Guid accountId, IEnumerable<MailFolderModel> folders)
+    {
+        var account = Accounts.FirstOrDefault(candidate => candidate.Id == accountId);
+        if (account?.BackendKind is not (BackendKind.Pop3Smtp or BackendKind.LocalArchive)) return;
+        foreach (var folder in folders)
+        {
+            if (folder.FullName.Contains('/') || folder.FullName.Contains('\\')) continue;
+            // Leading underscores are meaningful Eudora mailbox names (_In, _Out, _Trash), not
+            // decoration around QuickMail's system folders.
+            var leaf = folder.FullName.Replace('\\', '/').Split('/')[^1].Trim().ToLowerInvariant();
+            folder.Kind = leaf switch
+            {
+                "in" or "inbox" => SpecialFolderKind.Inbox,
+                "draft" or "drafts" => SpecialFolderKind.Drafts,
+                "scheduled" => SpecialFolderKind.Scheduled,
+                "out" or "sent" => SpecialFolderKind.Sent,
+                "trash" => SpecialFolderKind.Trash,
+                "junk" or "spam" => SpecialFolderKind.Junk,
+                _ => folder.Kind,
+            };
+        }
     }
 
     /// <summary>
@@ -3692,10 +4125,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
                         readReconciled.Add(existing); // its filter membership may have changed
                     }
 
-                    // Flag clear (§9.3): server now reports not-flagged but we still show a flag —
-                    // another client cleared it, so clear our local flag to match.
-                    if (!msg.IsServerFlagged && existing.FlagId != null)
-                        existing.FlagId = null;
+                    // Flags are local-first metadata. A sync can introduce the built-in flag when
+                    // the server reports \Flagged, but absence of that server bit must not erase a
+                    // user's named local flag (or a flag preserved while moving the message).
                 }
                 continue;
             }
@@ -3906,17 +4338,31 @@ public partial class MainViewModel : ObservableObject, IDisposable
     // Shows a Windows toast for genuinely-new inbox mail. Runs on the UI thread (the caller posts
     // it there) so _notifiedMessageKeys is single-thread-owned. Setting is re-read live so a
     // Settings change takes effect without a restart.
-    internal void MaybeNotifyNewMail(AccountModel account, IReadOnlyList<MailMessageSummary> incoming)
+    internal void MaybeNotifyNewMail(AccountModel account, IReadOnlyList<MailMessageSummary> incoming,
+        bool receivedNow = false)
     {
+        // A POP3 result is the authoritative hand-off event: the messages were downloaded in this
+        // session even when their sender Date predates application startup by a few minutes. Other
+        // sync paths retain the startup threshold so an initial IMAP/Graph backlog stays silent.
+        var threshold = receivedNow ? DateTimeOffset.MinValue : _notifyThresholdUtc;
+        var notificationConfig = _configService.Load();
+        if (notificationConfig.NotifyTrayIconOnNewMail)
+        {
+            if (_trayMessageKeys.Count > 10_000) _trayMessageKeys.Clear();
+            var trayFresh = Helpers.NewMailFilter.SelectNew(incoming, threshold, _trayMessageKeys);
+            if (trayFresh.Count > 0)
+                NewMailArrived?.Invoke(account.AccountLabel, trayFresh.Count);
+        }
+
         if (_notifications is not { IsSupported: true }) return;
-        if (!_configService.Load().NotifyOnNewMail) return;
+        if (!notificationConfig.NotifyOnNewMail) return;
 
         // Bound session memory: the set only holds keys of messages we've already notified for, but
         // an always-on session could grow it without limit. Clearing risks at most a re-notify for a
         // message still inside the last-50 IDLE fetch window whose Date is after launch — negligible.
         if (_notifiedMessageKeys.Count > 10_000) _notifiedMessageKeys.Clear();
 
-        var fresh = Helpers.NewMailFilter.SelectNew(incoming, _notifyThresholdUtc, _notifiedMessageKeys);
+        var fresh = Helpers.NewMailFilter.SelectNew(incoming, threshold, _notifiedMessageKeys);
 
         // #270 diagnostics: the user reports an inflated count that re-notifies every ~30 min. This
         // line tells whether the SAME message re-notifies each cycle (dedup key not matching / session
@@ -3952,6 +4398,60 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         LogService.Log(diag);
         _notifications.ShowNewMail(account.AccountLabel, account.Id, fresh);
+    }
+
+    /// <summary>
+    /// Reconciles the visible local page after a POP3 download. POP3 materializes messages directly
+    /// in SQLite and consequently does not raise <see cref="ISyncService.FolderSynced"/>. Automatic
+    /// rules have already completed when this method is called, so re-reading the page also reflects
+    /// messages moved out of Inbox (or into the folder currently being viewed) by those rules.
+    /// </summary>
+    internal async Task RefreshAfterPop3ReceiveAsync(AccountModel account, Pop3ReceiveResult result)
+    {
+        LastSyncText = DateTime.Now.ToString("T", CultureInfo.CurrentCulture);
+        IsBusy = false;
+        IsStatusHighlighted = true;
+
+        if (result.Downloaded <= 0)
+        {
+            StatusText = $"Mail download complete for {account.AccountLabel}: 0 new.";
+            return;
+        }
+
+        using var timing = PerformanceLogService.Measure("POP3 receive: refresh visible mailbox",
+            $"account={account.AccountLabel}; downloaded={result.Downloaded}; folder={SelectedFolder?.DisplayName ?? "none"}");
+        try
+        {
+            // Folder.message_count/unread_count are maintained in the same transactions that save
+            // and move local messages. Re-read those inexpensive counters before reloading the grid.
+            var stage = Stopwatch.GetTimestamp();
+            await RefreshCanonicalFolderCountsAsync();
+            PerformanceLogService.Record("POP3 receive refresh: canonical folder counts",
+                Stopwatch.GetElapsedTime(stage),
+                $"account={account.AccountLabel}; canonicalFolders={_canonicalFolders.Count}");
+
+            // Preserve the active quick/advanced search, sorting and paging. This is the same local
+            // page reload used by paging itself and avoids a network refresh or a folder-tree rebuild.
+            if (!IsCalendarView && SelectedFolder != null)
+            {
+                stage = Stopwatch.GetTimestamp();
+                await ReloadCurrentLocalPageAsync();
+                PerformanceLogService.Record("POP3 receive refresh: visible SQLite page and grid",
+                    Stopwatch.GetElapsedTime(stage),
+                    $"account={account.AccountLabel}; folder={SelectedFolder.DisplayName}; rows={Messages.Count}; total={LocalTotalMessages}");
+            }
+
+            StatusText = $"Mail download complete for {account.AccountLabel}: {result.Downloaded:N0} new.";
+        }
+        catch (Exception ex)
+        {
+            LogService.Log("Refresh visible mailbox after POP3 receive", ex);
+            StatusText = $"Mail downloaded for {account.AccountLabel}, but the message list could not be refreshed: {ex.Message}";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
     }
 
     /// <summary>
@@ -4050,6 +4550,14 @@ public partial class MainViewModel : ObservableObject, IDisposable
         RebuildActiveGroupView();
     }
 #pragma warning restore CA1859
+
+    /// <summary>
+    /// Applies a confirmed move/delete result to the currently materialized page. Rule execution
+    /// uses this before reloading the folder so no stale row can request a source message that has
+    /// already moved in the local database.
+    /// </summary>
+    public void RemoveMessagesFromActiveView(IReadOnlyList<MailMessageSummary> removed) =>
+        OnMessagesRemoved(removed);
 
     private int _lastRulesMatchCount;
     private DateTime _lastRulesRunTime;
@@ -4253,6 +4761,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
             MessageSort.FromDescending  => result.OrderByDescending(m => m.From, StringComparer.OrdinalIgnoreCase),
             MessageSort.ReadStateAscending => result.OrderBy(m => m.IsRead).ThenByDescending(m => m.Date),
             MessageSort.ReadStateDescending => result.OrderByDescending(m => m.IsRead).ThenByDescending(m => m.Date),
+            MessageSort.StatusAscending => result.OrderBy(m => m.StatusDisplay, StringComparer.CurrentCultureIgnoreCase).ThenByDescending(m => m.Date),
+            MessageSort.StatusDescending => result.OrderByDescending(m => m.StatusDisplay, StringComparer.CurrentCultureIgnoreCase).ThenByDescending(m => m.Date),
+            MessageSort.DirectionAscending => result.OrderBy(m => m.Direction).ThenByDescending(m => m.Date),
+            MessageSort.DirectionDescending => result.OrderByDescending(m => m.Direction).ThenByDescending(m => m.Date),
             MessageSort.AttachmentsFirst => result.OrderByDescending(m => m.HasAttachments).ThenByDescending(m => m.Date),
             MessageSort.AttachmentsLast => result.OrderBy(m => m.HasAttachments).ThenByDescending(m => m.Date),
             _                           => result.OrderByDescending(m => m.Date),
@@ -4350,6 +4862,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
         existing.FlagName       = fresh.FlagName;
         existing.FlagColorHex   = fresh.FlagColorHex;
         existing.IsServerFlagged = fresh.IsServerFlagged;
+        if (fresh.Direction != MessageDirection.Unknown)
+            existing.Direction = fresh.Direction;
     }
 
     /// <summary>
@@ -4715,64 +5229,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         var roots = new List<FolderTreeNode>();
 
-        // "Calendar" — top-level virtual folder that opens the event list.
-        // Shown only when a calendar service is wired (skipped in tests / online-only builds).
-        var navigationSettings = _configService.Load();
-        if (CalendarVm != null && navigationSettings.ShowCalendar)
-        {
-            var calNode = new FolderTreeNode
-            {
-                Folder = CalendarFolder,
-                Label  = CalendarFolder.DisplayName,
-                IsCalendarNode = true,
-            };
-            calNode.Children.Add(new FolderTreeNode
-            {
-                Folder = new MailFolderModel { FullName = CalendarSourcePrefix + "all", DisplayName = "All Calendars" },
-                Label  = "All Calendars",
-                IsCalendarNode = true,
-            });
-            calNode.Children.Add(new FolderTreeNode
-            {
-                Folder = new MailFolderModel { FullName = CalendarSourcePrefix + "local", DisplayName = "Local Calendar" },
-                Label  = "Local Calendar",
-                IsCalendarNode = true,
-            });
-            // Only accounts the user opted into calendar sync for (#282) get a source node.
-            foreach (var acct in Accounts.Where(a => a.SyncCalendar))
-            {
-                var acctNode = new FolderTreeNode
-                {
-                    Folder = new MailFolderModel
-                    {
-                        FullName    = CalendarSourcePrefix + acct.Id.ToString("D"),
-                        DisplayName = acct.AccountLabel,
-                    },
-                    Label = acct.AccountLabel,
-                    IsCalendarNode = true,
-                };
-
-                // A grandchild per discovered calendar so the user can view Home vs. Work vs. Family.
-                // With 0 or 1 calendars the account node alone suffices (no redundant single child).
-                var acctCalendars = _calendarSources.Where(s => s.AccountId == acct.Id).ToList();
-                if (acctCalendars.Count > 1)
-                    foreach (var (_, calId, calName) in acctCalendars)
-                        acctNode.Children.Add(new FolderTreeNode
-                        {
-                            Folder = new MailFolderModel
-                            {
-                                FullName    = CalendarSourcePrefix + acct.Id.ToString("D") + "|" + Uri.EscapeDataString(calId),
-                                DisplayName = calName,
-                            },
-                            Label = calName,
-                            IsCalendarNode = true,
-                        });
-
-                calNode.Children.Add(acctNode);
-            }
-            roots.Add(calNode);
-        }
-
         // "Views" group — shown only when the user has saved at least one view.
         if (SavedViews.Count > 0)
         {
@@ -4820,6 +5276,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
 
         // Aggregate searches are views, not a second folder hierarchy.
+        var navigationSettings = _configService.Load();
         var allMailGroup = new FolderTreeNode
         {
             IsHeader   = true,
@@ -4836,6 +5293,48 @@ public partial class MainViewModel : ObservableObject, IDisposable
         allMailGroup.Children.Add(new FolderTreeNode { Folder = AllWatchedFolder, Label = AllWatchedFolder.DisplayName });
         if (navigationSettings.ShowCombinedViews)
             roots.Add(allMailGroup);
+
+        // A profile with a validated canonical map has one real local hierarchy. Account ownership
+        // remains only in each node's bindings and is no longer rendered as parallel trees.
+        if (_canonicalLocalTree != null && _canonicalLocalTree.Folders.Count > 0)
+        {
+            var models = _canonicalLocalTree.Folders.ToDictionary(folder => folder.FolderId, folder =>
+            {
+                var (unread, total) = CanonicalDisplayCounts(folder);
+                return new MailFolderModel
+                {
+                    FullName = CanonicalFolderPrefix + folder.FolderId.ToString("D"),
+                    DisplayName = folder.Name,
+                    Kind = folder.Kind,
+                    IsContainer = folder.IsContainer,
+                    UnreadCount = unread,
+                    MessageCount = total,
+                };
+            });
+            var nodes = _canonicalLocalTree.Folders.ToDictionary(folder => folder.FolderId, folder =>
+                new FolderTreeNode { Folder = models[folder.FolderId], Label = folder.Name });
+            foreach (var folder in _canonicalLocalTree.Folders)
+            {
+                var node = nodes[folder.FolderId];
+                if (folder.ParentFolderId is { } parentId && nodes.TryGetValue(parentId, out var parent))
+                {
+                    node.Parent = parent;
+                    parent.Children.Add(node);
+                }
+                else
+                {
+                    node.IsExpanded = true;
+                    roots.Add(node);
+                }
+            }
+            foreach (var canonicalRoot in nodes.Values.Where(node => node.Parent == null))
+                SortCanonicalFolderChildren(canonicalRoot);
+            foreach (var n in FlattenAllNodes(roots))
+                if (expandedKeys.Contains(NodeKey(n))) n.IsExpanded = true;
+            FolderTree = new ObservableCollection<FolderTreeNode>(roots);
+            MarkDefaultCalendarNodes();
+            return;
+        }
 
         foreach (var rootGroup in Accounts.GroupBy(a => a.FolderTreeRootId ?? a.Id))
         {
@@ -5275,6 +5774,40 @@ public partial class MainViewModel : ObservableObject, IDisposable
         SelectionDataReady();
     }
 
+    private static void SortCanonicalFolderChildren(FolderTreeNode parent)
+    {
+        static int SystemFolderRank(FolderTreeNode node) => node.Folder?.Kind switch
+        {
+            SpecialFolderKind.Inbox => 0,
+            SpecialFolderKind.Drafts => 1,
+            SpecialFolderKind.Scheduled => 2,
+            SpecialFolderKind.Sent => 3,
+            SpecialFolderKind.Trash => 4,
+            SpecialFolderKind.Junk => 5,
+            _ when node.Label.Equals("In", StringComparison.OrdinalIgnoreCase) => 0,
+            _ when node.Label.Equals("Draft", StringComparison.OrdinalIgnoreCase) ||
+                   node.Label.Equals("Drafts", StringComparison.OrdinalIgnoreCase) => 1,
+            _ when node.Label.Equals("Scheduled", StringComparison.OrdinalIgnoreCase) => 2,
+            _ when node.Label.Equals("Out", StringComparison.OrdinalIgnoreCase) ||
+                   node.Label.Equals("Sent", StringComparison.OrdinalIgnoreCase) => 3,
+            _ when node.Label.Equals("Trash", StringComparison.OrdinalIgnoreCase) => 4,
+            _ when node.Label.Equals("Junk", StringComparison.OrdinalIgnoreCase) ||
+                   node.Label.Equals("Spam", StringComparison.OrdinalIgnoreCase) => 5,
+            _ => 6,
+        };
+
+        var ordered = parent.Children
+            .OrderBy(SystemFolderRank)
+            .ThenBy(node => node.Label, StringComparer.CurrentCultureIgnoreCase)
+            .ToList();
+        parent.Children.Clear();
+        foreach (var child in ordered)
+        {
+            parent.Children.Add(child);
+            SortCanonicalFolderChildren(child);
+        }
+    }
+
     public event Action<MailFolderModel, TimeSpan, int>? FolderSelectionDataReady;
 
     /// <summary>
@@ -5427,6 +5960,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             var list = _syncDays > 0
                 ? await _imap.GetMessagesSinceDateAsync(accountId, folder.FullName, DateTime.UtcNow.AddDays(-_syncDays), ct)
                 : await _imap.GetMessageSummariesAsync(accountId, folder.FullName, 50000, ct);
+            StampDirectionFromFolder(folder, list);
             if (!IsCurrentFolderLoad(version, folder))
                 return;
 
@@ -5500,6 +6034,24 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 return;
 
             MessageDetail = detail;
+            // Older Gmail cache rows stored only the friendly alias. Repair the visible row as soon
+            // as its full RFC address is known; the next normal summary sync repairs the rest.
+            if (!string.IsNullOrWhiteSpace(detail.From) && detail.From.Contains('@') &&
+                !string.Equals(summary.From, detail.From, StringComparison.Ordinal))
+            {
+                summary.From = detail.From;
+                if (!OnlineMode)
+                    _localStore.UpsertSummariesAsync([summary]).LogFaults("local store: repair sender address");
+            }
+            else if (!SenderMailbox(summary.From).Contains('@'))
+            {
+                // Legacy IMAP summaries (notably Gmail) stored only the friendly alias. A normal
+                // incremental refresh never revisits old UIDs, and a cached detail reads From from
+                // that same summary row, so neither path can repair it. Fetch just this envelope in
+                // the background; the preview is already usable and the grid updates in place when
+                // the lightweight request completes.
+                EnsureSenderAddressAsync(summary).LogFaults("repair legacy IMAP sender address");
+            }
             // Window mode shows messages in standalone windows; never open the reading pane there.
             IsMessageOpen = MessageOpenMode != MessageOpenMode.Window;
             var wasUnread = !summary.IsRead;
@@ -5640,8 +6192,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private async Task RefreshAsync()
     {
+        var operationId = Guid.NewGuid().ToString("N")[..8];
+        var refreshDetails = $"id={operationId}; folder={SelectedFolder?.DisplayName ?? "none"}";
+        PerformanceLogService.Marker("Mailbox: refresh BEGIN", refreshDetails);
         using var timing = PerformanceLogService.Measure("Mailbox: refresh",
-            $"folder={SelectedFolder?.DisplayName ?? "none"}");
+            refreshDetails);
         // Delegate to the calendar's own refresh while it's the active view, so every entry
         // point (View menu, toolbar button, Command Palette, F5) agrees — none of those bind
         // through CommandRegistry, so an isAvailable guard alone can't disambiguate them.
@@ -5657,17 +6212,77 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         // Pick up folders created/removed on the server since the last full sync. Only rebuilds the
         // tree when the folder set actually changed, so an ordinary refresh doesn't disturb focus.
+        var foldersStarted = Stopwatch.GetTimestamp();
         await RefreshAllFolderListsAsync();
+        PerformanceLogService.Record("Mailbox: refresh/folder lists",
+            Stopwatch.GetElapsedTime(foldersStarted), refreshDetails);
 
+        var contentStarted = Stopwatch.GetTimestamp();
         if (ActiveView != null)
         {
             await ApplyViewAsync(ActiveView);
+            PerformanceLogService.Record("Mailbox: refresh/content",
+                Stopwatch.GetElapsedTime(contentStarted), refreshDetails + "; source=saved-view");
             return;
         }
         if (IsVirtualFolder(SelectedFolder))
             await FetchVirtualAsync(SelectedFolder!);
         else if (SelectedFolder != null && SelectedFolder.AccountId != Guid.Empty)
             await FetchFolderAsync();
+        PerformanceLogService.Record("Mailbox: refresh/content",
+            Stopwatch.GetElapsedTime(contentStarted), refreshDetails + "; source=mailbox");
+    }
+
+    /// <summary>
+    /// Reloads the visible message set from SQLite after a local mutation.  This deliberately does
+    /// not enumerate IMAP folders or wait for a server refresh: filtering, filing and deleting must
+    /// leave the UI responsive even when a remote account is slow or temporarily unavailable.
+    /// F5 and Check Mail remain the explicit network refresh entry points.
+    /// </summary>
+    public async Task RefreshAfterLocalMutationAsync(string reason)
+    {
+        var operationId = Guid.NewGuid().ToString("N")[..8];
+        var details = $"id={operationId}; reason={reason}; folder={SelectedFolder?.DisplayName ?? "none"}";
+        var started = Stopwatch.GetTimestamp();
+        PerformanceLogService.Marker("Mailbox: local refresh BEGIN", details);
+        try
+        {
+            if (SelectedFolder is { } rootFolder && TryParseRootMail(rootFolder.FullName, out var rootId))
+            {
+                await FetchRootMailAsync(rootId, rootFolder);
+                return;
+            }
+
+            List<MailMessageSummary> cached;
+            if (ActiveView != null)
+                cached = await LoadViewSummariesAsync(ActiveView);
+            else if (SelectedFolder is null)
+                cached = [];
+            else if (string.Equals(SelectedFolder.FullName, AllMailFolder.FullName, StringComparison.Ordinal))
+                cached = await LoadStartupSummariesAsync(SelectedFolder);
+            else
+                cached = await LoadCurrentFolderSummariesForRulesAsync(SelectedFolder);
+
+            var queryDone = Stopwatch.GetTimestamp();
+            PerformanceLogService.Record("Mailbox: local refresh/SQLite",
+                Stopwatch.GetElapsedTime(started, queryDone), details + $"; rows={cached.Count}");
+            await ResolveFlagNamesAsync(cached);
+            SetMessages(cached.OrderByDescending(message => message.Date));
+            PerformanceLogService.Record("Mailbox: local refresh/grid",
+                Stopwatch.GetElapsedTime(queryDone), details + $"; grid={Messages.Count}");
+            StatusText = $"{Messages.Count:N0} message{(Messages.Count == 1 ? "" : "s")} in {SelectedFolder?.DisplayName ?? "current view"}.";
+        }
+        catch (Exception ex)
+        {
+            PerformanceLogService.Marker("Mailbox: local refresh FAILED", details + $"; error={ex.GetType().Name}");
+            LogService.Log("Local mailbox refresh after mutation", ex);
+            throw;
+        }
+        finally
+        {
+            PerformanceLogService.Record("Mailbox: local refresh END",
+                Stopwatch.GetElapsedTime(started), details);
+        }
     }
 
     /// <summary>
@@ -5680,13 +6295,30 @@ public partial class MainViewModel : ObservableObject, IDisposable
         // timed-out account shouldn't serialise the whole refresh (mirrors FetchAllMailAsync).
         var fetches = Accounts.ToList().Select(async account =>
         {
+            var started = Stopwatch.GetTimestamp();
+            var details = $"account={account.AccountLabel}; id={account.Id}";
+            PerformanceLogService.Marker("Mailbox: refresh/folder list BEGIN", details);
             try
             {
                 using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-                return (account, folders: (List<MailFolderModel>?)await _imap.GetFoldersAsync(account.Id, cts.Token));
+                var folders = (List<MailFolderModel>?)await _imap.GetFoldersAsync(account.Id, cts.Token);
+                PerformanceLogService.Record("Mailbox: refresh/folder list END",
+                    Stopwatch.GetElapsedTime(started), details + $"; folders={folders?.Count ?? 0}");
+                return (account, folders);
             }
-            catch (OperationCanceledException) { return (account, folders: (List<MailFolderModel>?)null); }
-            catch (Exception ex) { LogService.Log($"RefreshFolderList {account.AccountLabel}", ex); return (account, folders: (List<MailFolderModel>?)null); }
+            catch (OperationCanceledException)
+            {
+                PerformanceLogService.Record("Mailbox: refresh/folder list CANCELLED",
+                    Stopwatch.GetElapsedTime(started), details);
+                return (account, folders: (List<MailFolderModel>?)null);
+            }
+            catch (Exception ex)
+            {
+                PerformanceLogService.Record("Mailbox: refresh/folder list FAILED",
+                    Stopwatch.GetElapsedTime(started), details + $"; error={ex.GetType().Name}");
+                LogService.Log($"RefreshFolderList {account.AccountLabel}", ex);
+                return (account, folders: (List<MailFolderModel>?)null);
+            }
         });
         var results = await Task.WhenAll(fetches);
 
@@ -5964,6 +6596,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 var msgs = _syncDays > 0
                     ? await _imap.GetMessagesSinceDateAsync(account.Id, folder.FullName, DateTime.UtcNow.AddDays(-_syncDays), ct)
                     : await _imap.GetMessageSummariesAsync(account.Id, folder.FullName, 50000, ct);
+                StampDirectionFromFolder(folder, msgs);
                 result.AddRange(msgs);
             }
             catch (OperationCanceledException) { throw; }
@@ -6005,6 +6638,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                     var initialCount = _configService.Load().InitialSyncCount;
                     msgs = await _imap.GetMessagesSinceAsync(account.Id, folder.FullName, maxKey, initialCount, ct);
                 }
+                StampDirectionFromFolder(folder, msgs);
                 result.AddRange(msgs);
             }
             catch (OperationCanceledException) { throw; }
@@ -6098,6 +6732,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                                 ? await _imap.GetMessagesSinceDateAsync(
                                     account.Id, folder.FullName, DateTime.UtcNow.AddDays(-_syncDays), ct)
                                 : await _imap.GetMessageSummariesAsync(account.Id, folder.FullName, 50000, ct);
+                            StampDirectionFromFolder(folder, msgs);
                             all.AddRange(msgs.Where(IsWatchedMessage));
                         }
                         catch (OperationCanceledException) { throw; }
@@ -6172,6 +6807,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                                 ? await _imap.GetMessagesSinceDateAsync(
                                     account.Id, folder.FullName, DateTime.UtcNow.AddDays(-_syncDays), ct)
                                 : await _imap.GetMessageSummariesAsync(account.Id, folder.FullName, 50000, ct);
+                            StampDirectionFromFolder(folder, msgs);
                             all.AddRange(msgs.Where(m => m.IsFlagged));
                         }
                         catch (OperationCanceledException) { throw; }
@@ -6284,6 +6920,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                                 ? await _imap.GetMessagesSinceDateAsync(
                                     account.Id, folder.FullName, DateTime.UtcNow.AddDays(-_syncDays), ct)
                                 : await _imap.GetMessageSummariesAsync(account.Id, folder.FullName, 50000, ct);
+                            StampDirectionFromFolder(folder, msgs);
                             all.AddRange(msgs.Where(m => MatchesContactAddress(m, address, direction)));
                         }
                         catch (OperationCanceledException) { throw; }
@@ -6817,7 +7454,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// </summary>
     private static bool IsFolderScopedAggregate(string? fullName) =>
         fullName != null &&
-        (TryParseRootAggregate(fullName, out _, out _) ||
+        (TryParseRootAggregate(fullName, out _, out _) || TryParseCanonicalFolder(fullName, out _) ||
          string.Equals(fullName, AllInboxesFolder.FullName, StringComparison.Ordinal) ||
          string.Equals(fullName, AllDraftsFolder.FullName,  StringComparison.Ordinal) ||
          string.Equals(fullName, AllSentFolder.FullName,    StringComparison.Ordinal) ||
@@ -6863,6 +7500,46 @@ public partial class MainViewModel : ObservableObject, IDisposable
     internal IEnumerable<(AccountModel Account, MailFolderModel Folder)> FolderScopedAggregateSources(
         string fullName, bool connectedOnly = false)
     {
+        if (TryParseCanonicalFolder(fullName, out var canonicalId))
+        {
+            if (!_canonicalFolders.TryGetValue(canonicalId, out var canonical)) yield break;
+            var sources = (canonical.IsContainer
+                ? _canonicalFolders.Values.Where(candidate => canonical.CanonicalPath.Length == 0 ||
+                    candidate.CanonicalPath.Equals(canonical.CanonicalPath, StringComparison.OrdinalIgnoreCase) ||
+                    candidate.CanonicalPath.StartsWith(canonical.CanonicalPath + "/", StringComparison.OrdinalIgnoreCase))
+                : new[] { canonical }).ToList();
+            var yielded = new HashSet<(Guid AccountId, string FolderName)>();
+            foreach (var binding in sources.SelectMany(candidate => candidate.Bindings).Distinct())
+            {
+                var account = Accounts.FirstOrDefault(candidate => candidate.Id == binding.AccountId);
+                if (account == null || (connectedOnly && !_connectedAccountIds.Contains(account.Id))) continue;
+                if (!_cachedFolders.TryGetValue(account.Id, out var folders)) continue;
+                var folder = folders.FirstOrDefault(candidate => string.Equals(candidate.FullName,
+                    binding.LegacyFullName, StringComparison.OrdinalIgnoreCase));
+                if (folder != null && yielded.Add((account.Id, folder.FullName.ToUpperInvariant())))
+                    yield return (account, folder);
+            }
+
+            // The canonical tree is built from local POP3/Eudora folders, but system nodes are
+            // account-independent views. A remote account assigned to the same root contributes
+            // its real IMAP/Graph INBOX to In, Sent to Sent, etc. The server folders stay physical;
+            // custom remote folders are never guessed or merged.
+            foreach (var systemSource in sources.Where(source => source.Kind != SpecialFolderKind.None))
+            {
+                foreach (var account in Accounts.Where(candidate =>
+                             AccountBelongsToCanonicalRoot(candidate, systemSource.RootId) &&
+                             candidate.BackendKind is BackendKind.ImapSmtp or BackendKind.MicrosoftGraph))
+                {
+                    if (connectedOnly && !_connectedAccountIds.Contains(account.Id)) continue;
+                    if (!_cachedFolders.TryGetValue(account.Id, out var folders)) continue;
+                    foreach (var folder in folders.Where(candidate =>
+                                 FolderMatchesSpecialKind(candidate, systemSource.Kind)))
+                        if (yielded.Add((account.Id, folder.FullName.ToUpperInvariant())))
+                            yield return (account, folder);
+                }
+            }
+            yield break;
+        }
         var isRootAggregate = TryParseRootAggregate(fullName, out var rootId, out var rootKind);
         var isArchive = string.Equals(fullName, AllArchiveFolder.FullName, StringComparison.Ordinal);
         var kind = isRootAggregate ? rootKind
@@ -6888,9 +7565,36 @@ public partial class MainViewModel : ObservableObject, IDisposable
             }
 
             foreach (var folder in folders)
-                if (folder.Kind == kind)
+                if (FolderMatchesSpecialKind(folder, kind))
                     yield return (account, folder);
         }
+    }
+
+    /// <summary>
+    /// Matches both normalized folder metadata and the conventional server names restored by an
+    /// older cache. This is intentionally narrow: custom folders are never merged merely because
+    /// their name resembles a system folder, while the IMAP spelling INBOX remains part of In.
+    /// </summary>
+    private static bool FolderMatchesSpecialKind(MailFolderModel folder, SpecialFolderKind kind)
+    {
+        if (folder.Kind == kind) return true;
+        var leaf = folder.FullName.Replace('\\', '/').Split('/')[^1].Trim();
+        return kind switch
+        {
+            SpecialFolderKind.Inbox => leaf.Equals("INBOX", StringComparison.OrdinalIgnoreCase)
+                || leaf.Equals("In", StringComparison.OrdinalIgnoreCase),
+            SpecialFolderKind.Sent => leaf.Equals("Out", StringComparison.OrdinalIgnoreCase)
+                || leaf.Equals("Sent", StringComparison.OrdinalIgnoreCase)
+                || leaf.Equals("Sent Items", StringComparison.OrdinalIgnoreCase),
+            SpecialFolderKind.Drafts => leaf.Equals("Draft", StringComparison.OrdinalIgnoreCase)
+                || leaf.Equals("Drafts", StringComparison.OrdinalIgnoreCase),
+            SpecialFolderKind.Scheduled => leaf.Equals("Scheduled", StringComparison.OrdinalIgnoreCase),
+            SpecialFolderKind.Trash => leaf.Equals("Trash", StringComparison.OrdinalIgnoreCase)
+                || leaf.Equals("Deleted Items", StringComparison.OrdinalIgnoreCase),
+            SpecialFolderKind.Junk => leaf.Equals("Junk", StringComparison.OrdinalIgnoreCase)
+                || leaf.Equals("Spam", StringComparison.OrdinalIgnoreCase),
+            _ => false,
+        };
     }
 
     /// <summary>
@@ -6899,8 +7603,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// and forgotten here fails loudly instead of silently inheriting another folder's name in its
     /// status text, its loading text, and its log tag.
     /// </summary>
-    private static string FolderScopedAggregateDisplayName(string fullName) =>
-        TryParseRootAggregate(fullName, out _, out var rootKind) ? rootKind switch
+    private string FolderScopedAggregateDisplayName(string fullName) =>
+        TryParseCanonicalFolder(fullName, out var canonicalId) && _canonicalFolders.TryGetValue(canonicalId, out var canonical)
+            ? canonical.Name
+        : TryParseRootAggregate(fullName, out _, out var rootKind) ? rootKind switch
         {
             SpecialFolderKind.Inbox => "Inbox", SpecialFolderKind.Drafts => "Draft",
             SpecialFolderKind.Scheduled => "Scheduled", SpecialFolderKind.Sent => "Sent",
@@ -6917,18 +7623,45 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     /// <summary>Loads the complete local contents represented by the currently selected folder.</summary>
     public async Task<List<MailMessageSummary>> LoadCurrentFolderSummariesForRulesAsync(
-        MailFolderModel? folderSnapshot = null)
+        MailFolderModel? folderSnapshot = null, bool preservePhysicalCopies = false)
     {
         var selected = folderSnapshot ?? SelectedFolder;
         if (selected == null || selected.IsHeader) return [];
 
+        var started = Stopwatch.GetTimestamp();
+        var detail = $"folder={selected.DisplayName}; physical={selected.FullName}; preserveCopies={preservePhysicalCopies}";
+        PerformanceLogService.Marker("Rules: load current folder BEGIN", detail);
+
         var result = new List<MailMessageSummary>();
         if (IsFolderScopedAggregate(selected.FullName))
         {
-            foreach (var source in FolderScopedAggregateSources(selected.FullName))
+            var sources = FolderScopedAggregateSources(selected.FullName).ToList();
+            foreach (var source in sources)
                 result.AddRange(await _localStore.LoadFolderSummariesAsync(
                     source.Account.Id, source.Folder.FullName));
-            return MessageDeduplicator.CollapseForAggregate(result, ResolveFolderKind);
+            // Rule application operates on logical messages, but recursive state changes (such as
+            // Mark as read) must touch every stored copy. Otherwise In/Inbox or other bound copies
+            // leave residual unread counters after the visible duplicate is updated.
+            var final = preservePhysicalCopies
+                ? result
+                : MessageDeduplicator.CollapseForAggregate(result, ResolveFolderKind);
+            PerformanceLogService.Record("Rules: load current folder END",
+                Stopwatch.GetElapsedTime(started), detail + $"; sources={sources.Count}; rows={final.Count}");
+            return final;
+        }
+
+        if (TryParseRootMail(selected.FullName, out _))
+        {
+            var accountIds = RootAccountIdsFor(selected) ?? [];
+            foreach (var accountId in accountIds)
+            {
+                if (!_cachedFolders.TryGetValue(accountId, out var folders)) continue;
+                foreach (var folder in folders.Where(folder => !folder.ExcludeFromAllMail))
+                    result.AddRange(await _localStore.LoadFolderSummariesAsync(accountId, folder.FullName));
+            }
+            PerformanceLogService.Record("Rules: load current folder END",
+                Stopwatch.GetElapsedTime(started), detail + $"; rows={result.Count}; scope=root");
+            return result;
         }
 
         if (!IsVirtualFolder(selected) && selected.AccountId != Guid.Empty)
@@ -6943,11 +7676,54 @@ public partial class MainViewModel : ObservableObject, IDisposable
             }
             foreach (var folder in folders)
                 result.AddRange(await _localStore.LoadFolderSummariesAsync(selected.AccountId, folder.FullName));
+            PerformanceLogService.Record("Rules: load current folder END",
+                Stopwatch.GetElapsedTime(started), detail + $"; rows={result.Count}; scope=physical");
             return result;
         }
 
         // Saved/combined views can represent arbitrary predicates; use the materialized result set.
-        return Messages.ToList();
+        result = Messages.ToList();
+        PerformanceLogService.Record("Rules: load current folder END",
+            Stopwatch.GetElapsedTime(started), detail + $"; rows={result.Count}; scope=materialized");
+        return result;
+    }
+
+    /// <summary>
+    /// Loads the physical Sent/Out sources that belong to the same unified root as the current
+    /// folder. Direction is made explicit because historical Eudora rows predate that column and
+    /// a FROM rule must compare their recipient when it is run manually against Out.
+    /// </summary>
+    public async Task<List<MailMessageSummary>> LoadOutFolderSummariesForRulesAsync(
+        MailFolderModel? contextFolder, Guid? accountScope = null)
+    {
+        Guid? rootId = null;
+        if (TryParseCanonicalFolder(contextFolder?.FullName, out var canonicalId) &&
+            _canonicalFolders.TryGetValue(canonicalId, out var canonical))
+            rootId = canonical.RootId;
+        else if (TryParseRootMail(contextFolder?.FullName, out var parsedRootId))
+            rootId = parsedRootId;
+        else if (TryParseRootAggregate(contextFolder?.FullName, out parsedRootId, out _))
+            rootId = parsedRootId;
+
+        var result = new List<MailMessageSummary>();
+        foreach (var account in Accounts)
+        {
+            if (accountScope is { } scoped && account.Id != scoped) continue;
+            if (rootId is { } root && !AccountBelongsToCanonicalRoot(account, root)) continue;
+            if (!_cachedFolders.TryGetValue(account.Id, out var folders)) continue;
+            foreach (var folder in folders.Where(candidate =>
+                         FolderMatchesSpecialKind(candidate, SpecialFolderKind.Sent)))
+            {
+                var rows = await _localStore.LoadFolderSummariesAsync(account.Id, folder.FullName);
+                foreach (var row in rows)
+                {
+                    row.Direction = MessageDirection.Outgoing;
+                    result.Add(row);
+                }
+            }
+        }
+        return result.DistinctBy(message =>
+            (message.AccountId, message.FolderName, message.MessageId)).ToList();
     }
 
     public void UpdateMessageListTabTitle(string? folderName)
@@ -6966,22 +7742,37 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         var failures = new List<MailOperationFailure>();
         var remoteAccounts = Accounts
-            .Where(a => a.BackendKind is BackendKind.ImapSmtp or BackendKind.MicrosoftGraph)
+            .Where(a => a.IsActive && a.CheckIncomingMail &&
+                a.BackendKind is BackendKind.ImapSmtp or BackendKind.MicrosoftGraph)
             .ToList();
         if (remoteAccounts.Count == 0) return failures;
 
         var completed = 0;
         foreach (var account in remoteAccounts)
         {
-            progress?.Invoke($"Checking mail for {account.AccountLabel} {completed + 1}/{remoteAccounts.Count}…");
+            var position = $"account {completed + 1} of {remoteAccounts.Count}";
+            var accountStarted = Stopwatch.GetTimestamp();
             try
             {
                 if (!_connectedAccountIds.Contains(account.Id))
                 {
+                    progress?.Invoke($"{account.AccountLabel} ({position}): connecting, authenticating and loading folders…");
+                    var connectStarted = Stopwatch.GetTimestamp();
                     var (_, folders) = await ConnectOneAccountAsync(account);
+                    PerformanceLogService.Record("Check Mail IMAP: connect, authenticate and list folders",
+                        Stopwatch.GetElapsedTime(connectStarted),
+                        $"account={account.AccountLabel}; backend={account.BackendKind}; folders={folders?.Count ?? 0}");
                     ApplyAccountStatus(account, folders, "manual-check");
-                    if (folders == null) continue;
+                    if (folders == null)
+                    {
+                        progress?.Invoke($"{account.AccountLabel} ({position}): connection did not return a folder list.");
+                        continue;
+                    }
                     SetCachedFolders(account.Id, folders);
+                }
+                else
+                {
+                    progress?.Invoke($"{account.AccountLabel} ({position}): using the authenticated connection…");
                 }
 
                 if (_cachedFolders.TryGetValue(account.Id, out var cached))
@@ -6989,10 +7780,44 @@ public partial class MainViewModel : ObservableObject, IDisposable
                     var inbox = cached.FirstOrDefault(f => f.Kind == SpecialFolderKind.Inbox)
                         ?? cached.FirstOrDefault(f => string.Equals(f.FullName, "INBOX", StringComparison.OrdinalIgnoreCase));
                     if (inbox != null)
-                        await _syncService.SyncFolderFullAsync(account, inbox, CancellationToken.None);
+                    {
+                        var inboxStarted = Stopwatch.GetTimestamp();
+                        progress?.Invoke($"{account.AccountLabel} ({position}): starting {inbox.DisplayName} synchronization…");
+                        void ReportSyncStage(Guid accountId, string stage)
+                        {
+                            if (accountId == account.Id)
+                                progress?.Invoke($"{account.AccountLabel} ({position}): {stage}");
+                        }
+                        var concreteSync = _syncService as SyncService;
+                        if (concreteSync != null) concreteSync.FolderSyncStageChanged += ReportSyncStage;
+                        IReadOnlyList<MailMessageSummary> arrivals;
+                        try
+                        {
+                            arrivals = await _syncService.SyncFolderFullAsync(account, inbox, CancellationToken.None);
+                        }
+                        finally
+                        {
+                            if (concreteSync != null) concreteSync.FolderSyncStageChanged -= ReportSyncStage;
+                        }
+                        PerformanceLogService.Record("Check Mail IMAP: synchronize Inbox",
+                            Stopwatch.GetElapsedTime(inboxStarted),
+                            $"account={account.AccountLabel}; folder={inbox.FullName}; newVisibleAfterRules={arrivals.Count}");
+                        progress?.Invoke(arrivals.Count == 0
+                            ? $"{account.AccountLabel}: Inbox is synchronized; no new messages found."
+                            : $"{account.AccountLabel}: {arrivals.Count:N0} new message{(arrivals.Count == 1 ? "" : "s")} downloaded to the local cache.");
+                    }
+                    else
+                    {
+                        progress?.Invoke($"{account.AccountLabel} ({position}): Inbox was not found in the server folder list.");
+                    }
                 }
+                else
+                    progress?.Invoke($"{account.AccountLabel} ({position}): no cached server folder list is available.");
 
                 ScheduleFolderCountRefresh(account.Id);
+                PerformanceLogService.Record("Check Mail IMAP: account total",
+                    Stopwatch.GetElapsedTime(accountStarted),
+                    $"account={account.AccountLabel}; backend={account.BackendKind}");
             }
             catch (Exception ex)
             {
@@ -7027,9 +7852,35 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         try
         {
-            if (TryParseRootAggregate(fullName, out _, out var localAggregateKind)
-                && _localStore is ILocalMailboxStore)
+            var isRootAggregate = TryParseRootAggregate(fullName, out _, out var localAggregateKind);
+            var isCanonicalLocal = TryParseCanonicalFolder(fullName, out var localCanonicalId);
+            if (isCanonicalLocal && _canonicalFolders.TryGetValue(localCanonicalId, out var selectedCanonical) &&
+                selectedCanonical.ParentFolderId == null && _localStore is ILocalMailboxStore rootStore)
             {
+                var queryStarted = Stopwatch.GetTimestamp();
+                var rootAccounts = RootAccountIdsFor(expectedFolder);
+                var excludedFolders = RootExcludedFolderScopesFor(expectedFolder);
+                var page = await rootStore.LoadLocalPageAsync(null, null,
+                    LocalMailConstants.MaxRenderedMessages, 0, LocalSortFor(ActiveSort),
+                    ct: ct, accountIds: rootAccounts, excludedFolderScopes: excludedFolders,
+                    knownTotal: CachedRootMessageTotal(rootAccounts, excludedFolders));
+                PerformanceLogService.Record("Folder selection: canonical root SQLite page",
+                    Stopwatch.GetElapsedTime(queryStarted),
+                    $"root={selectedCanonical.Name}; rows={page.Messages.Count}; total={page.TotalMatches}");
+                if (!IsCurrentFolderLoad(loadVersion, expectedFolder)) return;
+                await ResolveFlagNamesAsync(page.Messages);
+                LocalTotalMessages = page.TotalMatches;
+                SetMessages(page.Messages.ToList());
+                if (expectedFolder != null) expectedFolder.MessageCount = (int)Math.Min(int.MaxValue, page.TotalMatches);
+                StatusText = page.TotalMatches > page.Messages.Count
+                    ? $"Showing {page.Messages.Count:N0} of {page.TotalMatches:N0} messages in {selectedCanonical.Name}."
+                    : $"{page.TotalMatches:N0} messages in {selectedCanonical.Name}.";
+                return;
+            }
+            if ((isRootAggregate || isCanonicalLocal) && _localStore is ILocalMailboxStore)
+            {
+                if (isCanonicalLocal && _canonicalFolders.TryGetValue(localCanonicalId, out var localCanonical))
+                    localAggregateKind = localCanonical.Kind;
                 foreach (var source in FolderScopedAggregateSources(fullName))
                     all.AddRange(await _localStore.LoadFolderSummariesAsync(
                         source.Account.Id, source.Folder.FullName));
@@ -7152,6 +8003,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 var msgs = _syncDays > 0
                     ? await _imap.GetMessagesSinceDateAsync(account.Id, folder.FullName, DateTime.UtcNow.AddDays(-_syncDays), ct)
                     : await _imap.GetMessageSummariesAsync(account.Id, folder.FullName, 50000, ct);
+                StampDirectionFromFolder(folder, msgs);
                 result.AddRange(msgs);
             }
             catch (OperationCanceledException) { throw; }
@@ -7165,10 +8017,35 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     // ── Delete / Trash ───────────────────────────────────────────────────────────
 
-    public Task MarkMessagesReadAsync(IReadOnlyList<MailMessageSummary> messages)
+    private void StampDirectionFromFolder(Guid accountId, string folderName,
+        IEnumerable<MailMessageSummary> messages)
+    {
+        if (!_cachedFolders.TryGetValue(accountId, out var folders)) return;
+        var folder = folders.FirstOrDefault(candidate =>
+            string.Equals(candidate.FullName, folderName, StringComparison.OrdinalIgnoreCase));
+        if (folder != null) StampDirectionFromFolder(folder, messages);
+    }
+
+    private static void StampDirectionFromFolder(MailFolderModel folder,
+        IEnumerable<MailMessageSummary> messages)
+    {
+        var direction = folder.Kind switch
+        {
+            SpecialFolderKind.Inbox => MessageDirection.Incoming,
+            SpecialFolderKind.Sent or SpecialFolderKind.Drafts or SpecialFolderKind.Scheduled
+                => MessageDirection.Outgoing,
+            // Trash, Junk and user folders may contain both directions.
+            _ => MessageDirection.Unknown,
+        };
+        if (direction == MessageDirection.Unknown) return;
+        foreach (var message in messages.Where(message => message.Direction == MessageDirection.Unknown))
+            message.Direction = direction;
+    }
+
+    public async Task MarkMessagesReadAsync(IReadOnlyList<MailMessageSummary> messages)
     {
         var unread = messages.Where(m => !m.IsRead).ToList();
-        if (unread.Count == 0) return Task.CompletedTask;
+        if (unread.Count == 0) return;
 
         foreach (var m in unread)
             m.IsRead = true;
@@ -7177,9 +8054,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
         var label = unread.Count == 1 ? "message" : $"{unread.Count} messages";
         StatusText = $"Marked {label} as read.";
 
-        _localStore.UpdateIsReadBatchAsync(
-                unread.Select(m => (m.AccountId, m.FolderName, m.MessageId)), true)
-            .LogFaults("local store: update is-read batch");
+        await _localStore.UpdateIsReadBatchAsync(
+            unread.Select(m => (m.AccountId, m.FolderName, m.MessageId)), true);
 
         foreach (var group in unread.GroupBy(m => (m.AccountId, m.FolderName)))
         {
@@ -7193,7 +8069,68 @@ public partial class MainViewModel : ObservableObject, IDisposable
         foreach (var accountId in unread.Select(m => m.AccountId).Distinct())
             ScheduleFolderCountRefresh(accountId);
 
-        return Task.CompletedTask;
+    }
+
+    /// <summary>Re-reads canonical counts from MessageSummary and updates the live tree in place.</summary>
+    public async Task RefreshCanonicalFolderCountsAsync()
+    {
+        var refreshed = await _localStore.LoadCanonicalLocalFolderTreeAsync();
+        if (refreshed == null) return;
+        _canonicalLocalTree = refreshed;
+        _canonicalFolders.Clear();
+        foreach (var folder in refreshed.Folders) _canonicalFolders[folder.FolderId] = folder;
+
+        foreach (var node in FlattenAllNodes(FolderTree))
+        {
+            if (node.Folder == null || !TryParseCanonicalFolder(node.Folder.FullName, out var id) ||
+                !_canonicalFolders.TryGetValue(id, out var canonical)) continue;
+            var (unread, total) = CanonicalDisplayCounts(canonical);
+            node.Folder.UnreadCount = unread;
+            node.Folder.MessageCount = total;
+            node.NotifyUnreadChanged();
+        }
+    }
+
+    /// <summary>
+    /// A network account created after a single canonical local tree already exists may have no
+    /// explicit root assignment. There is no ambiguity in that case, so its system mailboxes
+    /// (INBOX, Sent, etc.) belong to the sole visible tree. With multiple roots we never guess.
+    /// </summary>
+    private bool AccountBelongsToCanonicalRoot(AccountModel account, Guid rootId)
+    {
+        if (account.FolderTreeRootId is { } assignedRoot) return assignedRoot == rootId;
+        if (account.Id == rootId) return true;
+        var roots = _canonicalFolders.Values
+            .Where(folder => folder.ParentFolderId == null)
+            .Select(folder => folder.RootId)
+            .Distinct()
+            .Take(2)
+            .ToList();
+        return roots.Count == 1 && roots[0] == rootId;
+    }
+
+    private (int Unread, int Total) CanonicalDisplayCounts(CanonicalLocalFolder canonical)
+    {
+        var unread = canonical.UnreadCount;
+        var total = canonical.MessageCount;
+        if (canonical.Kind == SpecialFolderKind.None) return (unread, total);
+
+        var bound = canonical.Bindings
+            .Select(binding => (binding.AccountId, binding.LegacyFullName.ToUpperInvariant()))
+            .ToHashSet();
+        foreach (var account in Accounts.Where(candidate =>
+                     AccountBelongsToCanonicalRoot(candidate, canonical.RootId) &&
+                     candidate.BackendKind is BackendKind.ImapSmtp or BackendKind.MicrosoftGraph))
+        {
+            if (!_cachedFolders.TryGetValue(account.Id, out var folders)) continue;
+            foreach (var folder in folders.Where(candidate => candidate.Kind == canonical.Kind &&
+                         !bound.Contains((account.Id, candidate.FullName.ToUpperInvariant()))))
+            {
+                unread += folder.UnreadCount;
+                total += folder.MessageCount;
+            }
+        }
+        return (unread, total);
     }
 
     private static IOrderedEnumerable<MailMessageSummary> SortMessageSequence(
@@ -7208,6 +8145,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
         MessageSort.ToDescending => messages.OrderByDescending(m => m.To, StringComparer.OrdinalIgnoreCase),
         MessageSort.ReadStateAscending => messages.OrderBy(m => m.IsRead).ThenByDescending(m => m.Date),
         MessageSort.ReadStateDescending => messages.OrderByDescending(m => m.IsRead).ThenByDescending(m => m.Date),
+        MessageSort.StatusAscending => messages.OrderBy(m => m.StatusDisplay, StringComparer.CurrentCultureIgnoreCase).ThenByDescending(m => m.Date),
+        MessageSort.StatusDescending => messages.OrderByDescending(m => m.StatusDisplay, StringComparer.CurrentCultureIgnoreCase).ThenByDescending(m => m.Date),
+        MessageSort.DirectionAscending => messages.OrderBy(m => m.Direction).ThenByDescending(m => m.Date),
+        MessageSort.DirectionDescending => messages.OrderByDescending(m => m.Direction).ThenByDescending(m => m.Date),
         MessageSort.AttachmentsFirst => messages.OrderByDescending(m => m.HasAttachments).ThenByDescending(m => m.Date),
         MessageSort.AttachmentsLast => messages.OrderBy(m => m.HasAttachments).ThenByDescending(m => m.Date),
         _ => messages.OrderByDescending(m => m.Date),
@@ -7216,9 +8157,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private async Task FetchRootMailAsync(Guid rootId, MailFolderModel expectedFolder)
     {
         if (_localStore is not ILocalMailboxStore store) return;
-        var accountIds = Accounts
-            .Where(a => (a.FolderTreeRootId ?? a.Id) == rootId)
-            .Select(a => a.Id).ToArray();
+        // Use the same authoritative scope as quick/advanced search.  Keeping two independent
+        // account-list calculations here was what allowed clicking a root and searching that same
+        // root to produce different sets immediately after an account was reassigned.
+        var accountIds = RootAccountIdsFor(expectedFolder) ?? [];
         var loadVersion = Interlocked.Increment(ref _folderLoadVersion);
         StatusText = $"Loading {expectedFolder.DisplayName}…";
         IsBusy = true;
@@ -7259,13 +8201,36 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private void ApplyOptimisticReadCountDelta(IEnumerable<MailMessageSummary> messages, int deltaPerMessage)
     {
-        foreach (var group in messages.GroupBy(m => (m.AccountId, m.FolderName)))
+        var groups = messages.GroupBy(m => (m.AccountId, m.FolderName))
+            .Select(group => (group.Key.AccountId, group.Key.FolderName, Count: group.Count())).ToList();
+        foreach (var group in groups)
         {
-            if (!_cachedFolders.TryGetValue(group.Key.AccountId, out var folders)) continue;
+            if (!_cachedFolders.TryGetValue(group.AccountId, out var folders)) continue;
             var folder = folders.FirstOrDefault(f =>
-                string.Equals(f.FullName, group.Key.FolderName, StringComparison.OrdinalIgnoreCase));
+                string.Equals(f.FullName, group.FolderName, StringComparison.OrdinalIgnoreCase));
             if (folder == null) continue;
-            folder.UnreadCount = Math.Max(0, folder.UnreadCount + deltaPerMessage * group.Count());
+            folder.UnreadCount = Math.Max(0, folder.UnreadCount + deltaPerMessage * group.Count);
+        }
+
+        if (_canonicalLocalTree != null)
+        {
+            var replacements = new Dictionary<Guid, CanonicalLocalFolder>();
+            foreach (var canonical in _canonicalFolders.Values)
+            {
+                var delta = groups.Where(group => canonical.Bindings.Any(binding =>
+                        binding.AccountId == group.AccountId && string.Equals(binding.LegacyFullName,
+                            group.FolderName, StringComparison.OrdinalIgnoreCase)))
+                    .Sum(group => deltaPerMessage * group.Count);
+                if (delta != 0)
+                    replacements[canonical.FolderId] = canonical with
+                    {
+                        UnreadCount = Math.Max(0, canonical.UnreadCount + delta),
+                    };
+            }
+            foreach (var (id, replacement) in replacements) _canonicalFolders[id] = replacement;
+            if (replacements.Count > 0)
+                _canonicalLocalTree = new CanonicalLocalFolderTree(_canonicalLocalTree.Folders
+                    .Select(folder => replacements.GetValueOrDefault(folder.FolderId, folder)).ToList());
         }
 
         foreach (var account in Accounts)
@@ -7275,6 +8240,111 @@ public partial class MainViewModel : ObservableObject, IDisposable
         // Rebuild also recalculates the synthetic shared-root aggregates. Expansion state is
         // preserved by BuildFolderTree, and message-list focus is unaffected.
         BuildFolderTree();
+    }
+
+    private void ApplyOptimisticMoveCountDelta(IReadOnlyCollection<MailMessageSummary> messages,
+        string destinationName, Guid? destinationCanonicalId)
+    {
+        if (messages.Count == 0) return;
+        var canonicalDeltas = new Dictionary<Guid, (int Messages, int Unread)>();
+        var affectedCanonicalIds = new HashSet<Guid>();
+
+        static void AddDelta(Dictionary<Guid, (int Messages, int Unread)> deltas,
+            Guid id, int messages, int unread)
+        {
+            var current = deltas.GetValueOrDefault(id);
+            deltas[id] = (current.Messages + messages, current.Unread + unread);
+        }
+
+        foreach (var group in messages.GroupBy(message => message.AccountId))
+        {
+            if (!_cachedFolders.TryGetValue(group.Key, out var cached))
+                _cachedFolders[group.Key] = cached = [];
+
+            var destinationModel = cached.FirstOrDefault(folder =>
+                folder.FullName.Equals(destinationName, StringComparison.OrdinalIgnoreCase));
+            if (destinationModel == null && destinationCanonicalId is { } destinationId &&
+                _canonicalFolders.TryGetValue(destinationId, out var destinationCanonical))
+            {
+                var slash = destinationName.LastIndexOf('/');
+                destinationModel = new MailFolderModel
+                {
+                    AccountId = group.Key,
+                    FullName = destinationName,
+                    DisplayName = destinationCanonical.Name,
+                    ParentId = slash < 0 ? null : destinationName[..slash],
+                    Kind = destinationCanonical.Kind,
+                    IsContainer = destinationCanonical.IsContainer,
+                };
+                cached.Add(destinationModel);
+            }
+
+            foreach (var sourceGroup in group.GroupBy(message => message.FolderName))
+            {
+                if (sourceGroup.Key.Equals(destinationName, StringComparison.OrdinalIgnoreCase)) continue;
+                var moved = sourceGroup.Count();
+                var unread = sourceGroup.Count(message => !message.IsRead);
+                var sourceModel = cached.FirstOrDefault(folder =>
+                    folder.FullName.Equals(sourceGroup.Key, StringComparison.OrdinalIgnoreCase));
+                if (sourceModel != null)
+                {
+                    sourceModel.MessageCount = Math.Max(0, sourceModel.MessageCount - moved);
+                    sourceModel.UnreadCount = Math.Max(0, sourceModel.UnreadCount - unread);
+                }
+                if (destinationModel != null)
+                {
+                    destinationModel.MessageCount += moved;
+                    destinationModel.UnreadCount += unread;
+                }
+
+                var sourceCanonical = _canonicalFolders.Values.FirstOrDefault(folder =>
+                    folder.Bindings.Any(binding => binding.AccountId == group.Key &&
+                        binding.LegacyFullName.Equals(sourceGroup.Key, StringComparison.OrdinalIgnoreCase)));
+                if (sourceCanonical != null)
+                {
+                    AddDelta(canonicalDeltas, sourceCanonical.FolderId, -moved, -unread);
+                    affectedCanonicalIds.Add(sourceCanonical.FolderId);
+                }
+                if (destinationCanonicalId is { } canonicalId)
+                {
+                    AddDelta(canonicalDeltas, canonicalId, moved, unread);
+                    affectedCanonicalIds.Add(canonicalId);
+                }
+            }
+
+            if (destinationCanonicalId is { } id && _canonicalFolders.TryGetValue(id, out var canonical) &&
+                !canonical.Bindings.Any(binding => binding.AccountId == group.Key &&
+                    binding.LegacyFullName.Equals(destinationName, StringComparison.OrdinalIgnoreCase)))
+            {
+                _canonicalFolders[id] = canonical with
+                {
+                    Bindings = canonical.Bindings.Append(
+                        new CanonicalLocalFolderBinding(group.Key, destinationName)).ToList(),
+                };
+            }
+        }
+
+        foreach (var (id, delta) in canonicalDeltas)
+        {
+            if (!_canonicalFolders.TryGetValue(id, out var folder)) continue;
+            _canonicalFolders[id] = folder with
+            {
+                MessageCount = Math.Max(0, folder.MessageCount + delta.Messages),
+                UnreadCount = Math.Max(0, folder.UnreadCount + delta.Unread),
+            };
+        }
+        if (_canonicalLocalTree != null && affectedCanonicalIds.Count > 0)
+            _canonicalLocalTree = new CanonicalLocalFolderTree(_canonicalLocalTree.Folders
+                .Select(folder => _canonicalFolders.GetValueOrDefault(folder.FolderId, folder)).ToList());
+
+        foreach (var node in FlattenAllNodes(FolderTree))
+        {
+            if (node.Folder == null || !TryParseCanonicalFolder(node.Folder.FullName, out var id) ||
+                !affectedCanonicalIds.Contains(id) || !_canonicalFolders.TryGetValue(id, out var canonical)) continue;
+            node.Folder.MessageCount = canonical.MessageCount;
+            node.Folder.UnreadCount = canonical.UnreadCount;
+            node.NotifyUnreadChanged();
+        }
     }
 
     [RelayCommand]
@@ -7615,7 +8685,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 if (!OnlineMode)
                     await _localStore.DeleteSummariesAsync(group.Key.AccountId, group.Key.FolderName, uids);
             }
-
             // Archiving an unread message changes the source and destination folder counts; refresh
             // after the move lands (only when an unread message actually moved). The account unread
             // total is unchanged — the message is still in the account, just a different folder.
@@ -7680,6 +8749,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     public event EventHandler<(string Text, AnnouncementCategory Category)>? AnnouncementRequested;
     public event EventHandler? RulesManagerRequested;
     public event EventHandler<MailRule>? CreateRuleFromMessageRequested;
+    public event EventHandler? FilterAllLikeThisRequested;
     public event EventHandler? TutorialRequested;
     public event EventHandler? AboutRequested;
     public event EventHandler? ReportBugRequested;
@@ -7875,6 +8945,52 @@ public partial class MainViewModel : ObservableObject, IDisposable
     }
 
     [RelayCommand]
+    private async Task SendAgain()
+    {
+        var detail = await EnsureDetailAsync();
+        if (detail == null) return;
+        var model = ComposeViewModel.CreateSendAgain(detail, detail.AccountId);
+        if (detail.Attachments.Count > 0)
+        {
+            IsBusy = true;
+            try
+            {
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+                var loaded = new List<AttachmentModel>();
+                for (var index = 0; index < detail.Attachments.Count; index++)
+                {
+                    var attachment = detail.Attachments[index];
+                    StatusText = $"Preparing attachment {index + 1}/{detail.Attachments.Count}…";
+                    if (!attachment.IsLoaded && attachment.PartSpecifier != null)
+                    {
+                        try
+                        {
+                            attachment.Content = await _imap.DownloadAttachmentAsync(detail.AccountId,
+                                detail.FolderName, detail.MessageId, attachment.PartSpecifier, cts.Token);
+                        }
+                        catch (Exception ex) when (ex is not OperationCanceledException)
+                        {
+                            LogService.Log($"Send again: failed to load '{attachment.FileName}'", ex);
+                        }
+                    }
+                    if (attachment.IsLoaded) loaded.Add(attachment);
+                }
+                model.Attachments = loaded;
+                var omitted = detail.Attachments.Count - loaded.Count;
+                if (omitted > 0)
+                    Announce($"{omitted} attachment{(omitted == 1 ? "" : "s")} could not be copied.",
+                        AnnouncementCategory.Status);
+            }
+            finally
+            {
+                IsBusy = false;
+                StatusText = string.Empty;
+            }
+        }
+        ComposeRequested?.Invoke(model);
+    }
+
+    [RelayCommand]
     private async Task Forward()
     {
         var detail = await EnsureDetailAsync();
@@ -8033,16 +9149,82 @@ public partial class MainViewModel : ObservableObject, IDisposable
         var source = SelectedMessage;
         if (source == null) return;
 
+        var sender = SenderMailbox(source.From);
+
         var template = new MailRule
         {
-            Name = $"Rule for {source.From}",
-            FromContains = source.From,
+            Name = $"Rule for {sender}",
+            FromContains = sender,
             ApplyAutomatically = false,
+            AlsoFilterOutMailbox = _configService.Load().MarkAlsoFilterOutMailboxByDefault,
             SubjectContains = string.IsNullOrWhiteSpace(source.Subject) ? null : source.Subject,
             AccountId = null,
         };
 
         CreateRuleFromMessageRequested?.Invoke(this, template);
+    }
+
+    [RelayCommand]
+    private void FilterAllLikeThis() => FilterAllLikeThisRequested?.Invoke(this, EventArgs.Empty);
+
+    public static string SenderMailbox(string? from)
+    {
+        if (string.IsNullOrWhiteSpace(from)) return string.Empty;
+        var match = System.Text.RegularExpressions.Regex.Match(from,
+            @"[A-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Z0-9.-]+", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        return match.Success ? match.Value : from.Trim();
+    }
+
+    /// <summary>
+    /// Repairs a legacy IMAP summary that contains only a friendly sender alias. The operation
+    /// requests one envelope (not the body), persists the corrected summary, and updates the live
+    /// row and preview header. It is safe to call before creating a rule because it returns the
+    /// best mailbox value available even when the account is offline.
+    /// </summary>
+    public async Task<string> EnsureSenderAddressAsync(
+        MailMessageSummary summary, CancellationToken ct = default)
+    {
+        var current = SenderMailbox(summary.From);
+        if (current.Contains('@')) return current;
+
+        var account = Accounts.FirstOrDefault(a => a.Id == summary.AccountId);
+        if (account?.BackendKind != BackendKind.ImapSmtp || !_imap.IsConnected(summary.AccountId))
+            return current;
+
+        try
+        {
+            using var timing = PerformanceLogService.Measure("IMAP: repair cached sender",
+                $"account={summary.AccountId}; folder={summary.FolderName}; uid={summary.MessageId}");
+            var fresh = await _imap.GetMessageSummaryAsync(
+                summary.AccountId, summary.FolderName, summary.MessageId, ct);
+            var repaired = SenderMailbox(fresh?.From);
+            if (fresh == null || !repaired.Contains('@')) return current;
+
+            // Direction is local metadata and must survive a header-only server refresh after the
+            // message has been filed away from Inbox/Sent.
+            fresh.Direction = summary.Direction;
+            if (!OnlineMode)
+                await _localStore.UpsertSummariesAsync([fresh]);
+
+            _ui.Invoke(() =>
+            {
+                summary.From = fresh.From;
+                if (MessageDetail?.AccountId == summary.AccountId &&
+                    MessageDetail.FolderName == summary.FolderName &&
+                    MessageDetail.MessageId == summary.MessageId)
+                    MessageDetail.From = fresh.From;
+            });
+            return repaired;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            return current;
+        }
+        catch (Exception ex)
+        {
+            LogService.Log("Repair legacy IMAP sender address", ex);
+            return current;
+        }
     }
 
     /// <summary>True when the currently selected folder is a Drafts folder.</summary>
@@ -8076,6 +9258,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
             To = source.To, Cc = source.Cc, Bcc = source.Bcc, Subject = source.Subject,
             Body = source.Body, Mode = source.Mode, HtmlBody = source.HtmlBody,
             SpellLanguage = source.SpellLanguage, Attachments = source.Attachments,
+            InReplyToMessageId = source.InReplyToMessageId,
+            ReplySourceAccountId = source.ReplySourceAccountId,
+            ReplySourceFolderName = source.ReplySourceFolderName,
+            ReplySourceMessageId = source.ReplySourceMessageId,
             ScheduledId = item.Id, ScheduledLocalMessageId = item.LocalMessageId ?? summary.MessageId,
             ScheduledAt = item.SendAtUtc,
         });
@@ -8289,6 +9475,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// the View also honours the MVVM rule that VMs do not touch <c>Application</c>.</summary>
     public event Action? ExitRequested;
 
+    /// <summary>
+    /// Raised on the UI thread for genuinely-new inbox mail so the permanent tray icon can expose
+    /// an unread indicator independently of the optional Windows toast setting.
+    /// </summary>
+    public event Action<string, int>? NewMailArrived;
+
     /// <summary>Raised on the UI thread once the startup connect pass has completed. Lets a deferred
     /// notification activation (cold start) open its message once the account is reachable.</summary>
     public event Action? StartupConnectCompleted;
@@ -8432,7 +9624,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// </summary>
     private void ScheduleFolderCountRefresh(Guid accountId)
     {
-        if (accountId == Guid.Empty) return;
+        if (accountId == Guid.Empty || Volatile.Read(ref _disposeState) != 0) return;
         // Only IMAP accounts get STATUS sweeps: skip unknown ids and Graph accounts (which get counts
         // from a different path). Guarding null here avoids scheduling a doomed GetFoldersAsync.
         var account = Accounts.FirstOrDefault(a => a.Id == accountId);
@@ -8440,7 +9632,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         if (_folderCountCts.TryGetValue(accountId, out var old))
         {
-            try { old.Cancel(); old.Dispose(); } catch { }
+            try { old.Cancel(); } catch { }
         }
         var cts = new CancellationTokenSource();
         _folderCountCts[accountId] = cts;
@@ -8483,12 +9675,46 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         if (!_cachedFolders.TryGetValue(accountId, out var cached)) return;
 
-        var byName = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        foreach (var f in fresh) byName[f.FullName] = f.UnreadCount;
+        var previousByName = cached.ToDictionary(folder => folder.FullName,
+            folder => (folder.UnreadCount, folder.MessageCount), StringComparer.OrdinalIgnoreCase);
+        var byName = new Dictionary<string, (int Unread, int Total)>(StringComparer.OrdinalIgnoreCase);
+        foreach (var f in fresh) byName[f.FullName] = (f.UnreadCount, f.MessageCount);
 
         foreach (var c in cached)
-            if (byName.TryGetValue(c.FullName, out var unread))
-                c.UnreadCount = unread;
+            if (byName.TryGetValue(c.FullName, out var counts))
+            {
+                c.UnreadCount = counts.Unread;
+                c.MessageCount = counts.Total;
+            }
+
+        // Canonical records contain the sum of their physical bindings as loaded from SQLite.
+        // Replace this account's old contribution immediately; otherwise a bound In/Junk node keeps
+        // the stale database value while an unbound IMAP node uses the fresh STATUS value.
+        if (_canonicalLocalTree != null)
+        {
+            var replacements = new Dictionary<Guid, CanonicalLocalFolder>();
+            foreach (var canonical in _canonicalFolders.Values)
+            {
+                var bindings = canonical.Bindings.Where(binding => binding.AccountId == accountId).ToList();
+                if (bindings.Count == 0) continue;
+                var unreadDelta = bindings.Sum(binding =>
+                    byName.GetValueOrDefault(binding.LegacyFullName).Unread -
+                    previousByName.GetValueOrDefault(binding.LegacyFullName).UnreadCount);
+                var totalDelta = bindings.Sum(binding =>
+                    byName.GetValueOrDefault(binding.LegacyFullName).Total -
+                    previousByName.GetValueOrDefault(binding.LegacyFullName).MessageCount);
+                if (unreadDelta == 0 && totalDelta == 0) continue;
+                replacements[canonical.FolderId] = canonical with
+                {
+                    UnreadCount = Math.Max(0, canonical.UnreadCount + unreadDelta),
+                    MessageCount = Math.Max(0, canonical.MessageCount + totalDelta),
+                };
+            }
+            foreach (var (id, replacement) in replacements) _canonicalFolders[id] = replacement;
+            if (replacements.Count > 0)
+                _canonicalLocalTree = new CanonicalLocalFolderTree(_canonicalLocalTree.Folders
+                    .Select(folder => replacements.GetValueOrDefault(folder.FolderId, folder)).ToList());
+        }
 
         var account = Accounts.FirstOrDefault(a => a.Id == accountId);
         if (account != null)
@@ -8498,8 +9724,23 @@ public partial class MainViewModel : ObservableObject, IDisposable
         // user's place in the folder tree is undisturbed.
         if (FolderTree != null)
             foreach (var n in FlattenAllNodes(FolderTree))
-                if (n.Folder is { } mf && mf.AccountId == accountId)
+            {
+                if (n.Folder is not { } mf) continue;
+                if (mf.AccountId == accountId)
                     n.NotifyUnreadChanged();
+
+                // Canonical system nodes have Guid.Empty as their visible account id and aggregate
+                // local bindings plus unbound IMAP system folders. Recompute them whenever any one
+                // account reports fresh counts; otherwise In/Junk remain stuck on startup values.
+                if (TryParseCanonicalFolder(mf.FullName, out var canonicalId) &&
+                    _canonicalFolders.TryGetValue(canonicalId, out var canonical))
+                {
+                    var (unread, total) = CanonicalDisplayCounts(canonical);
+                    mf.UnreadCount = unread;
+                    mf.MessageCount = total;
+                    n.NotifyUnreadChanged();
+                }
+            }
     }
 
     /// <summary>
@@ -8660,27 +9901,150 @@ public partial class MainViewModel : ObservableObject, IDisposable
         return full.IndexOfAny(['/', '.'], dest.Length + 1) < 0;
     }
 
+    public bool IsInvalidFolderMoveTarget(MailFolderModel source, MailFolderModel destination,
+        out string reason)
+    {
+        reason = string.Empty;
+        if (source.AccountId != destination.AccountId)
+        {
+            reason = "Folders can only be moved within the same account.";
+            return true;
+        }
+        if (string.Equals(source.FullName, destination.FullName, StringComparison.OrdinalIgnoreCase))
+        {
+            reason = "A folder cannot be moved into itself.";
+            return true;
+        }
+        if (IsAlreadyUnder(source, destination))
+        {
+            reason = $"'{source.DisplayName}' is already in {destination.DisplayName}.";
+            return true;
+        }
+
+        if (source.ParentId == null)
+        {
+            var prefix = source.FullName + FolderSeparatorFor(source);
+            if (destination.FullName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                reason = "A folder cannot be moved into one of its subfolders.";
+                return true;
+            }
+        }
+        else if (_cachedFolders.TryGetValue(source.AccountId, out var folders))
+        {
+            var parentId = destination.ParentId;
+            var visited = new HashSet<string>(StringComparer.Ordinal);
+            while (!string.IsNullOrEmpty(parentId) && visited.Add(parentId))
+            {
+                if (string.Equals(parentId, source.FullName, StringComparison.Ordinal))
+                {
+                    reason = "A folder cannot be moved into one of its subfolders.";
+                    return true;
+                }
+                parentId = folders.FirstOrDefault(f =>
+                    string.Equals(f.FullName, parentId, StringComparison.Ordinal))?.ParentId;
+            }
+        }
+        return false;
+    }
+
+    public bool WillMergeFolderMove(MailFolderModel source, MailFolderModel destination)
+    {
+        if (TryParseCanonicalFolder(source.FullName, out var sourceId) &&
+            TryParseCanonicalFolder(destination.FullName, out var destinationId) &&
+            _canonicalFolders.TryGetValue(sourceId, out var canonicalSource) &&
+            _canonicalFolders.TryGetValue(destinationId, out var canonicalDestination))
+        {
+            var targetPath = canonicalDestination.CanonicalPath.Length == 0
+                ? canonicalSource.Name
+                : canonicalDestination.CanonicalPath + "/" + canonicalSource.Name;
+            return _canonicalFolders.Values.Any(folder => folder.FolderId != sourceId &&
+                folder.RootId == canonicalSource.RootId &&
+                folder.CanonicalPath.Equals(targetPath, StringComparison.OrdinalIgnoreCase));
+        }
+        if (!_cachedFolders.TryGetValue(source.AccountId, out var folders)) return false;
+        var separator = FolderSeparatorFor(source);
+        var target = destination.FullName.TrimEnd('/', '.') + separator + source.DisplayName;
+        return folders.Any(folder => folder.FullName.Equals(target, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private char FolderSeparatorFor(MailFolderModel folder)
+    {
+        // QuickMail's local POP3/archive hierarchy is canonicalized with '/'. Do not infer '.'
+        // from a perfectly valid folder name such as "microsoft.com".
+        if (Accounts.FirstOrDefault(a => a.Id == folder.AccountId)?.BackendKind
+            is BackendKind.Pop3Smtp or BackendKind.LocalArchive)
+            return '/';
+        if (_cachedFolders.TryGetValue(folder.AccountId, out var folders))
+        {
+            var child = folders.FirstOrDefault(f => f.FullName.Length > folder.FullName.Length + 1
+                && f.FullName.StartsWith(folder.FullName, StringComparison.OrdinalIgnoreCase)
+                && f.FullName[folder.FullName.Length] is '/' or '.');
+            if (child != null) return child.FullName[folder.FullName.Length];
+        }
+        return folder.FullName.Contains('/') ? '/' : folder.FullName.Contains('.') ? '.' : '/';
+    }
+
     public async Task MoveFolderToAsync(FolderTreeNode node, MailFolderModel destination)
     {
         if (node.Folder == null) return;
-        if (IsAlreadyUnder(node.Folder, destination))
+        using var timing = PerformanceLogService.Measure("Folder move: total",
+            $"from={node.Folder.FullName}; toParent={destination.FullName}");
+        if (TryParseCanonicalFolder(node.Folder.FullName, out var canonicalSourceId) &&
+            TryParseCanonicalFolder(destination.FullName, out var canonicalParentId))
         {
-            StatusText = $"'{node.Label}' is already in {destination.DisplayName}.";
+            StatusText = $"Moving folder '{node.Label}'…";
+            IsBusy = true;
+            try
+            {
+                var result = await _localStore.MoveCanonicalFolderAsync(canonicalSourceId, canonicalParentId);
+                UpdateRuleTargetsAfterFolderMove(null, result.OldPath, result.NewPath, '/');
+                await ReloadCanonicalLocalTreeAsync(rebuildTree: true, refreshPhysicalCache: true);
+                StatusText = result.WasMerged
+                    ? $"Folder '{node.Label}' merged."
+                    : $"Folder '{node.Label}' moved.";
+            }
+            catch (Exception ex)
+            {
+                StatusText = $"Failed to move folder: {ex.Message}";
+                LogService.Log("MoveCanonicalFolder", ex);
+            }
+            finally { IsBusy = false; }
+            return;
+        }
+        if (IsInvalidFolderMoveTarget(node.Folder, destination, out var invalidReason))
+        {
+            StatusText = invalidReason;
             Announce(StatusText);
             return;
         }
+        var oldPath = node.Folder.FullName;
+        var separator = FolderSeparatorFor(node.Folder);
+        var newPath = node.Folder.ParentId != null
+            ? oldPath
+            : destination.FullName.TrimEnd('/', '.') + separator + node.Folder.DisplayName;
         StatusText = $"Moving folder '{node.Label}'…";
         IsBusy     = true;
         try
         {
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            var stage = Stopwatch.GetTimestamp();
             await _imap.RenameFolderAsync(
                 node.Folder.AccountId,
                 node.Folder.FullName,
                 node.Folder.DisplayName,
                 destination.FullName,
                 cts.Token);
+            PerformanceLogService.Record("Folder move: backend/database rename",
+                Stopwatch.GetElapsedTime(stage), $"from={oldPath}; to={newPath}");
+            stage = Stopwatch.GetTimestamp();
+            UpdateRuleTargetsAfterFolderMove(node.Folder.AccountId, oldPath, newPath, separator);
+            PerformanceLogService.Record("Folder move: update rule targets",
+                Stopwatch.GetElapsedTime(stage), $"from={oldPath}; to={newPath}");
+            stage = Stopwatch.GetTimestamp();
             await RefreshFolderListAsync(node.Folder.AccountId);
+            PerformanceLogService.Record("Folder move: refresh folder tree",
+                Stopwatch.GetElapsedTime(stage), $"account={node.Folder.AccountId}");
             StatusText = $"Folder '{node.Label}' moved.";
         }
         catch (Exception ex)
@@ -8689,6 +10053,83 @@ public partial class MainViewModel : ObservableObject, IDisposable
             LogService.Log("MoveFolder", ex);
         }
         finally { IsBusy = false; }
+    }
+
+    public async Task RenameFolderAsync(FolderTreeNode node, string newName)
+    {
+        if (node.Folder == null) return;
+        newName = newName.Trim();
+        if (newName.Length == 0 || newName.IndexOfAny(['/', '\\']) >= 0)
+        {
+            StatusText = "Folder names cannot be empty or contain path separators.";
+            return;
+        }
+
+        var folder = node.Folder;
+        StatusText = $"Renaming folder '{node.Label}'…";
+        IsBusy = true;
+        try
+        {
+            if (TryParseCanonicalFolder(folder.FullName, out var canonicalId))
+            {
+                var result = await _localStore.RenameCanonicalFolderAsync(canonicalId, newName);
+                UpdateRuleTargetsAfterFolderMove(null, result.OldPath, result.NewPath, '/');
+                await ReloadCanonicalLocalTreeAsync(rebuildTree: true, refreshPhysicalCache: true);
+                StatusText = $"Folder '{node.Label}' renamed to '{newName}'.";
+                return;
+            }
+
+            var account = Accounts.FirstOrDefault(candidate => candidate.Id == folder.AccountId);
+            var separator = FolderSeparatorFor(folder);
+            string? parent = folder.ParentId;
+            if (account?.BackendKind != BackendKind.MicrosoftGraph && string.IsNullOrWhiteSpace(parent))
+            {
+                var cut = folder.FullName.LastIndexOf(separator);
+                parent = cut < 0 ? null : folder.FullName[..cut];
+            }
+
+            var oldPath = folder.FullName;
+            await _imap.RenameFolderAsync(folder.AccountId, folder.FullName, newName, parent);
+            if (account?.BackendKind != BackendKind.MicrosoftGraph)
+            {
+                var newPath = string.IsNullOrWhiteSpace(parent)
+                    ? newName : parent.TrimEnd('/', '.') + separator + newName;
+                UpdateRuleTargetsAfterFolderMove(folder.AccountId, oldPath, newPath, separator);
+            }
+            await RefreshFolderListAsync(folder.AccountId);
+            StatusText = $"Folder '{node.Label}' renamed to '{newName}'.";
+        }
+        catch (Exception ex)
+        {
+            StatusText = $"Failed to rename folder: {ex.Message}";
+            LogService.Log("RenameFolder", ex);
+        }
+        finally { IsBusy = false; }
+    }
+
+    private void UpdateRuleTargetsAfterFolderMove(Guid? accountId, string oldPath, string newPath, char separator)
+    {
+        if (string.Equals(oldPath, newPath, StringComparison.Ordinal)) return;
+        var rules = _ruleService.LoadRules();
+        var changed = false;
+        var descendantPrefix = oldPath + separator;
+        foreach (var rule in rules)
+        {
+            if (accountId is Guid movedAccount && rule.AccountId is Guid scopedAccount && scopedAccount != movedAccount) continue;
+            var target = rule.TargetFolder;
+            if (string.IsNullOrWhiteSpace(target)) continue;
+            if (string.Equals(target, oldPath, StringComparison.OrdinalIgnoreCase))
+            {
+                rule.TargetFolder = newPath;
+                changed = true;
+            }
+            else if (target.StartsWith(descendantPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                rule.TargetFolder = newPath + target[oldPath.Length..];
+                changed = true;
+            }
+        }
+        if (changed) _ruleService.SaveRules(rules);
     }
 
     /// <summary>Copies a folder (and all its messages) to a new parent and refreshes the tree.</summary>
@@ -8732,6 +10173,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         if (node.Folder == null || node.IsHeader) return false;
 
+        if (TryParseCanonicalFolder(node.Folder.FullName, out var canonicalId))
+            return await DeleteCanonicalFolderAsync(node, canonicalId);
+
         if (ConfirmationRequested?.Invoke(
             $"Delete the folder '{node.Label}' and move all its messages to Trash?",
             "Delete Folder") != true) return false;
@@ -8769,6 +10213,77 @@ public partial class MainViewModel : ObservableObject, IDisposable
         finally { IsBusy = false; }
     }
 
+    private async Task<bool> DeleteCanonicalFolderAsync(FolderTreeNode node, Guid folderId)
+    {
+        if (!_canonicalFolders.TryGetValue(folderId, out var source) || source.ParentFolderId == null)
+        {
+            StatusText = "The tree root cannot be deleted.";
+            return false;
+        }
+        if (ConfirmationRequested?.Invoke(
+            $"Delete the folder '{node.Label}' and all its subfolders, move their messages to Trash, and remove filters that target them?",
+            "Delete Folder") != true) return false;
+
+        StatusText = $"Deleting folder '{node.Label}'…";
+        IsBusy = true;
+        try
+        {
+            var subtree = _canonicalFolders.Values.Where(folder => folder.RootId == source.RootId &&
+                (folder.FolderId == folderId || folder.CanonicalPath.StartsWith(
+                    source.CanonicalPath + "/", StringComparison.OrdinalIgnoreCase))).ToList();
+            var bindings = subtree.SelectMany(folder => folder.Bindings).Distinct().ToList();
+            var trash = _canonicalFolders.Values.FirstOrDefault(folder => folder.RootId == source.RootId &&
+                folder.Kind == SpecialFolderKind.Trash);
+            if (trash == null) throw new InvalidOperationException("No Trash folder exists in this tree.");
+            if (_localStore is not ILocalMailboxStore mailboxStore)
+                throw new InvalidOperationException("The local mailbox store is unavailable.");
+
+            using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(5));
+            foreach (var binding in bindings)
+            {
+                var trashPath = trash.Bindings.FirstOrDefault(candidate => candidate.AccountId == binding.AccountId)?.LegacyFullName
+                                ?? await _localStore.EnsureCanonicalFolderBindingAsync(trash.FolderId, binding.AccountId);
+                var ids = await _localStore.GetAllMessageIdsAsync(binding.AccountId, binding.LegacyFullName);
+                if (ids.Count != 0)
+                    await mailboxStore.MoveLocalMessagesAsync(binding.AccountId, binding.LegacyFullName,
+                        trashPath, ids.ToList(), cts.Token);
+            }
+
+            var aliases = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var folder in subtree)
+            {
+                aliases.Add(CanonicalFolderPrefix + folder.FolderId.ToString("D"));
+                aliases.Add(folder.CanonicalPath);
+                foreach (var binding in folder.Bindings) aliases.Add(binding.LegacyFullName);
+            }
+            var rules = _ruleService.LoadRules();
+            var removedRules = rules.RemoveAll(rule => !string.IsNullOrWhiteSpace(rule.TargetFolder) &&
+                aliases.Contains(rule.TargetFolder));
+            if (removedRules != 0) _ruleService.SaveRules(rules);
+
+            await _localStore.DeleteCanonicalFolderTreeAsync(folderId);
+            var selectedWasDeleted = SelectedFolder != null && TryParseCanonicalFolder(
+                SelectedFolder.FullName, out var selectedId) && subtree.Any(folder => folder.FolderId == selectedId);
+            await ReloadCanonicalLocalTreeAsync(rebuildTree: true, refreshPhysicalCache: true);
+            if (selectedWasDeleted)
+            {
+                FallBackToAllMail();
+                await FetchAllMailAsync();
+            }
+            StatusText = removedRules == 0
+                ? $"Folder '{node.Label}' deleted."
+                : $"Folder '{node.Label}' and {removedRules} targeting filter(s) deleted.";
+            return true;
+        }
+        catch (Exception ex)
+        {
+            StatusText = $"Failed to delete folder: {ex.Message}";
+            LogService.Log("DeleteCanonicalFolder", ex);
+            return false;
+        }
+        finally { IsBusy = false; }
+    }
+
     // ── Message move / copy ───────────────────────────────────────────────────
 
     /// <summary>
@@ -8781,9 +10296,16 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// picker opens pre-selected on the folder the messages came from: activating "Copy to Folder…"
     /// with Enter and a repeated keypress would otherwise be enough.</para>
     /// </summary>
-    private static bool AlreadyIn(IReadOnlyList<MailMessageSummary> messages, MailFolderModel destination) =>
-        messages.All(m => m.AccountId == destination.AccountId &&
-                          string.Equals(m.FolderName, destination.FullName, StringComparison.Ordinal));
+    private bool AlreadyIn(IReadOnlyList<MailMessageSummary> messages, MailFolderModel destination)
+    {
+        if (TryParseCanonicalFolder(destination.FullName, out var canonicalId) &&
+            _canonicalFolders.TryGetValue(canonicalId, out var canonical))
+            return messages.All(message => canonical.Bindings.Any(binding =>
+                binding.AccountId == message.AccountId && string.Equals(binding.LegacyFullName,
+                    message.FolderName, StringComparison.OrdinalIgnoreCase)));
+        return messages.All(m => m.AccountId == destination.AccountId &&
+            string.Equals(m.FolderName, destination.FullName, StringComparison.Ordinal));
+    }
 
     // ── Last message destination (#515) ───────────────────────────────────────
     //
@@ -8882,6 +10404,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         IsBusy     = true;
         try
         {
+            var totalStarted = Stopwatch.GetTimestamp();
             // Own token per move (same rationale as delete) — a follow-up action no longer cancels
             // this move's in-flight IMAP work. Cancels only at app shutdown. (#311)
             using var actionCts = CancellationTokenSource.CreateLinkedTokenSource(_messageActionShutdownCts.Token);
@@ -8890,13 +10413,29 @@ public partial class MainViewModel : ObservableObject, IDisposable
             var groups = messages.GroupBy(m => (m.AccountId, m.FolderName));
             foreach (var group in groups)
             {
+                var stageStarted = Stopwatch.GetTimestamp();
                 var uids = group.Select(m => m.MessageId).ToList();
+                var isCanonicalDestination = TryParseCanonicalFolder(destination.FullName, out var canonicalId);
+                var destinationName = isCanonicalDestination
+                    ? await _localStore.EnsureCanonicalFolderBindingAsync(canonicalId, group.Key.AccountId)
+                    : destination.FullName;
+                PerformanceLogService.Record("Message move: resolve destination",
+                    Stopwatch.GetElapsedTime(stageStarted),
+                    $"messages={uids.Count}; source={group.Key.FolderName}; destination={destinationName}");
+                stageStarted = Stopwatch.GetTimestamp();
                 await _imap.MoveMessagesAsync(
                     group.Key.AccountId, group.Key.FolderName, uids,
-                    destination.FullName, ct);
+                    destinationName, ct);
+                PerformanceLogService.Record("Message move: update local store",
+                    Stopwatch.GetElapsedTime(stageStarted),
+                    $"messages={uids.Count}; source={group.Key.FolderName}; destination={destinationName}");
                 if (!OnlineMode)
                     await _localStore.DeleteSummariesAsync(group.Key.AccountId, group.Key.FolderName, uids);
+                ApplyOptimisticMoveCountDelta(group.ToList(), destinationName,
+                    isCanonicalDestination ? canonicalId : null);
             }
+            PerformanceLogService.Record("Message move: total",
+                Stopwatch.GetElapsedTime(totalStarted), $"messages={messages.Count}; destination={destination.DisplayName}");
 
             // Moving an unread message changes both the source and destination folder counts; refresh
             // after the server move lands (only when an unread message actually moved) (#227 follow-up).
@@ -9779,7 +11318,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private async Task OpenCalendarAsync()
     {
         if (CalendarVm == null) return;
-        await SelectFolderCommand.ExecuteAsync(CalendarFolder);
+        await ActivateCalendarTabAsync();
     }
 
     /// <summary>
@@ -9805,7 +11344,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     /// <summary>
     /// Schedules a debounced calendar harvest 2 seconds after the last FolderSynced event.
-    /// Runs on the UI thread via Dispatcher so the CalendarService refresh is safe.
+    /// The expensive harvest runs on a worker thread; only the final filter update is posted
+    /// back to the UI thread.
     /// </summary>
     private void ScheduleCalendarHarvest()
     {
@@ -9817,7 +11357,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             _ui.Post(async () =>
             {
                 if (_calendarService == null || CalendarVm == null) return;
-                await _calendarService.RefreshAsync();
+                await Task.Run(() => _calendarService.RebuildAsync());
                 // Only re-apply filters if the calendar view is active (no UI churn otherwise).
                 if (IsCalendarView)
                     CalendarVm.ApplyFiltersFromExternalUpdate();
@@ -9869,6 +11409,28 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (_calendarService == null || OnlineMode) { _calendarSources = []; return; }
         try { _calendarSources = await _localStore.LoadCalendarSourcesAsync(); }
         catch (Exception ex) { LogService.Log("LoadCalendarSources", ex); }
+        RebuildCalendarSourceChoices();
+    }
+
+    private void RebuildCalendarSourceChoices()
+    {
+        if (CalendarVm == null) return;
+        var choices = new List<CalendarViewModel.SourceChoice>
+        {
+            new("All Calendars", new CalendarFilter(null, null)),
+            new("Local Calendar", new CalendarFilter(Guid.Empty, null)),
+        };
+        foreach (var account in Accounts.Where(a => a.SyncCalendar))
+        {
+            choices.Add(new CalendarViewModel.SourceChoice(
+                account.AccountLabel, new CalendarFilter(account.Id, null)));
+            var calendars = _calendarSources.Where(x => x.AccountId == account.Id).ToList();
+            if (calendars.Count > 1)
+                foreach (var (_, id, name) in calendars)
+                    choices.Add(new CalendarViewModel.SourceChoice(
+                        $"{account.AccountLabel} — {name}", new CalendarFilter(account.Id, id)));
+        }
+        CalendarVm.SetSourceChoices(choices);
     }
 
     private async Task RunGraphCalendarSyncAsync(bool refreshAndAnnounce = true)

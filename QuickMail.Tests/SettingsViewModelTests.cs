@@ -116,6 +116,21 @@ public class SettingsViewModelTests
     }
 
     [Fact]
+    public void NewMailTrayIcon_LoadsAndSavesIndependently()
+    {
+        var configService = new StubConfigService();
+        var vm = new SettingsViewModel(configService, new StubCommandRegistry());
+
+        Assert.True(vm.NotifyTrayIconOnNewMail);
+        vm.NotifyTrayIconOnNewMail = false;
+        vm.NotifyOnNewMail = true;
+        vm.SaveCommand.Execute(null);
+
+        Assert.False(configService.Load().NotifyTrayIconOnNewMail);
+        Assert.True(configService.Load().NotifyOnNewMail);
+    }
+
+    [Fact]
     public void CloseToTray_LoadsAndSaves()
     {
         var configService = new StubConfigService();

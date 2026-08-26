@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using QuickMail.Models;
@@ -11,6 +12,8 @@ namespace QuickMail.Services;
 
 public class RuleService : IRuleService
 {
+    private const string CanonicalFolderPrefix = "\u0000LocalFolder:";
+    private const string PrintableCanonicalFolderPrefix = "LocalFolder:";
     private readonly string _filePath;
     private readonly IMailService _imap;
     private readonly ILocalStoreService _store;
@@ -101,7 +104,7 @@ public class RuleService : IRuleService
     }
 
     private static string SemanticKey(MailRule r) => string.Join('\u001f',
-        r.Name, r.IsEnabled, r.ApplyAutomatically,
+        r.Name, r.IsEnabled, r.ApplyAutomatically, r.AlsoFilterOutMailbox,
         r.UseFromCondition, r.FromContains,
         r.UseToCondition, r.ToContains,
         r.UseSubjectCondition, r.SubjectContains,
@@ -116,6 +119,38 @@ public class RuleService : IRuleService
 
         Helpers.AtomicFile.WriteAllText(_filePath, JsonSerializer.Serialize(rules, JsonOptions));
         _loaded = true;
+    }
+
+    public (MailRule Rule, bool Created) SaveOrUpdateQuickMoveRule(MailRule candidate)
+    {
+        ArgumentNullException.ThrowIfNull(candidate);
+        if (candidate.Action != RuleAction.MoveToFolder || !candidate.UseFromCondition ||
+            string.IsNullOrWhiteSpace(candidate.FromContains) || string.IsNullOrWhiteSpace(candidate.TargetFolder))
+            throw new ArgumentException("A quick move rule requires a FROM condition and destination folder.", nameof(candidate));
+
+        var rules = LoadRules();
+        var criterion = candidate.FromContains.Trim();
+        var existing = rules.FirstOrDefault(rule =>
+            rule.Action == RuleAction.MoveToFolder &&
+            rule.AccountId is null &&
+            rule.UseFromCondition &&
+            string.Equals(rule.FromContains?.Trim(), criterion, StringComparison.OrdinalIgnoreCase) &&
+            !rule.UseToCondition && !rule.UseSubjectCondition && !rule.UseBodyCondition &&
+            !rule.MustHaveAttachments);
+
+        if (existing != null)
+        {
+            existing.TargetFolder = candidate.TargetFolder;
+            existing.AlsoMarkAsRead = true;
+            SaveRules(rules);
+            return (existing, false);
+        }
+
+        candidate.FromContains = criterion;
+        candidate.AlsoMarkAsRead = true;
+        rules.Add(candidate);
+        SaveRules(rules);
+        return (candidate, true);
     }
 
     // ── Rule Execution ──────────────────────────────────────────────────────
@@ -138,10 +173,18 @@ public class RuleService : IRuleService
         CancellationToken ct,
         bool automaticOnly)
     {
+        var started = System.Diagnostics.Stopwatch.GetTimestamp();
+        var perf = $"account={accountId}; messages={incoming.Count}; automaticOnly={automaticOnly}";
+        PerformanceLogService.Marker("Rules: apply batch BEGIN", perf);
         var rules = LoadRules();
         var enabledRules = rules.Where(r => r.IsEnabled && (!automaticOnly || r.ApplyAutomatically)).ToList();
         LogService.Debug($"ApplyRulesAsync: {enabledRules.Count} enabled rules, {incoming.Count} incoming messages for account {accountId}");
-        if (enabledRules.Count == 0) return (0, []);
+        if (enabledRules.Count == 0)
+        {
+            PerformanceLogService.Record("Rules: apply batch END",
+                System.Diagnostics.Stopwatch.GetElapsedTime(started), perf + "; enabled=0");
+            return (0, []);
+        }
 
         var bodies = new Dictionary<(Guid, string, string), string>();
         if (enabledRules.Any(r => r.UseBodyCondition && !string.IsNullOrEmpty(r.BodyContains)))
@@ -154,6 +197,10 @@ public class RuleService : IRuleService
                     : string.IsNullOrWhiteSpace(detail.PlainTextBody) ? detail.HtmlBody ?? string.Empty : detail.PlainTextBody;
             }
         }
+        var bodiesDone = System.Diagnostics.Stopwatch.GetTimestamp();
+        PerformanceLogService.Record("Rules: apply batch/load bodies",
+            System.Diagnostics.Stopwatch.GetElapsedTime(started, bodiesDone),
+            perf + $"; enabled={enabledRules.Count}; bodies={bodies.Count}");
 
         var affectedKeys = new HashSet<(string MessageId, Guid AccountId, string FolderName)>();
         var removedMessages = new List<MailMessageSummary>();
@@ -179,12 +226,11 @@ public class RuleService : IRuleService
             }
             if (matched.Count == 0) continue;
 
-            foreach (var m in matched)
-                affectedKeys.Add((m.MessageId, m.AccountId, m.FolderName));
-
             try
             {
                 await ExecuteActionAsync(rule, matched, accountId, ct);
+                foreach (var m in matched)
+                    affectedKeys.Add((m.MessageId, m.AccountId, m.FolderName));
 
                 // Remove messages from incoming that were moved or deleted so the
                 // UI doesn't show them in the original folder after FolderSynced fires.
@@ -201,9 +247,13 @@ public class RuleService : IRuleService
             catch (Exception ex)
             {
                 LogService.Log($"Rule '{rule.Name}' action failed", ex);
+                if (!automaticOnly) throw;
             }
         }
 
+        PerformanceLogService.Record("Rules: apply batch END",
+            System.Diagnostics.Stopwatch.GetElapsedTime(started),
+            perf + $"; enabled={enabledRules.Count}; matched={affectedKeys.Count}; removed={removedMessages.Count}");
         return (affectedKeys.Count, removedMessages);
     }
 
@@ -212,12 +262,19 @@ public class RuleService : IRuleService
         return messages.Where(m => MatchesRule(rule, m)).ToList();
     }
 
-    public async Task<int> ApplyRuleToMessagesAsync(
+    public bool IsMatch(MailRule rule, MailMessageSummary message, string? completeBody = null) =>
+        (!rule.AccountId.HasValue || rule.AccountId.Value == message.AccountId) &&
+        MatchesRule(rule, message, completeBody);
+
+    public async Task<(int MatchedCount, List<MailMessageSummary> RemovedMessages)> ApplyRuleToMessagesAsync(
         MailRule rule,
         List<MailMessageSummary> messages,
         ILocalStoreService store,
         CancellationToken ct)
     {
+        var started = System.Diagnostics.Stopwatch.GetTimestamp();
+        var perf = $"rule={rule.Name}; action={rule.Action}; messages={messages.Count}";
+        PerformanceLogService.Marker("Rules: apply one BEGIN", perf);
         var candidates = rule.AccountId is { } accountId
             ? messages.Where(m => m.AccountId == accountId).ToList()
             : messages;
@@ -238,7 +295,16 @@ public class RuleService : IRuleService
 
         var matched = candidates.Where(m => MatchesRule(rule, m,
             bodies.GetValueOrDefault((m.AccountId, m.FolderName, m.MessageId)))).ToList();
-        if (matched.Count == 0) return 0;
+        var matchDone = System.Diagnostics.Stopwatch.GetTimestamp();
+        PerformanceLogService.Record("Rules: apply one/evaluate",
+            System.Diagnostics.Stopwatch.GetElapsedTime(started, matchDone),
+            perf + $"; candidates={candidates.Count}; bodies={bodies.Count}; matched={matched.Count}");
+        if (matched.Count == 0)
+        {
+            PerformanceLogService.Record("Rules: apply one END",
+                System.Diagnostics.Stopwatch.GetElapsedTime(started), perf + "; matched=0");
+            return (0, []);
+        }
 
         foreach (var group in matched.GroupBy(m => m.AccountId))
             await ExecuteActionAsync(rule, group.ToList(), group.Key, ct);
@@ -249,37 +315,51 @@ public class RuleService : IRuleService
                 await store.DeleteSummariesAsync(group.Key.AccountId, group.Key.FolderName,
                     group.Select(m => m.MessageId));
         }
-        return matched.Count;
+        var removed = rule.Action is RuleAction.MoveToFolder or RuleAction.Delete ? matched : [];
+        PerformanceLogService.Record("Rules: apply one END",
+            System.Diagnostics.Stopwatch.GetElapsedTime(started),
+            perf + $"; matched={matched.Count}; removed={removed.Count}");
+        return (matched.Count, removed);
     }
 
     // ── Condition Matching ──────────────────────────────────────────────────
 
     private static bool MatchesRule(MailRule rule, MailMessageSummary msg, string? completeBody = null)
     {
+        var fromCandidate = msg.Direction == MessageDirection.Outgoing ? msg.To : msg.From;
         if (rule.UseFromCondition
             && !string.IsNullOrEmpty(rule.FromContains)
-            && !msg.From.Contains(rule.FromContains, StringComparison.OrdinalIgnoreCase))
+            && !MatchesText(fromCandidate, rule.FromContains))
             return false;
 
         if (rule.UseToCondition
             && !string.IsNullOrEmpty(rule.ToContains)
-            && !msg.To.Contains(rule.ToContains, StringComparison.OrdinalIgnoreCase))
+            && !MatchesText(msg.To, rule.ToContains))
             return false;
 
         if (rule.UseSubjectCondition
             && !string.IsNullOrEmpty(rule.SubjectContains)
-            && !msg.Subject.Contains(rule.SubjectContains, StringComparison.OrdinalIgnoreCase))
+            && !MatchesText(msg.Subject, rule.SubjectContains))
             return false;
 
         if (rule.UseBodyCondition
             && !string.IsNullOrEmpty(rule.BodyContains)
-            && !(completeBody ?? msg.Preview ?? string.Empty).Contains(rule.BodyContains, StringComparison.OrdinalIgnoreCase))
+            && !MatchesText(completeBody ?? msg.Preview ?? string.Empty, rule.BodyContains))
             return false;
 
         if (rule.MustHaveAttachments && !msg.HasAttachments)
             return false;
 
         return true;
+    }
+
+    private static bool MatchesText(string value, string criterion)
+    {
+        if (!criterion.Contains('*') && !criterion.Contains('?'))
+            return value.Contains(criterion, StringComparison.OrdinalIgnoreCase);
+        var pattern = Regex.Escape(criterion).Replace("\\*", ".*").Replace("\\?", ".");
+        return Regex.IsMatch(value, pattern, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
+            TimeSpan.FromMilliseconds(250));
     }
 
     // ── Action Execution ────────────────────────────────────────────────────
@@ -315,19 +395,22 @@ public class RuleService : IRuleService
 
     private async Task MarkAsReadAsync(List<MailMessageSummary> messages, CancellationToken ct)
     {
-        foreach (var msg in messages)
+        foreach (var group in messages.GroupBy(message => (message.AccountId, message.FolderName)))
         {
             ct.ThrowIfCancellationRequested();
             try
             {
-                await _imap.MarkReadAsync(msg.AccountId, msg.FolderName, msg.MessageId, ct);
-                msg.IsRead = true;
-                await _store.UpdateIsReadAsync(msg.AccountId, msg.FolderName, msg.MessageId, true);
+                var groupMessages = group.ToList();
+                await _imap.MarkReadBatchAsync(group.Key.AccountId, group.Key.FolderName,
+                    groupMessages.Select(message => message.MessageId).ToList(), ct);
+                foreach (var message in groupMessages) message.IsRead = true;
+                await _store.UpdateIsReadBatchAsync(groupMessages.Select(message =>
+                    (message.AccountId, message.FolderName, message.MessageId)), true);
             }
             catch (OperationCanceledException) { throw; }
             catch (Exception ex)
             {
-                LogService.Log($"MarkRead failed for UID {msg.MessageId}", ex);
+                LogService.Log($"MarkRead failed for {group.Count()} messages in {group.Key.FolderName}", ex);
             }
         }
     }
@@ -361,17 +444,56 @@ public class RuleService : IRuleService
         {
             ct.ThrowIfCancellationRequested();
             var uids = group.Select(m => m.MessageId).ToList();
+            var physicalTarget = await ResolveTargetFolderAsync(targetFolder, group.Key.AccountId);
             try
             {
                 await _imap.MoveMessagesAsync(
-                    group.Key.AccountId, group.Key.FolderName, uids, targetFolder, ct);
+                    group.Key.AccountId, group.Key.FolderName, uids, physicalTarget, ct);
             }
             catch (OperationCanceledException) { throw; }
             catch (Exception ex)
             {
-                LogService.Log($"MoveToFolder failed for {uids.Count} messages to '{targetFolder}'", ex);
+                LogService.Log($"MoveToFolder failed for {uids.Count} messages to '{physicalTarget}'", ex);
+                throw new InvalidOperationException(
+                    $"Could not move {uids.Count:N0} message(s) to '{physicalTarget}': {ex.Message}", ex);
             }
         }
+    }
+
+    private async Task<string> ResolveTargetFolderAsync(string targetFolder, Guid accountId)
+    {
+        // Rules saved before the local tree became canonical may still name the old POP3 alias.
+        // Resolve it per account instead of rewriting a global rule that could also cover a real
+        // IMAP Inbox. IMAP/Graph accounts retain their server-owned target unchanged.
+        if (targetFolder.Equals("Inbox", StringComparison.Ordinal) &&
+            _accountService?.LoadAccounts().FirstOrDefault(account => account.Id == accountId)?.BackendKind
+                is BackendKind.Pop3Smtp or BackendKind.LocalArchive)
+            targetFolder = "In";
+
+        var tree = await _store.LoadCanonicalLocalFolderTreeAsync();
+        if (tree == null) return targetFolder;
+
+        CanonicalLocalFolder? canonical;
+        var canonicalPrefixLength = targetFolder.StartsWith(CanonicalFolderPrefix, StringComparison.Ordinal)
+            ? CanonicalFolderPrefix.Length
+            : targetFolder.StartsWith(PrintableCanonicalFolderPrefix, StringComparison.OrdinalIgnoreCase)
+                ? PrintableCanonicalFolderPrefix.Length
+                : 0;
+        if (canonicalPrefixLength > 0 &&
+            Guid.TryParse(targetFolder.AsSpan(canonicalPrefixLength), out var folderId))
+            canonical = tree.Folders.FirstOrDefault(folder => folder.FolderId == folderId);
+        else
+            canonical = tree.Folders.FirstOrDefault(folder =>
+                folder.CanonicalPath.Equals(targetFolder.Trim('/'), StringComparison.OrdinalIgnoreCase));
+
+        if (canonical == null)
+        {
+            LogService.Debug($"Rule target '{targetFolder}' has no canonical match; using it as a physical path.");
+            return targetFolder;
+        }
+        var resolved = await _store.EnsureCanonicalFolderBindingAsync(canonical.FolderId, accountId);
+        LogService.Debug($"Rule target '{targetFolder}' resolved to '{resolved}' for account {accountId}.");
+        return resolved;
     }
 
     private async Task DeleteAsync(List<MailMessageSummary> messages, CancellationToken ct)
@@ -416,13 +538,23 @@ public class RuleService : IRuleService
         var inboxMessages = allMessages.Where(m =>
             inboxFolderByAccount.TryGetValue(m.AccountId, out var inbox) &&
             string.Equals(m.FolderName, inbox, StringComparison.Ordinal)).ToList();
-        LogService.Debug($"ApplyRulesToExisting: {allMessages.Count} cached, {inboxMessages.Count} in Inbox, {enabledRules.Count} enabled rules");
+        var physicalOutMessages = allMessages.Where(m =>
+            m.Direction == MessageDirection.Outgoing && IsPhysicalOutFolder(m.FolderName)).ToList();
+        LogService.Debug($"ApplyRulesToExisting: {allMessages.Count} cached, {inboxMessages.Count} in Inbox, " +
+            $"{physicalOutMessages.Count} in physical Out/Sent, {enabledRules.Count} enabled rules");
 
         foreach (var rule in enabledRules)
         {
             ct.ThrowIfCancellationRequested();
 
-            var matched = inboxMessages.Where(m =>
+            // This is an explicitly user-invoked run. The extra Out scope is therefore honoured
+            // here, but never in ApplyAutomaticRulesAsync (which only sees the newly arrived Inbox
+            // batch). A rule can remain manual while still covering both directions when invoked.
+            IEnumerable<MailMessageSummary> candidates = rule.AlsoFilterOutMailbox
+                ? inboxMessages.Concat(physicalOutMessages)
+                    .DistinctBy(m => (m.AccountId, m.FolderName, m.MessageId))
+                : inboxMessages;
+            var matched = candidates.Where(m =>
             {
                 if (rule.AccountId.HasValue && rule.AccountId.Value != m.AccountId)
                     return false;
@@ -456,5 +588,16 @@ public class RuleService : IRuleService
         }
 
         return removedMessages;
+    }
+
+    private static bool IsPhysicalOutFolder(string? folderName)
+    {
+        if (string.IsNullOrWhiteSpace(folderName)) return false;
+        var normalized = folderName.Replace('\\', '/').TrimEnd('/');
+        var leaf = normalized[(normalized.LastIndexOf('/') + 1)..];
+        return leaf.Equals("Out", StringComparison.OrdinalIgnoreCase)
+            || leaf.Equals("Sent", StringComparison.OrdinalIgnoreCase)
+            || leaf.Equals("Sent Items", StringComparison.OrdinalIgnoreCase)
+            || leaf.Equals("Sent Mail", StringComparison.OrdinalIgnoreCase);
     }
 }
