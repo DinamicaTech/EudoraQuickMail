@@ -303,6 +303,36 @@ public sealed class LocalFirstMailTests : IDisposable
     }
 
     [Fact]
+    public async Task CanonicalFolder_ExistingEmptyContainerCanBeFinishedAsMessageFolder()
+    {
+        var account = new AccountModel
+        {
+            Id = Guid.NewGuid(), AccountName = "POP", Username = "sender@example.test",
+            BackendKind = BackendKind.Pop3Smtp, FolderTreeRootId = Guid.NewGuid(),
+            FolderTreeRootName = "Local mail", IsActive = true,
+        };
+        var store = CreateStore();
+        await store.EnsureLocalSystemFoldersAsync([account]);
+        var root = (await store.LoadCanonicalLocalFolderTreeAsync())!.Folders
+            .Single(folder => folder.ParentFolderId == null);
+        var parent = await store.CreateCanonicalFolderAsync(root.FolderId, "Prov", account.Id, true);
+        var miele = await store.CreateCanonicalFolderAsync(parent, "Miele", account.Id, true);
+
+        // Simulates retrying an interrupted/legacy quick-drop creation. Both the canonical node and
+        // its already-existing physical binding must become leaves, otherwise the move validator
+        // still rejects the message even though the tree displays a valid empty folder.
+        Assert.Equal(miele, await store.CreateCanonicalFolderAsync(parent, "Miele", account.Id, false));
+        await store.SaveLocalMessageAsync(Message(account.Id, "In", "miele-message", "body"));
+        var binding = await store.EnsureCanonicalFolderBindingAsync(miele, account.Id);
+
+        await store.MoveLocalMessagesAsync(account.Id, "In", binding, ["miele-message"]);
+
+        Assert.Equal(1, (await store.LoadLocalPageAsync(account.Id, binding, 10, 0)).TotalMatches);
+        Assert.False((await store.LoadFoldersAsync())[account.Id]
+            .Single(folder => folder.FullName == binding).IsContainer);
+    }
+
+    [Fact]
     public async Task CanonicalFolderRename_PreservesImportedPhysicalPathPrefix()
     {
         var account = new AccountModel

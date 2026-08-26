@@ -363,6 +363,50 @@ public class RuleServiceTests
     }
 
     [Fact]
+    public async Task ApplyRuleToMessages_RemoteMoveUpdatesLocalCacheImmediately()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), $"QuickMailRuleMove-{Guid.NewGuid():N}");
+        try
+        {
+            var profile = new ProfileContext(dir);
+            var store = new LocalStoreService(profile);
+            store.Initialize();
+            var account = new AccountModel
+            {
+                Id = Guid.NewGuid(), AccountName = "IMAP", Username = "mail@example.test",
+                BackendKind = BackendKind.ImapSmtp,
+            };
+            var accounts = new AccountService(profile);
+            accounts.SaveAccounts([account]);
+            await store.SaveFoldersAsync(account.Id,
+            [
+                new MailFolderModel { AccountId = account.Id, FullName = "INBOX", DisplayName = "INBOX" },
+                new MailFolderModel { AccountId = account.Id, FullName = "Archive", DisplayName = "Archive" },
+            ]);
+            var message = MakeMsg(from: "sender@example.test", accountId: account.Id, folderName: "INBOX");
+            await store.UpsertSummariesAsync([message]);
+            var service = new RuleService(new StubImapMailService(), store, dir, accounts);
+            var rule = new MailRule
+            {
+                Name = "Move sender", UseFromCondition = true, FromContains = "sender@example.test",
+                Action = RuleAction.MoveToFolder, TargetFolder = "Archive",
+            };
+
+            var result = await service.ApplyRuleToMessagesAsync(
+                rule, [message], store, TestContext.Current.CancellationToken);
+
+            Assert.Equal(1, result.MatchedCount);
+            Assert.Empty(await store.LoadFolderSummariesAsync(account.Id, "INBOX"));
+            Assert.Single(await store.LoadFolderSummariesAsync(account.Id, "Archive"));
+        }
+        finally
+        {
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            if (Directory.Exists(dir)) Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
     public void TestRule_SubjectContains_MatchesSubstring()
     {
         var svc = CreateService(Path.GetTempPath());

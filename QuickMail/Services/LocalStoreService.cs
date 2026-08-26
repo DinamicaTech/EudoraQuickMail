@@ -93,6 +93,7 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
         string name;
         int kind;
         int container;
+        string? existingBinding;
         await using (var reader = await lookup.ExecuteReaderAsync())
         {
             if (!await reader.ReadAsync()) throw new InvalidOperationException("The destination folder no longer exists.");
@@ -100,9 +101,32 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
             name = reader.GetString(1);
             kind = reader.GetInt32(2);
             container = reader.GetInt32(3);
-            if (!reader.IsDBNull(4)) return reader.GetString(4);
+            existingBinding = reader.IsDBNull(4) ? null : reader.GetString(4);
         }
         if (path.Length == 0) throw new InvalidOperationException("Messages cannot be stored directly in the tree root.");
+
+        if (existingBinding != null)
+        {
+            // The canonical node is authoritative. A failed/aborted quick-filter creation could
+            // previously turn an empty node into a leaf without updating its already-created
+            // physical Folder row. MoveLocalMessagesAsync validates that physical row and then
+            // rejected an otherwise valid drop as "container folder". Repair it whenever a binding
+            // is resolved, which also heals profiles created by affected builds.
+            await using var sync = connection.CreateCommand();
+            sync.Transaction = (SqliteTransaction)tx;
+            sync.CommandText = """
+                UPDATE Folder SET display_name=$name,kind=$kind,is_container=$container
+                 WHERE account_id=$account AND full_name=$path;
+                """;
+            sync.Parameters.AddWithValue("$name", name);
+            sync.Parameters.AddWithValue("$kind", kind);
+            sync.Parameters.AddWithValue("$container", container);
+            sync.Parameters.AddWithValue("$account", accountId.ToString("D"));
+            sync.Parameters.AddWithValue("$path", existingBinding);
+            await sync.ExecuteNonQueryAsync();
+            await tx.CommitAsync();
+            return existingBinding;
+        }
 
         var slash = path.LastIndexOf('/');
         var parent = slash < 0 ? null : path[..slash];
@@ -172,6 +196,24 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
                     """;
                 makeLeaf.Parameters.AddWithValue("$id", value);
                 await makeLeaf.ExecuteNonQueryAsync();
+
+                // Keep every existing physical binding in lockstep with the canonical node. This
+                // is important when several POP/local accounts share one tree: the next message
+                // dropped for any of them must see the same leaf/container classification.
+                await using var syncBindings = connection.CreateCommand();
+                syncBindings.Transaction = tx;
+                syncBindings.CommandText = """
+                    UPDATE Folder SET is_container=0
+                     WHERE EXISTS(
+                           SELECT 1 FROM LocalFolderBinding_shadow binding
+                            JOIN LocalFolderNode_shadow node ON node.folder_id=binding.folder_id
+                           WHERE binding.folder_id=$id
+                             AND node.is_container=0
+                             AND binding.account_id=Folder.account_id
+                             AND binding.legacy_full_name=Folder.full_name);
+                    """;
+                syncBindings.Parameters.AddWithValue("$id", value);
+                await syncBindings.ExecuteNonQueryAsync();
             }
             await MarkCanonicalContainerAsync(connection, tx, parentFolderId);
             await tx.CommitAsync();

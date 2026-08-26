@@ -463,6 +463,18 @@ public class RuleService : IRuleService
             {
                 await _imap.MoveMessagesAsync(
                     group.Key.AccountId, group.Key.FolderName, uids, physicalTarget, ct);
+
+                // IMAP and Graph are server-authoritative, but the message list and canonical local
+                // tree are rendered from the SQLite cache. Reflect a successful remote move there
+                // immediately; otherwise the source keeps a ghost row and the new destination looks
+                // empty until a later reconciliation. Local/POP backends already perform this move
+                // inside LocalMailService, so they must not be moved twice.
+                var backend = _accountService?.LoadAccounts()
+                    .FirstOrDefault(account => account.Id == group.Key.AccountId)?.BackendKind;
+                if (backend is BackendKind.ImapSmtp or BackendKind.MicrosoftGraph &&
+                    _store is ILocalMailboxStore mailboxStore)
+                    await mailboxStore.MoveLocalMessagesAsync(
+                        group.Key.AccountId, group.Key.FolderName, physicalTarget, uids, ct);
             }
             catch (OperationCanceledException) { throw; }
             catch (Exception ex)

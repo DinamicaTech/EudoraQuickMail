@@ -469,10 +469,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
         IsBusy = true;
         try
         {
-            // A folder created explicitly from the tree is organizational by default, regardless
-            // of its depth. The Shift/Ctrl+Shift drop workflow passes false explicitly when it
-            // creates the leaf that will actually receive messages.
-            var createAsContainer = isContainer ?? true;
+            // A root child is organizational by default; a nested folder is a message folder.
+            // The quick-filter workflow passes its intent explicitly, but an ordinary "New folder"
+            // under a category must immediately accept a plain message drop.
+            var createAsContainer = isContainer ?? canonicalParent.CanonicalPath.Length == 0;
             var createdId = await _localStore.CreateCanonicalFolderAsync(
                 parentId, name, owner.Id, createAsContainer);
             await ReloadCanonicalLocalTreeAsync(rebuildTree: true, refreshPhysicalCache: true);
@@ -10427,6 +10427,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 await _imap.MoveMessagesAsync(
                     group.Key.AccountId, group.Key.FolderName, uids,
                     destinationName, ct);
+                var backend = Accounts.FirstOrDefault(account => account.Id == group.Key.AccountId)?.BackendKind;
+                if (backend is BackendKind.ImapSmtp or BackendKind.MicrosoftGraph &&
+                    _localStore is ILocalMailboxStore mailboxStore)
+                    await mailboxStore.MoveLocalMessagesAsync(
+                        group.Key.AccountId, group.Key.FolderName, destinationName, uids, ct);
                 PerformanceLogService.Record("Message move: update local store",
                     Stopwatch.GetElapsedTime(stageStarted),
                     $"messages={uids.Count}; source={group.Key.FolderName}; destination={destinationName}");
