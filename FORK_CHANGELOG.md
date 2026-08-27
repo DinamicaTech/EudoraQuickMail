@@ -10,6 +10,11 @@ before a public release.
 
 ## Unreleased
 
+- Quick search now keeps a persistent, deduplicated ten-item history in an editable drop-down;
+  selecting a previous query never runs it until Search or Enter is pressed.
+- Added Tools > Analyze Folder, which asynchronously reports the twenty most frequent sender
+  domains across the selected folder's complete recursive/local-index scope rather than only the
+  currently rendered message page.
 - Added Tools > Delete Orphaned Attachments: it safely compares physical files in the applicable
   Eudora `Attach*` or QuickMail Attachments tree with live database references, presents a sortable
   path/date/size grid, supports guarded double-click opening, clipboard export, and confirmed

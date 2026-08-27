@@ -687,6 +687,9 @@
                 <MenuItem Header="_Watched Conversations…"
                           Click="MenuWatchedConversations_Click"
                           AutomationProperties.Name="Watched Conversations"/>
+                <MenuItem Header="_Analyze Folder…"
+                          Click="MenuAnalyzeFolder_Click"
+                          AutomationProperties.Name="Analyze Folder"/>
                 <Separator/>
                 <MenuItem Header="Recalculate _Folder Counts"
                           Click="MenuRecalculateFolderCounts_Click"
@@ -1316,11 +1319,14 @@
                                     </Style>
                                 </TextBlock.Style>
                             </TextBlock>
-                            <TextBox x:Name="SearchBox"
-                                     Text="{Binding SearchText, UpdateSourceTrigger=Explicit}"
-                                     AutomationProperties.Name="Search messages"
-                                     ToolTip="Search by sender, subject, or preview. Escape to clear."
-                                     PreviewKeyDown="SearchBox_PreviewKeyDown"/>
+                            <ComboBox x:Name="SearchBox"
+                                      IsEditable="True"
+                                      IsTextSearchEnabled="False"
+                                      MaxDropDownHeight="320"
+                                      Text="{Binding SearchText, UpdateSourceTrigger=Explicit}"
+                                      AutomationProperties.Name="Search messages"
+                                      ToolTip="Search messages, or select one of the last ten searches. Search runs only after Enter or Search."
+                                      PreviewKeyDown="SearchBox_PreviewKeyDown"/>
                         </DockPanel>
                     </Border>
 

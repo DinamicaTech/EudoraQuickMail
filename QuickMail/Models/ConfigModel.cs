@@ -56,6 +56,9 @@ public class ConfigModel
     /// </summary>
     public bool ShowFilteredDestinationTab { get; set; } = true;
 
+    /// <summary>Most recently executed quick searches, newest first (maximum ten).</summary>
+    public List<string> QuickSearchHistory { get; set; } = [];
+
     /// <summary>
     /// How many days of mail to sync. 0 = sync all mail (no date filter).
     /// Supported values: 7, 30, 180, 365, or 0 (all).

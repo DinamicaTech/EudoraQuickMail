@@ -29,6 +29,22 @@ public class ConfigServiceSaveTests
     }
 
     [Fact]
+    public void SaveThenLoad_RoundTripsBoundedQuickSearchHistory()
+    {
+        var profile = MakeTempProfile();
+        var service = new ConfigService(profile);
+        var config = service.Load();
+        config.QuickSearchHistory = QuickMail.Helpers.QuickSearchHistory.Add(
+            Enumerable.Range(0, 12).Select(index => $"S:term{index}"),
+            "D>2025;F:@example.com");
+        service.Save(config);
+
+        var reloaded = new ConfigService(profile).Load();
+        Assert.Equal(10, reloaded.QuickSearchHistory.Count);
+        Assert.Equal("D>2025;F:@example.com", reloaded.QuickSearchHistory[0]);
+    }
+
+    [Fact]
     public void SaveThenLoad_RoundTripsAlsoFilterOutDefault()
     {
         var profile = MakeTempProfile();

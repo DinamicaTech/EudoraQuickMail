@@ -1524,6 +1524,36 @@ public partial class MainViewModel : ObservableObject, IDisposable
             .ToArray();
     }
 
+    /// <summary>Returns the most frequent sender domains in the currently selected folder scope.</summary>
+    public async Task<IReadOnlyList<FolderDomainSummary>> AnalyzeSelectedFolderDomainsAsync(
+        CancellationToken ct = default)
+    {
+        if (_localStore is not ILocalMailboxStore store)
+            throw new NotSupportedException("Folder analysis is available only for locally indexed mail.");
+        var folder = SelectedFolder;
+        if (folder is null || folder.IsHeader || IsCalendarFolderName(folder.FullName))
+            throw new InvalidOperationException("Select a mail folder before running the analysis.");
+
+        var isVirtual = IsVirtualFolder(folder);
+        var accountIds = RootAccountIdsFor(folder);
+        var folderScopes = SearchFolderScopesFor(folder);
+        if (isVirtual && accountIds is null && folderScopes is null)
+            throw new InvalidOperationException("This virtual view cannot be analyzed. Select a mail folder instead.");
+
+        var query = new FolderDomainAnalysisQuery(
+            AccountId: !isVirtual && folder.AccountId != Guid.Empty ? folder.AccountId : null,
+            FolderName: !isVirtual && folder.AccountId != Guid.Empty ? folder.FullName : null,
+            IncludeDescendants: !isVirtual && folder.IsContainer,
+            AccountIds: accountIds,
+            FolderScopes: folderScopes,
+            ExcludedFolderScopes: RootExcludedFolderScopesFor(folder),
+            Limit: 20);
+
+        // Microsoft.Data.Sqlite performs much of ExecuteReaderAsync synchronously. Keep a root
+        // analysis over hundreds of thousands of summaries away from WPF's dispatcher thread.
+        return await Task.Run(() => store.AnalyzeFolderDomainsAsync(query, ct), ct);
+    }
+
     private long? CachedRootMessageTotal(IReadOnlyCollection<Guid>? accountIds,
         IReadOnlyCollection<LocalFolderScope>? excludedFolders)
     {

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
@@ -142,6 +143,7 @@ public partial class MainWindow : Window
     private readonly TypeAheadPrefixTracker _typeAhead = new();
     private readonly TypeAheadPrefixTracker _folderTypeAhead =
         new(resetDelay: TimeSpan.FromMilliseconds(500));
+    private readonly ObservableCollection<string> _quickSearchHistory = [];
     private int _messageBodyRenderVersion;
 
     // Tracks which pane (GetFocusedPaneIndex) was active when the window last deactivated
@@ -292,6 +294,9 @@ public partial class MainWindow : Window
         _vm.NewMailArrived += OnNewMailArrived;
         Loaded += (_, _) => EnsureTrayIcon();
         var initialConfig = _configService.Load();
+        foreach (var search in QuickSearchHistory.Normalize(initialConfig.QuickSearchHistory))
+            _quickSearchHistory.Add(search);
+        SearchBox.ItemsSource = _quickSearchHistory;
         ApplyAccountsPanelVisibility(initialConfig.ShowAccountsPanel);
         ApplyTodayAgendaVisibility(initialConfig.ShowTodayAgenda);
         DataContext = vm;
@@ -991,14 +996,27 @@ public partial class MainWindow : Window
         Dispatcher.InvokeAsync(() =>
         {
             SearchBox.Focus();
+            if (SearchBox.Template.FindName("PART_EditableTextBox", SearchBox) is TextBox editor)
+            {
+                editor.Focus();
+                editor.SelectAll();
+            }
             AccessibilityHelper.Announce(this, "Search box. Type to filter messages.", interrupt: true, category: AnnouncementCategory.Hint);
         }, DispatcherPriority.Input);
     }
 
     private void MenuSearch_Click(object sender, RoutedEventArgs e) => OpenSearch();
 
-    private void ExecuteSearch() =>
-        SearchBox.GetBindingExpression(TextBox.TextProperty)?.UpdateSource();
+    private void ExecuteSearch()
+    {
+        SearchBox.GetBindingExpression(ComboBox.TextProperty)?.UpdateSource();
+        var updated = QuickSearchHistory.Add(_quickSearchHistory, SearchBox.Text);
+        _quickSearchHistory.Clear();
+        foreach (var search in updated) _quickSearchHistory.Add(search);
+        var config = _configService.Load();
+        config.QuickSearchHistory = updated;
+        _configService.Save(config);
+    }
 
     private void SearchButton_Click(object sender, RoutedEventArgs e) => ExecuteSearch();
 
@@ -1021,6 +1039,12 @@ public partial class MainWindow : Window
         }
         else if (e.Key == Key.Escape)
         {
+            if (SearchBox.IsDropDownOpen)
+            {
+                SearchBox.IsDropDownOpen = false;
+                e.Handled = true;
+                return;
+            }
             var count = _vm.Messages.Count;
             _vm.ClearSearchCommand.Execute(null);
             ReturnFocusToMessageList();
@@ -1028,7 +1052,15 @@ public partial class MainWindow : Window
             AccessibilityHelper.Announce(this, $"Search cleared. {count} {word}.", interrupt: true, category: AnnouncementCategory.Result);
             e.Handled = true;
         }
-        else if (e.Key == Key.Down || (e.Key == Key.Tab && Keyboard.Modifiers == ModifierKeys.None))
+        else if (e.Key == Key.Down)
+        {
+            if (!SearchBox.IsDropDownOpen && _quickSearchHistory.Count > 0)
+            {
+                SearchBox.IsDropDownOpen = true;
+                e.Handled = true;
+            }
+        }
+        else if (e.Key == Key.Tab && Keyboard.Modifiers == ModifierKeys.None)
         {
             ReturnFocusToMessageList();
             e.Handled = true;
@@ -8059,6 +8091,31 @@ public partial class MainWindow : Window
 
     private async void MenuRecalculateFolderCounts_Click(object sender, RoutedEventArgs e) =>
         await _vm.RecalculateFolderCountsAsync();
+
+    private async void MenuAnalyzeFolder_Click(object sender, RoutedEventArgs e)
+    {
+        var folderName = _vm.SelectedFolder?.DisplayName ?? "Selected folder";
+        _vm.IsStatusHighlighted = true;
+        _vm.StatusText = $"Analyzing {folderName}…";
+        Mouse.OverrideCursor = Cursors.Wait;
+        try
+        {
+            var rows = await _vm.AnalyzeSelectedFolderDomainsAsync();
+            _vm.StatusText = $"Folder analysis complete: {rows.Count:N0} sender domains shown.";
+            new FolderAnalysisWindow(folderName, rows) { Owner = this }.ShowDialog();
+        }
+        catch (Exception ex)
+        {
+            LogService.Log("Analyze folder", ex);
+            _vm.StatusText = $"Folder analysis failed: {ex.Message}";
+            MessageBox.Show(this, ex.Message, "Analyze Folder",
+                MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            Mouse.OverrideCursor = null;
+        }
+    }
 
     private bool HasLinkedGoogleCalendar() => _vm.Accounts.Any(account =>
         (account.CalendarProvider?.Equals("google", StringComparison.OrdinalIgnoreCase) == true &&

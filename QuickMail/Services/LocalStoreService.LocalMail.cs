@@ -1,4 +1,5 @@
 using Microsoft.Data.Sqlite;
+using QuickMail.Helpers;
 using QuickMail.Models;
 using System.Diagnostics;
 using System.IO;
@@ -843,6 +844,54 @@ public partial class LocalStoreService
         IsMailingList = reader.GetInt64(13) != 0, FlagId = reader.IsDBNull(14) ? null : reader.GetString(14),
         Direction = reader.IsDBNull(15) ? MessageDirection.Unknown : (MessageDirection)reader.GetInt64(15),
     };
+
+    public async Task<IReadOnlyList<FolderDomainSummary>> AnalyzeFolderDomainsAsync(
+        FolderDomainAnalysisQuery query, CancellationToken ct = default)
+    {
+        var started = Stopwatch.GetTimestamp();
+        var limit = Math.Clamp(query.Limit, 1, 100);
+        var accountFilter = BuildAccountFilter("s.", query.AccountId, query.AccountIds);
+        var folderFilter = !string.IsNullOrWhiteSpace(query.FolderName)
+            ? query.IncludeDescendants
+                ? " AND (s.folder_name=$fn OR (s.folder_name >= $ds AND s.folder_name < $de))"
+                : " AND s.folder_name=$fn"
+            : string.Empty;
+        var folderScopesFilter = BuildFolderScopesFilter("s.", query.FolderScopes);
+        var details = $"folder={query.FolderName ?? "(scoped)"}; descendants={query.IncludeDescendants}; " +
+                      $"scopes={query.FolderScopes?.Count ?? 0}; accountScope=" +
+                      $"{query.AccountId?.ToString() ?? (query.AccountIds?.Count.ToString() ?? "all")}; limit={limit}";
+
+        await using var conn = await OpenAsync();
+        await PopulateFolderScopesAsync(conn, query.FolderScopes, ct);
+        await PopulateExcludedFolderScopesAsync(conn, query.ExcludedFolderScopes, ct);
+        conn.CreateFunction("qm_sender_domain",
+            (string? value) => SenderDomainExtractor.Extract(value), isDeterministic: true);
+
+        await using var command = conn.CreateCommand();
+        command.CommandText = $"""
+            SELECT qm_sender_domain(s.from_disp) AS sender_domain, COUNT(*) AS message_count
+            FROM MessageSummary s
+            WHERE 1=1{accountFilter}{folderFilter}{folderScopesFilter}{BuildExcludedFolderScopesFilter("s.", query.ExcludedFolderScopes)}
+            GROUP BY sender_domain
+            ORDER BY message_count DESC, sender_domain COLLATE NOCASE ASC
+            LIMIT $limit;
+            """;
+        AddAccountParameters(command, query.AccountId, query.AccountIds);
+        if (!string.IsNullOrWhiteSpace(query.FolderName))
+            command.Parameters.AddWithValue("$fn", query.FolderName);
+        if (!string.IsNullOrWhiteSpace(query.FolderName) && query.IncludeDescendants)
+            AddDescendantRange(command, query.FolderName);
+        AddFolderScopeParameters(command, query.FolderScopes);
+        command.Parameters.AddWithValue("$limit", limit);
+
+        var result = new List<FolderDomainSummary>();
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+            result.Add(new FolderDomainSummary(reader.GetString(0), reader.GetInt64(1)));
+        PerformanceLogService.Record("Folder analysis: sender domains",
+            Stopwatch.GetElapsedTime(started), $"{details}; rows={result.Count}");
+        return result;
+    }
 
     public async Task MoveLocalMessagesAsync(Guid accountId, string sourceFolder, string destinationFolder,
         IReadOnlyCollection<string> messageIds, CancellationToken ct = default)

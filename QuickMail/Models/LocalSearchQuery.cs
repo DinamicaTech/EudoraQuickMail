@@ -14,6 +14,17 @@ public sealed record LocalSearchQuery(
 
 public sealed record LocalFolderScope(Guid AccountId, string FolderName, bool IncludeDescendants = false);
 
+public sealed record FolderDomainAnalysisQuery(
+    Guid? AccountId = null,
+    string? FolderName = null,
+    bool IncludeDescendants = false,
+    IReadOnlyCollection<Guid>? AccountIds = null,
+    IReadOnlyCollection<LocalFolderScope>? FolderScopes = null,
+    IReadOnlyCollection<LocalFolderScope>? ExcludedFolderScopes = null,
+    int Limit = 20);
+
+public sealed record FolderDomainSummary(string Domain, long MessageCount);
+
 public enum LocalSearchSort
 {
     NewestFirst, OldestFirst, Relevance, FromAscending, FromDescending,

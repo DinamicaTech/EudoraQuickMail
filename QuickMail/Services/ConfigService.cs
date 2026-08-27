@@ -221,6 +221,14 @@ public class ConfigService : IConfigService
                     case "showaccountspanel": config.ShowAccountsPanel = ParseBool(value); break;
                     case "showtodayagenda":   config.ShowTodayAgenda   = ParseBool(value); break;
                     case "showfiltereddestinationtab": config.ShowFilteredDestinationTab = ParseBool(value); break;
+                    case "quicksearchhistory":
+                        try
+                        {
+                            config.QuickSearchHistory = QuickSearchHistory.Normalize(
+                                JsonSerializer.Deserialize<List<string>>(value));
+                        }
+                        catch { config.QuickSearchHistory = []; }
+                        break;
                     case "syncdays":
                         if (int.TryParse(value, out var sd)) config.SyncDays = Math.Max(0, sd);
                         break;
@@ -484,6 +492,10 @@ public class ConfigService : IConfigService
 
         sb.AppendLine($"ShowFilteredDestinationTab = {(config.ShowFilteredDestinationTab ? "on" : "off")}");
         sb.AppendLine("# Keep one background tab pointing at the latest successful rule destination.");
+        sb.AppendLine();
+
+        sb.AppendLine($"QuickSearchHistory = {JsonSerializer.Serialize(QuickSearchHistory.Normalize(config.QuickSearchHistory))}");
+        sb.AppendLine("# Last ten executed quick searches, newest first. Maintained by QuickMail.");
         sb.AppendLine();
 
         sb.AppendLine($"SyncDays = {config.SyncDays}");
