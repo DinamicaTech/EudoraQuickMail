@@ -1020,6 +1020,19 @@ public partial class MainWindow : Window
 
     private void SearchButton_Click(object sender, RoutedEventArgs e) => ExecuteSearch();
 
+    private void SearchHistoryButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_quickSearchHistory.Count == 0)
+        {
+            _vm.IsStatusHighlighted = true;
+            _vm.StatusText = "No recent searches yet.";
+            return;
+        }
+
+        SearchBox.Focus();
+        SearchBox.IsDropDownOpen = true;
+    }
+
     private void QuickSearchHelpButton_Click(object sender, RoutedEventArgs e) =>
         new QuickSearchHelpWindow { Owner = this }.ShowDialog();
 
@@ -8155,7 +8168,25 @@ public partial class MainWindow : Window
         {
             var rows = await _vm.AnalyzeSelectedFolderDomainsAsync();
             _vm.StatusText = $"Folder analysis complete: {rows.Count:N0} sender domains shown.";
-            new FolderAnalysisWindow(folderName, rows) { Owner = this }.ShowDialog();
+            var analysis = new FolderAnalysisWindow(folderName, rows) { Owner = this };
+            // The database work has finished. Release the application-wide wait cursor before
+            // entering ShowDialog's nested message loop, otherwise the result window inherits it.
+            Mouse.OverrideCursor = null;
+            if (analysis.ShowDialog() == true &&
+                !string.IsNullOrWhiteSpace(analysis.SelectedDomain))
+            {
+                if (analysis.SelectedDomain == SenderDomainExtractor.MissingDomain)
+                {
+                    _vm.IsStatusHighlighted = true;
+                    _vm.StatusText = "Messages without a valid sender domain cannot be opened as a domain search.";
+                }
+                else
+                {
+                    _vm.IsSearchActive = true;
+                    SearchBox.Text = $"F:@{analysis.SelectedDomain}";
+                    ExecuteSearch();
+                }
+            }
         }
         catch (Exception ex)
         {

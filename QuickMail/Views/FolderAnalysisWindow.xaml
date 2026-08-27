@@ -26,6 +26,7 @@
             <DataGrid x:Name="DomainGrid" AutoGenerateColumns="False" IsReadOnly="True"
                       SelectionMode="Extended" SelectionUnit="FullRow"
                       CanUserSortColumns="True" EnableRowVirtualization="True"
+                      MouseDoubleClick="DomainGrid_MouseDoubleClick"
                       AutomationProperties.Name="Top sender domains">
                 <DataGrid.Columns>
                     <DataGridTextColumn Header="Sender domain" Binding="{Binding Domain}"

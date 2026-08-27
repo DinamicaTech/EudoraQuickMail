@@ -1319,9 +1319,16 @@
                                     </Style>
                                 </TextBlock.Style>
                             </TextBlock>
+                            <Button DockPanel.Dock="Right"
+                                    Content="▼" Width="28" Margin="0,0,4,0"
+                                    Click="SearchHistoryButton_Click"
+                                    AutomationProperties.Name="Show recent searches"
+                                    ToolTip="Show the last ten searches"
+                                    Focusable="False"/>
                             <ComboBox x:Name="SearchBox"
                                       IsEditable="True"
                                       IsTextSearchEnabled="False"
+                                      StaysOpenOnEdit="True"
                                       MaxDropDownHeight="320"
                                       Text="{Binding SearchText, UpdateSourceTrigger=Explicit}"
                                       AutomationProperties.Name="Search messages"
