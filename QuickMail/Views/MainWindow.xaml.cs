@@ -3564,6 +3564,7 @@ public partial class MainWindow : Window
     private async Task CreateDomainRuleAndApplyToSourceFolderAsync(
         MailMessageSummary sourceMessage, MailFolderModel destination)
     {
+        var continuation = CaptureMessageListContinuation([sourceMessage]);
         var started = Stopwatch.GetTimestamp();
         var operationId = Guid.NewGuid().ToString("N")[..8];
         var perf = $"id={operationId}; source={sourceMessage.FolderName}; destination={_vm.RuleTargetPath(destination)}";
@@ -3603,6 +3604,7 @@ public partial class MainWindow : Window
             if (result.RemovedMessages.Count > 0)
                 _vm.RemoveMessagesFromActiveView(result.RemovedMessages);
             await _vm.RefreshAfterLocalMutationAsync("quick-filter");
+            RestoreMessageListContinuation(continuation);
             if (result.RemovedMessages.Count > 0)
                 _vm.ShowLatestFilteredDestination(rule, result.RemovedMessages[0]);
             Report($"Filter '{rule.Name}' {(created ? "created" : "updated")} and applied to {sourceMessage.FolderName}: "
@@ -4917,6 +4919,7 @@ public partial class MainWindow : Window
         var sample = GetSelectedMessages().FirstOrDefault();
         var folder = _vm.SelectedFolder;
         if (sample == null || folder == null) return;
+        var continuation = CaptureMessageListContinuation(GetSelectedMessages());
 
         var operationId = Guid.NewGuid().ToString("N")[..8];
         var perf = $"id={operationId}; sample={sample.MessageId}; folder={folder.DisplayName}";
@@ -4989,6 +4992,7 @@ public partial class MainWindow : Window
                 _vm.RemoveMessagesFromActiveView(removed.DistinctBy(message =>
                     (message.AccountId, message.FolderName, message.MessageId)).ToList());
             await _vm.RefreshAfterLocalMutationAsync("filter-all-like-this");
+            RestoreMessageListContinuation(continuation);
             if (latestMoveRule != null)
                 _vm.ShowLatestFilteredDestination(latestMoveRule, latestMovedMessage);
             Report($"Applied {applicable.Count:N0} matching filter{(applicable.Count == 1 ? "" : "s")} to {folder.DisplayName}: {totalMatches:N0} match{(totalMatches == 1 ? "" : "es")}.");
@@ -5010,6 +5014,7 @@ public partial class MainWindow : Window
     private async Task ApplyRulesToSelectedMessagesAsync()
     {
         var selected = MessageList.SelectedItems.OfType<MailMessageSummary>().ToList();
+        var continuation = CaptureMessageListContinuation(selected);
         var matched = 0;
         var removed = new List<MailMessageSummary>();
         MailRule? destinationRule = null;
@@ -5048,7 +5053,10 @@ public partial class MainWindow : Window
             if (removed.Count > 0)
                 _vm.RemoveMessagesFromActiveView(removed);
             if (matched > 0)
+            {
                 await _vm.RefreshAfterLocalMutationAsync("apply-rules-to-selection");
+                RestoreMessageListContinuation(continuation);
+            }
             if (destinationRule != null && removed.Count > 0)
                 _vm.ShowLatestFilteredDestination(destinationRule, removed[0]);
             _vm.StatusText = $"Rules applied: {matched:N0} matched.";
@@ -5061,6 +5069,51 @@ public partial class MainWindow : Window
             AccessibilityHelper.Announce(this, _vm.StatusText, category: AnnouncementCategory.Result);
         }
         finally { _vm.IsBusy = false; }
+    }
+
+    private sealed record MessageListContinuationContext(
+        MessageListContinuation Position, Guid FolderAccountId, string? FolderFullName);
+
+    private MessageListContinuationContext CaptureMessageListContinuation(
+        IReadOnlyCollection<MailMessageSummary> affected)
+    {
+        var visible = MessageList.Items.OfType<MailMessageSummary>().ToList();
+        var position = MessageListContinuationPolicy.Capture(
+            visible, affected, MessageList.SelectedIndex);
+        return new MessageListContinuationContext(position,
+            _vm.SelectedFolder?.AccountId ?? Guid.Empty, _vm.SelectedFolder?.FullName);
+    }
+
+    private void RestoreMessageListContinuation(MessageListContinuationContext continuation)
+    {
+        // A long rule may finish after the operator deliberately changed folders. Never drag them
+        // back to a row belonging to the old view.
+        if (_vm.SelectedFolder?.AccountId != continuation.FolderAccountId ||
+            !string.Equals(_vm.SelectedFolder?.FullName, continuation.FolderFullName,
+                StringComparison.Ordinal)) return;
+
+        _ = Dispatcher.InvokeAsync(() =>
+        {
+            if (_vm.SelectedFolder?.AccountId != continuation.FolderAccountId ||
+                !string.Equals(_vm.SelectedFolder?.FullName, continuation.FolderFullName,
+                    StringComparison.Ordinal)) return;
+            var refreshed = MessageList.Items.OfType<MailMessageSummary>().ToList();
+            var index = MessageListContinuationPolicy.Resolve(continuation.Position, refreshed);
+            if (index < 0)
+            {
+                _vm.SelectedMessage = null;
+                MessageList.Focus();
+                return;
+            }
+
+            MessageList.SelectedItems.Clear();
+            MessageList.SelectedIndex = index;
+            if (MessageList.Items[index] is MailMessageSummary target)
+                _vm.SelectedMessage = target;
+            MessageList.ScrollIntoView(MessageList.Items[index]);
+            MessageList.UpdateLayout();
+            FocusItemAt(index);
+        }, DispatcherPriority.Loaded);
     }
 
     private async void ReadingPaneAttachmentList_MouseDoubleClick(object sender, MouseButtonEventArgs e)

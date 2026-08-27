@@ -10,6 +10,9 @@ before a public release.
 
 ## Unreleased
 
+- Rule filtering from the message list now preserves the operator's place after its local refresh:
+  focus lands on the first surviving message at the filtered row (or the preceding final row),
+  matching Delete and Shift+Delete instead of jumping to the top of the grid.
 - Quick search now keeps a persistent, deduplicated ten-item history in an editable drop-down;
   selecting a previous query never runs it until Search or Enter is pressed.
 - Added Tools > Analyze Folder, which asynchronously reports the twenty most frequent sender
