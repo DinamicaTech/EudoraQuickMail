@@ -13,6 +13,22 @@ namespace QuickMail;
 [SuppressMessage("Design", "CA1001", Justification = "Disposable fields are disposed in OnExit; WPF Application does not support IDisposable.")]
 public partial class App : Application
 {
+    private int _shutdownState;
+
+    /// <summary>True after a real main-window close has begun.</summary>
+    internal bool IsShutdownInProgress => Volatile.Read(ref _shutdownState) != 0;
+
+    /// <summary>
+    /// Marks the short interval in which queued dispatcher continuations are being cancelled while
+    /// application-owned services are disposed. MainWindow calls this only from OnClosed, so hiding
+    /// the window to the tray does not enter shutdown state.
+    /// </summary>
+    internal void BeginShutdown()
+    {
+        if (Interlocked.Exchange(ref _shutdownState, 1) == 0)
+            LogService.Log("Shutdown: main window closed; draining background work.");
+    }
+
     /// <summary>
     /// Debug screenshot capture (#175). Exposed so view code-behind (Settings
     /// composition, reading-pane render-complete) can reach the session service
@@ -757,6 +773,8 @@ public partial class App : Application
 
     protected override void OnExit(ExitEventArgs e)
     {
+        BeginShutdown();
+        LogService.Log("Shutdown: App.OnExit disposing application services.");
         _pop3Receiver?.Dispose();
         ScheduledSender?.Dispose();
         _changeNotifier?.Dispose(); // stops all watchers (IDLE + Graph poll) + severs the event chain
@@ -777,6 +795,7 @@ public partial class App : Application
         _autoDiscoverService?.Dispose(); // releases the autoconfig HttpClient
         _truthProbe?.Dispose();     // cancels in-flight probes before releasing their token source
         ScreenshotCapture?.Dispose(); // flushes any in-flight PNG save (best effort, bounded)
+        LogService.Log("Shutdown: application services disposed.");
         base.OnExit(e);
     }
 
@@ -911,8 +930,23 @@ public partial class App : Application
     private static void OnDispatcherUnhandledException(
         object sender, System.Windows.Threading.DispatcherUnhandledExceptionEventArgs e)
     {
-        for (var cur = e.Exception; cur != null; cur = cur.InnerException)
-            LogService.Log("Dispatcher", cur);
+        // This is the only global exception boundary, so preserve the full stack. The former compact
+        // message made shutdown races impossible to attribute: every instance looked like the same
+        // bare "CancellationTokenSource has been disposed" line.
+        LogService.LogDetailed("Dispatcher", e.Exception);
+
+        // A queued continuation can observe a service immediately after OnClosed has cancelled and
+        // disposed its application-lifetime token source. The process is already terminating and no
+        // operation can continue, so a modal error box serves no purpose. Suppress only this exact
+        // shutdown race; the same exception during normal operation still reaches the user.
+        if ((Current as App)?.IsShutdownInProgress == true &&
+            ShutdownExceptionPolicy.IsCancellationTokenSourceDisposal(e.Exception))
+        {
+            LogService.Log("Shutdown: suppressed a late CancellationTokenSource disposal exception; " +
+                           "the complete stack is recorded in the preceding Dispatcher entry.");
+            e.Handled = true;
+            return;
+        }
 
         // ui-probe (#180): unattended — a modal error box would park the run on an
         // invisible dialog until the orchestrator's kill timeout and destroy the

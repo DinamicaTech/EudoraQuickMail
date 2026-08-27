@@ -892,6 +892,7 @@ public partial class MainWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
+        (Application.Current as App)?.BeginShutdown();
         _statusClockTimer.Stop();
         _statusClockTimer.Tick -= StatusClockTimer_Tick;
         _vm.FolderSelectionDataReady -= OnFolderSelectionDataReady;

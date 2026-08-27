@@ -103,6 +103,28 @@ public sealed class LogServiceTests : IDisposable
     }
 
     [Fact]
+    public void LogDetailed_IncludesContextExceptionAndStackOnOneLine()
+    {
+        try
+        {
+            ThrowDetailedFailure();
+        }
+        catch (Exception ex)
+        {
+            LogService.LogDetailed($"dispatcher {_marker}", ex);
+        }
+
+        var text = File.ReadAllText(LogFile);
+        Assert.Contains($"dispatcher {_marker}", text, StringComparison.Ordinal);
+        Assert.Contains(nameof(ThrowDetailedFailure), text, StringComparison.Ordinal);
+        Assert.Contains("diagnostic failure", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("\n   at ", text, StringComparison.Ordinal);
+    }
+
+    private static void ThrowDetailedFailure() =>
+        throw new InvalidOperationException("diagnostic failure");
+
+    [Fact]
     public void DeleteLog_RemovesExistingFile()
     {
         LogService.Log(_marker);

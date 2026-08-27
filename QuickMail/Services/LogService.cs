@@ -114,6 +114,21 @@ public static class LogService
         Log($"[ERROR] {context}: {FormatException(ex)}");
 
     /// <summary>
+    /// Logs the complete exception text, including stack frames and inner exceptions, on one
+    /// physical log line. Use this for global/unhandled exceptions where the call site cannot
+    /// otherwise identify the failing continuation. Ordinary operational failures intentionally
+    /// keep using <see cref="Log(string, Exception)"/> so the main log remains compact.
+    /// </summary>
+    public static void LogDetailed(string context, Exception ex)
+    {
+        var detail = ex.ToString()
+            .Replace("\r\n", " | ", StringComparison.Ordinal)
+            .Replace('\r', ' ')
+            .Replace('\n', ' ');
+        Log($"[ERROR] {context}: {detail}");
+    }
+
+    /// <summary>
     /// Walks the full inner-exception chain, appending each type, message, and — for
     /// SocketException — the socket error code and native error code.
     /// </summary>
