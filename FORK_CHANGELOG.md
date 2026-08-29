@@ -10,6 +10,10 @@ before a public release.
 
 ## Unreleased
 
+- Added `AI_HANDOFF.md`, a self-contained continuation specification covering the fork's
+  complete functional inventory, architecture, persistent-data and folder invariants, Eudora
+  migration contract, search/rule grammar, build/installer workflow, regression checklist and
+  safe instructions for a future developer or AI working without the original conversation.
 - Rule filtering from the message list now preserves the operator's place after its local refresh:
   focus lands on the first surviving message at the filtered row (or the preceding final row),
   matching Delete and Shift+Delete instead of jumping to the top of the grid.

@@ -2,6 +2,14 @@
 
 A keyboard-first WPF desktop email client for Windows. Multi-account IMAP/SMTP with a unified inbox, conversation threading, and an HTML reading pane.
 
+## Fork documentation
+
+This repository contains the local-first **Eudora QuickMail** fork, whose scope now extends
+well beyond the original QuickMail feature summary below. See
+[`AI_HANDOFF.md`](AI_HANDOFF.md) for the complete product specification, architecture,
+behavioral invariants, build/release workflow and reconstruction checklist. See
+[`FORK_CHANGELOG.md`](FORK_CHANGELOG.md) for its incremental development history.
+
 ## Features
 
 - **Multi-account** — connect any number of IMAP/SMTP accounts simultaneously
