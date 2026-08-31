@@ -471,18 +471,56 @@ public partial class CalendarViewModel : ObservableObject
         // An explicit user default wins. Otherwise prefer a Google account whose calendar sync is
         // enabled: silently creating a local-only reservation while a cloud calendar is available
         // is a much more dangerous default than choosing the first synced Google calendar.
-        if (DefaultCalendar is { Account: { } defaultAccount })
-            editor.SelectTarget(defaultAccount, DefaultCalendar.CalendarId);
-        else
-        {
-            var google = (_graphAccountsProvider?.Invoke() ?? [])
-                .FirstOrDefault(a => a.SyncCalendar
-                    && (a.AuthType == AuthType.OAuth2Google
-                        || string.Equals(a.CalendarProvider, "google", StringComparison.OrdinalIgnoreCase)));
-            if (google != null) editor.SelectTarget(google.Id, null);
-        }
+        ApplyPreferredTarget(editor);
         editor.Saved += evt => _ = SaveNewEventAsync(evt);
         EditorRequested?.Invoke(editor);
+    }
+
+    /// <summary>
+    /// Opens a new-event editor populated from a standalone iCalendar publication attached to an
+    /// email. The editor receives a fresh UID and the normal preferred calendar target, so saving
+    /// creates a real appointment rather than mutating the source message's VEVENT.
+    /// </summary>
+    public void AddCalendarItem(IcsModel item)
+    {
+        if (_onlineMode) { Announce("Calendar is unavailable in online mode.", AnnouncementCategory.Result); return; }
+        var source = new CalendarEvent
+        {
+            Uid = item.Uid ?? string.Empty,
+            AccountId = CalendarEvent.LocalAccountId,
+            Summary = item.Summary ?? string.Empty,
+            Description = item.Description ?? string.Empty,
+            Location = item.Location ?? string.Empty,
+            Organizer = item.Organizer ?? string.Empty,
+            OrganizerName = item.OrganizerName ?? string.Empty,
+            StartTimeTicks = item.StartTime?.ToUniversalTime().Ticks,
+            EndTimeTicks = item.EndTime?.ToUniversalTime().Ticks,
+            IsAllDay = item.IsAllDay,
+            RecurrenceRule = item.RecurrenceRule,
+            ExDates = item.ExDates.Count == 0
+                ? null
+                : string.Join(",", item.ExDates.Select(d =>
+                    d.ToString("yyyyMMdd'T'HHmmss", System.Globalization.CultureInfo.InvariantCulture))),
+        };
+        var editor = EventEditorViewModel.CreateDuplicate(source, BuildSaveTargets());
+        ApplyPreferredTarget(editor);
+        editor.Saved += evt => _ = SaveNewEventAsync(evt);
+        EditorRequested?.Invoke(editor);
+    }
+
+    private void ApplyPreferredTarget(EventEditorViewModel editor)
+    {
+        if (DefaultCalendar is { Account: { } defaultAccount })
+        {
+            editor.SelectTarget(defaultAccount, DefaultCalendar.CalendarId);
+            return;
+        }
+
+        var google = (_graphAccountsProvider?.Invoke() ?? [])
+            .FirstOrDefault(a => a.SyncCalendar
+                && (a.AuthType == AuthType.OAuth2Google
+                    || string.Equals(a.CalendarProvider, "google", StringComparison.OrdinalIgnoreCase)));
+        if (google != null) editor.SelectTarget(google.Id, null);
     }
 
     private List<CalendarSaveTarget> BuildSaveTargets()

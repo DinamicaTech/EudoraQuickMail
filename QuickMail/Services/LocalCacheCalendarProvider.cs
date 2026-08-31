@@ -58,6 +58,12 @@ public sealed class LocalCacheCalendarProvider : ICalendarProvider
             }
             if (model == null || string.IsNullOrEmpty(model.Uid)) continue;
 
+            // Only actual meeting requests and cancellations are harvested automatically. A
+            // standalone METHOD:PUBLISH (or an ICS file without METHOD) is offered as an explicit
+            // "Add to Calendar" action in the message card instead of silently creating an event.
+            var method = model.Method?.Trim().ToUpperInvariant() ?? string.Empty;
+            if (method is not ("REQUEST" or "CANCEL")) continue;
+
             // METHOD:CANCEL means the organizer cancelled the event. Mark it as
             // Cancelled so the calendar list can filter it out and announce it.
             var isCancel = string.Equals(model.Method, "CANCEL", StringComparison.OrdinalIgnoreCase);

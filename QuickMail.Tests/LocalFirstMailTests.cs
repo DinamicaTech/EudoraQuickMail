@@ -689,6 +689,66 @@ public sealed class LocalFirstMailTests : IDisposable
     }
 
     [Fact]
+    public void Pop3Mapping_ParsesAndRetainsTextCalendarPart()
+    {
+        const string ics = "BEGIN:VCALENDAR\r\nMETHOD:REQUEST\r\nBEGIN:VEVENT\r\nUID:pop3-invite\r\n" +
+                           "SUMMARY:POP3 meeting\r\nDTSTART:20260901T100000Z\r\nEND:VEVENT\r\nEND:VCALENDAR";
+        var message = new MimeMessage
+        {
+            Subject = "Invitation",
+            Date = DateTimeOffset.UtcNow,
+            Body = new Multipart("mixed")
+            {
+                new TextPart("plain") { Text = "Please join us." },
+                new TextPart("calendar")
+                {
+                    Text = ics,
+                    FileName = "meeting.ics",
+                    ContentDisposition = new ContentDisposition(ContentDisposition.Attachment),
+                },
+            },
+        };
+        message.From.Add(MailboxAddress.Parse("organizer@example.test"));
+        message.To.Add(MailboxAddress.Parse("user@example.test"));
+
+        var mapped = Pop3ReceiveService.MapMessage(Guid.NewGuid(), "ics-uidl", message);
+
+        Assert.Equal(ics, mapped.CalendarIcs);
+        Assert.Equal("pop3-invite", mapped.CalendarInvite?.Uid);
+        var attachment = Assert.Single(mapped.Attachments);
+        Assert.Equal("meeting.ics", attachment.FileName);
+        Assert.Equal("text/calendar", attachment.ContentType);
+        Assert.NotEmpty(attachment.Content!);
+    }
+
+    [Fact]
+    public void Pop3Mapping_RecognizesGenericAttachmentByIcsExtension()
+    {
+        const string ics = "BEGIN:VCALENDAR\r\nMETHOD:PUBLISH\r\nBEGIN:VEVENT\r\nUID:published-item\r\n" +
+                           "SUMMARY:Published event\r\nDTSTART:20260902T100000Z\r\nEND:VEVENT\r\nEND:VCALENDAR";
+        var calendarPart = new MimePart("application", "octet-stream")
+        {
+            FileName = "event.ics",
+            ContentDisposition = new ContentDisposition(ContentDisposition.Attachment),
+            Content = new MimeContent(new MemoryStream(System.Text.Encoding.UTF8.GetBytes(ics))),
+        };
+        var message = new MimeMessage
+        {
+            Subject = "Calendar file",
+            Date = DateTimeOffset.UtcNow,
+            Body = new Multipart("mixed") { new TextPart("plain") { Text = "Attached." }, calendarPart },
+        };
+        message.From.Add(MailboxAddress.Parse("organizer@example.test"));
+        message.To.Add(MailboxAddress.Parse("user@example.test"));
+
+        var mapped = Pop3ReceiveService.MapMessage(Guid.NewGuid(), "generic-ics", message);
+
+        Assert.Equal("published-item", mapped.CalendarInvite?.Uid);
+        Assert.Equal("PUBLISH", mapped.CalendarInvite?.Method);
+        Assert.Equal("event.ics", Assert.Single(mapped.Attachments).FileName);
+    }
+
+    [Fact]
     public async Task AutomaticPop3Check_RespectsPerAccountFlag()
     {
         var account = new AccountModel { BackendKind = BackendKind.Pop3Smtp, CheckIncomingMail = false };

@@ -34,11 +34,18 @@ public static class EventCardHtmlBuilder
         sb.Append($"<div style=\"border:1px solid {cardBorder};border-radius:6px;padding:12px;margin:0 0 16px 0;background:{cardBg};color:{cardText};font-family:Segoe UI,Arial,sans-serif;font-size:13px;line-height:1.45;\" role=\"region\" aria-label=\"");
         sb.Append(System.Net.WebUtility.HtmlEncode(invite.DisplaySummary));
         sb.Append("\">");
-        sb.Append("<div style=\"font-weight:bold;font-size:15px;margin-bottom:8px;\">Event Invitation</div>");
+        var method = invite.Method?.Trim().ToUpperInvariant() ?? string.Empty;
+        var isRequest = method == "REQUEST";
+        var isCancel = method == "CANCEL";
+        var isReply = method == "REPLY";
+        var title = isRequest ? "Event Invitation"
+                  : isCancel ? "Cancelled Event"
+                  : isReply ? "Calendar Response"
+                  : "Calendar Event";
+        sb.Append($"<div style=\"font-weight:bold;font-size:15px;margin-bottom:8px;\">{title}</div>");
 
         // Cancellation notice — shown instead of the accept/decline buttons when
         // the organizer sent METHOD:CANCEL.
-        var isCancel = string.Equals(invite.Method, "CANCEL", StringComparison.OrdinalIgnoreCase);
         if (isCancel)
         {
             sb.Append($"<div style=\"font-weight:bold;color:{Color("error", "#B3261E")};margin-bottom:8px;\">This event has been cancelled by the organizer.</div>");
@@ -94,7 +101,7 @@ public static class EventCardHtmlBuilder
         // its status color's pale background tint with the dark status text partner
         // and a 1px status border, readable in light and dark themes alike; the
         // verb text (not color) carries the meaning.
-        if (!isCancel)
+        if (isRequest)
         {
             void AppendButton(string href, string ariaLabel, string label, string fg, string bg, bool last = false)
             {
@@ -117,6 +124,14 @@ public static class EventCardHtmlBuilder
             // notification is dropped while focus is in the WebView2. Empty until the user responds.
             sb.Append("<div id=\"qm-invite-status\" aria-live=\"assertive\" aria-atomic=\"true\" " +
                       "style=\"margin-top:8px;font-weight:600;\"></div>");
+        }
+        else if (!isCancel && !isReply)
+        {
+            sb.Append("<div style=\"margin-top:8px;\">");
+            sb.Append("<a href=\"quickmail:ics-add\" role=\"button\" aria-label=\"Add event to calendar\" ");
+            sb.Append($"style=\"display:inline-block;padding:6px 14px;margin-bottom:4px;background:{Color("successBackground", "#E9F3EC")};");
+            sb.Append($"color:{Color("success", "#2E6B3E")};border:1px solid {Color("success", "#2E6B3E")};border-radius:4px;text-decoration:none;font-weight:600;\">Add to Calendar</a>");
+            sb.Append("</div>");
         }
 
         sb.Append("</div>");

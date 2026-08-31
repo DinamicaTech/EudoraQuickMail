@@ -28,6 +28,7 @@ public class ExternalUriPolicyTests
     [InlineData("skype:someone?call")]
     [InlineData("ldap://example.com")]
     [InlineData("quickmail:ics-accept")]
+    [InlineData("quickmail:ics-add")]
     [InlineData("about:blank")]
     public void IsAllowed_BlocksEverythingElse(string uri)
     {

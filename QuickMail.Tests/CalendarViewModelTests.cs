@@ -162,6 +162,33 @@ public class CalendarViewModelTests
     }
 
     [Fact]
+    public void AddCalendarItem_OpensNewEditorPopulatedFromIcs()
+    {
+        var vm = MakeVm([]);
+        EventEditorViewModel? opened = null;
+        vm.EditorRequested += editor => opened = editor;
+
+        vm.AddCalendarItem(new IcsModel
+        {
+            Uid = "external-uid",
+            Method = "PUBLISH",
+            Summary = "Published event",
+            Description = "Bring the notes",
+            Location = "Room 4",
+            StartTime = new DateTime(2026, 9, 3, 8, 0, 0, DateTimeKind.Utc),
+            EndTime = new DateTime(2026, 9, 3, 9, 0, 0, DateTimeKind.Utc),
+        });
+
+        Assert.NotNull(opened);
+        Assert.False(opened!.IsEdit);
+        Assert.Equal("Published event", opened.Title);
+        Assert.Equal("Bring the notes", opened.Notes);
+        Assert.Equal("Room 4", opened.Location);
+        Assert.True(opened.TryBuildEvent(out var created, out var error), error);
+        Assert.NotEqual("external-uid", created.Uid);
+    }
+
+    [Fact]
     public void NewEventAt_SeedsEditorFromSelectedCalendarSlot()
     {
         var vm = MakeVm([]);

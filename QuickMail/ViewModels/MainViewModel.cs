@@ -11156,7 +11156,26 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// <summary>True when the open message contains a calendar invite that can be responded to.</summary>
     public bool HasCalendarInvite => IsMessageOpen
         && MessageDetail?.CalendarInvite != null
-        && !string.Equals(MessageDetail.CalendarInvite.Method, "CANCEL", StringComparison.OrdinalIgnoreCase);
+        && string.Equals(MessageDetail.CalendarInvite.Method, "REQUEST", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Adds a standalone ICS publication from either message surface through the calendar editor.</summary>
+    public void AddCalendarItemFromMessage(MailMessageDetail? detail)
+    {
+        if (detail?.CalendarInvite is not { } item)
+        {
+            Announce("This message does not contain a usable calendar event.", AnnouncementCategory.Result);
+            return;
+        }
+        if (CalendarVm == null)
+        {
+            Announce("Calendar is not enabled.", AnnouncementCategory.Result);
+            return;
+        }
+        CalendarVm.AddCalendarItem(item);
+    }
+
+    [RelayCommand]
+    private void AddCalendarItem() => AddCalendarItemFromMessage(MessageDetail);
 
     /// <summary>
     /// Builds an accessible HTML event card for display in the WebView2 reading pane.

@@ -3,6 +3,7 @@ using System.Text;
 using System.IO;
 using System.Diagnostics;
 using MimeKit;
+using QuickMail.Helpers;
 using QuickMail.Models;
 
 namespace QuickMail.Services;
@@ -137,7 +138,7 @@ public sealed class Pop3ReceiveService : IPop3ReceiveService
             recipients = FirstNonEmptyHeader(message, "Delivered-To", "X-Original-To", "Envelope-To")
                          ?? fallbackRecipient
                          ?? string.Empty;
-        return new MailMessageDetail
+        var detail = new MailMessageDetail
         {
             MessageId = StableMessageId(accountId, uidl),
             AccountId = accountId,
@@ -158,6 +159,8 @@ public sealed class Pop3ReceiveService : IPop3ReceiveService
             RawHeaders = SerializeHeaders(message.Headers),
             Attachments = ExtractMimeResources(message),
         };
+        CalendarMimeHelper.Populate(detail, CalendarMimeHelper.FindCalendarText(message), "Pop3ReceiveService");
+        return detail;
     }
 
     private static string? FirstNonEmptyHeader(MimeMessage message, params string[] names)
@@ -183,9 +186,9 @@ public sealed class Pop3ReceiveService : IPop3ReceiveService
         foreach (var entity in message.BodyParts)
         {
             if (entity is not MimePart part || part.Content is null) continue;
-            if (part.ContentType.IsMimeType("text", "plain") ||
-                part.ContentType.IsMimeType("text", "html") ||
-                part.ContentType.IsMimeType("text", "calendar")) continue;
+            var isCalendar = CalendarMimeHelper.IsCalendarPart(part);
+            if (!isCalendar && (part.ContentType.IsMimeType("text", "plain") ||
+                                part.ContentType.IsMimeType("text", "html"))) continue;
 
             var isAttachment = part.ContentDisposition?.IsAttachment == true;
             var contentId = part.ContentId?.Trim().Trim('<', '>');
@@ -194,7 +197,9 @@ public sealed class Pop3ReceiveService : IPop3ReceiveService
                  !string.IsNullOrWhiteSpace(contentId));
             var fileName = part.FileName;
             if (string.IsNullOrWhiteSpace(fileName))
-                fileName = isInline && !string.IsNullOrWhiteSpace(contentId)
+                fileName = isCalendar
+                    ? "event.ics"
+                    : isInline && !string.IsNullOrWhiteSpace(contentId)
                     ? contentId
                     : "attachment." + part.ContentType.MediaSubtype;
 

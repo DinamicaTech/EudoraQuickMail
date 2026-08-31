@@ -312,7 +312,7 @@ public class CalendarStoreTests : IDisposable
             From = "org@example.com",
             Subject = "Invite",
             Date = DateTimeOffset.UtcNow,
-            CalendarIcs = "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:purge-test\r\nSUMMARY:Purge meeting\r\nEND:VEVENT\r\nEND:VCALENDAR",
+            CalendarIcs = "BEGIN:VCALENDAR\r\nMETHOD:REQUEST\r\nBEGIN:VEVENT\r\nUID:purge-test\r\nSUMMARY:Purge meeting\r\nEND:VEVENT\r\nEND:VCALENDAR",
         };
         // UpsertDetailAsync requires a summary row first (LEFT JOIN is fine for loading,
         // but the summary row is needed so the delete has something to cascade from).
@@ -544,6 +544,26 @@ public class CalendarStoreTests : IDisposable
         events = await _store.LoadCalendarEventsAsync();
         Assert.Single(events);
         Assert.Equal(CalendarResponseStatus.Cancelled, events[0].ResponseStatus);
+    }
+
+    [Fact]
+    public async Task Harvest_PublishMethod_WaitsForExplicitAddToCalendar()
+    {
+        var accountId = Guid.NewGuid();
+        await _store.UpsertDetailAsync(new MailMessageDetail
+        {
+            MessageId = "msg-publish",
+            AccountId = accountId,
+            FolderName = "INBOX",
+            Subject = "Published event",
+            Date = DateTimeOffset.UtcNow,
+            CalendarIcs = "BEGIN:VCALENDAR\r\nMETHOD:PUBLISH\r\nBEGIN:VEVENT\r\nUID:publish-test\r\n" +
+                          "SUMMARY:Published event\r\nDTSTART:20260901T100000Z\r\nEND:VEVENT\r\nEND:VCALENDAR",
+        });
+
+        await new LocalCacheCalendarProvider(_store).HarvestAsync();
+
+        Assert.Empty(await _store.LoadCalendarEventsAsync());
     }
 
     // ── Invite card survives caching (regression for #297) ───────────────────────

@@ -377,6 +377,9 @@ public partial class MessageWindow : Window
     /// </summary>
     public event Action<MailMessageDetail, InviteResponse>? InviteResponseRequested;
 
+    /// <summary>Raised for a standalone ICS publication that the user wants to add to a calendar.</summary>
+    public event Action<MailMessageDetail>? CalendarAddRequested;
+
     /// <summary>Handles quickmail: pseudo-URIs from this window's event card buttons.</summary>
     private void HandleQuickMailUri(string uri)
     {
@@ -386,6 +389,8 @@ public partial class MessageWindow : Window
             RespondToInvite(InviteResponse.Tentative);
         else if (uri.StartsWith("quickmail:ics-decline", StringComparison.OrdinalIgnoreCase))
             RespondToInvite(InviteResponse.Decline);
+        else if (uri.StartsWith("quickmail:ics-add", StringComparison.OrdinalIgnoreCase) && _vm.MessageDetail is { } detail)
+            CalendarAddRequested?.Invoke(detail);
     }
 
     private void RespondToInvite(InviteResponse response)
@@ -398,7 +403,7 @@ public partial class MessageWindow : Window
     /// <summary>True when this window has an invitation open that can still be answered.</summary>
     private bool CanRespondToInvite() =>
         _vm.MessageDetail?.CalendarInvite is { } invite &&
-        !string.Equals(invite.Method, "CANCEL", StringComparison.OrdinalIgnoreCase);
+        string.Equals(invite.Method, "REQUEST", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>Re-renders the open message with fresh theme CSS. Never moves focus.</summary>
     private void OnThemeChanged(object? sender, EventArgs e)

@@ -13,6 +13,7 @@ using MailKit.Net.Imap;
 using MailKit.Search;
 using MailKit.Security;
 using MimeKit;
+using QuickMail.Helpers;
 using QuickMail.Models;
 
 namespace QuickMail.Services;
@@ -410,7 +411,7 @@ public class ImapMailService : IMailService, IChangeNotifier, IConnectionProbe
 
             var attachments = ExtractAttachments(s.Body);
 
-            // Detect text/calendar MIME parts (ICS calendar invites). Only the fetch is done
+            // Detect text/calendar parts and generically typed .ics attachments. Only the fetch is done
             // here; parsing and field assignment live in PopulateCalendar so the invariant
             // "CalendarInvite set => CalendarIcs set" is enforced (and testable) in one place.
             string? rawCalendarIcs = null;
@@ -421,8 +422,8 @@ public class ImapMailService : IMailService, IChangeNotifier, IConnectionProbe
                 try
                 {
                     var decoded = await folder.GetBodyPartAsync(mailKitUid, calendarPart, ct);
-                    if (decoded is TextPart tp)
-                        rawCalendarIcs = tp.Text;
+                    if (decoded is MimePart mimePart)
+                        rawCalendarIcs = CalendarMimeHelper.ReadCalendarText(mimePart);
                 }
                 catch (Exception ex)
                 {
@@ -451,7 +452,7 @@ public class ImapMailService : IMailService, IChangeNotifier, IConnectionProbe
                 DraftSpellLanguage = s.Headers?["X-QuickMail-Spell-Language"] ?? string.Empty,
             };
 
-            PopulateCalendar(detail, rawCalendarIcs);
+            CalendarMimeHelper.Populate(detail, rawCalendarIcs, "ImapMailService");
             return detail;
         }
         finally { await folder.CloseAsync(false, ct); }
@@ -468,22 +469,7 @@ public class ImapMailService : IMailService, IChangeNotifier, IConnectionProbe
     /// and the card silently vanishes (the root cause of #297, really a prefetch-vs-open race).
     /// </summary>
     internal static void PopulateCalendar(MailMessageDetail detail, string? rawIcs)
-    {
-        if (string.IsNullOrWhiteSpace(rawIcs))
-            return;
-
-        detail.CalendarIcs = rawIcs;
-        try
-        {
-            detail.CalendarInvite = IcsModel.Parse(rawIcs);
-        }
-        catch (Exception ex)
-        {
-            // Raw ICS stays cached even when parsing fails, so a later fix to the parser
-            // retroactively revives the invite card for already-cached rows.
-            LogService.Log($"ImapMailService: failed to parse calendar part for UID {detail.MessageId}: {ex.Message}");
-        }
-    }
+        => CalendarMimeHelper.Populate(detail, rawIcs, "ImapMailService");
 
     // ── Mutations ────────────────────────────────────────────────────────────────
 
@@ -1837,7 +1823,11 @@ public class ImapMailService : IMailService, IChangeNotifier, IConnectionProbe
             var subtype = multi.ContentType.MediaSubtype;
             if (subtype.Equals("alternative", StringComparison.OrdinalIgnoreCase) ||
                 subtype.Equals("related",     StringComparison.OrdinalIgnoreCase))
+            {
+                foreach (var child in multi.BodyParts)
+                    CollectCalendarAttachments(child, result);
                 return;
+            }
             foreach (var child in multi.BodyParts)
                 CollectAttachments(child, result);
         }
@@ -1847,15 +1837,16 @@ public class ImapMailService : IMailService, IChangeNotifier, IConnectionProbe
             var fileName    = basic.ContentDisposition?.FileName ?? basic.ContentType.Name;
 
             bool isExplicit = disposition.Equals("attachment", StringComparison.OrdinalIgnoreCase);
+            bool isCalendar = IsCalendarPart(basic);
             bool isTextBody = basic is BodyPartText bt &&
                               (bt.ContentType.MediaSubtype.Equals("plain", StringComparison.OrdinalIgnoreCase) ||
                                bt.ContentType.MediaSubtype.Equals("html",  StringComparison.OrdinalIgnoreCase));
 
-            if (isExplicit || (!isTextBody && !string.IsNullOrEmpty(fileName)))
+            if (isCalendar || isExplicit || (!isTextBody && !string.IsNullOrEmpty(fileName)))
             {
                 result.Add(new AttachmentModel
                 {
-                    FileName      = fileName ?? $"attachment.{basic.ContentType.MediaSubtype}",
+                    FileName      = fileName ?? (isCalendar ? "event.ics" : $"attachment.{basic.ContentType.MediaSubtype}"),
                     ContentType   = basic.ContentType.MimeType,
                     FileSize      = (long)basic.Octets,
                     PartSpecifier = basic.PartSpecifier,
@@ -1863,6 +1854,30 @@ public class ImapMailService : IMailService, IChangeNotifier, IConnectionProbe
             }
         }
     }
+
+    private static void CollectCalendarAttachments(BodyPart part, List<AttachmentModel> result)
+    {
+        if (part is BodyPartMultipart multi)
+        {
+            foreach (var child in multi.BodyParts) CollectCalendarAttachments(child, result);
+            return;
+        }
+        if (part is not BodyPartBasic basic || !IsCalendarPart(basic)) return;
+        var fileName = basic.ContentDisposition?.FileName ?? basic.ContentType.Name;
+        result.Add(new AttachmentModel
+        {
+            FileName = fileName ?? "event.ics",
+            ContentType = basic.ContentType.MimeType,
+            FileSize = (long)basic.Octets,
+            PartSpecifier = basic.PartSpecifier,
+        });
+    }
+
+    private static bool IsCalendarPart(BodyPartBasic basic) =>
+        (basic.ContentType.MediaType.Equals("text", StringComparison.OrdinalIgnoreCase) &&
+         basic.ContentType.MediaSubtype.Equals("calendar", StringComparison.OrdinalIgnoreCase)) ||
+        string.Equals(Path.GetExtension(basic.ContentDisposition?.FileName ?? basic.ContentType.Name),
+                      ".ics", StringComparison.OrdinalIgnoreCase);
 
     private static BodyPart? FindBodyPartBySpecifier(BodyPart? part, string specifier)
     {
@@ -1878,15 +1893,13 @@ public class ImapMailService : IMailService, IChangeNotifier, IConnectionProbe
     }
 
     /// <summary>
-    /// Finds the first text/calendar body part in the MIME tree, if any.
+    /// Finds the first text/calendar body part or .ics attachment in the MIME tree, if any.
     /// Returns null if no calendar part is present.
     /// </summary>
     private static BodyPart? FindCalendarPart(BodyPart? part)
     {
         if (part == null) return null;
-        if (part is BodyPartBasic basic &&
-            basic.ContentType.MediaType.Equals("text", StringComparison.OrdinalIgnoreCase) &&
-            basic.ContentType.MediaSubtype.Equals("calendar", StringComparison.OrdinalIgnoreCase))
+        if (part is BodyPartBasic basic && IsCalendarPart(basic))
             return part;
         if (part is BodyPartMultipart multi)
             foreach (var child in multi.BodyParts)

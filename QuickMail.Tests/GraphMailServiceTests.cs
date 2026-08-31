@@ -448,6 +448,60 @@ public class GraphMailServiceTests
     }
 
     [Fact]
+    public async Task GetMessageDetailAsync_OrdinaryMessageWithGenericIcsAttachment_ExtractsCalendarItem()
+    {
+        const string detail = """
+            {"id":"m1","subject":"Calendar file",
+             "body":{"contentType":"html","content":"<p>Attached</p>"},
+             "from":{"emailAddress":{"address":"alice@x.com"}},
+             "toRecipients":[{"emailAddress":{"address":"me@x.com"}}],
+             "ccRecipients":[],"receivedDateTime":"2026-09-01T03:04:05Z","isRead":false,"hasAttachments":true,
+             "attachments":[{"id":"a1","name":"event.ics","contentType":"application/octet-stream","size":180,"isInline":false}]}
+            """;
+        var raw = string.Join("\r\n", new[]
+        {
+            "From: Alice <alice@x.com>",
+            "To: me@x.com",
+            "Subject: Calendar file",
+            "MIME-Version: 1.0",
+            "Content-Type: multipart/mixed; boundary=\"b\"",
+            "",
+            "--b",
+            "Content-Type: text/plain; charset=utf-8",
+            "",
+            "Attached",
+            "--b",
+            "Content-Type: application/octet-stream; name=\"event.ics\"",
+            "Content-Disposition: attachment; filename=\"event.ics\"",
+            "",
+            "BEGIN:VCALENDAR",
+            "VERSION:2.0",
+            "METHOD:PUBLISH",
+            "BEGIN:VEVENT",
+            "UID:generic-graph-ics",
+            "SUMMARY:Published event",
+            "DTSTART:20260902T100000Z",
+            "END:VEVENT",
+            "END:VCALENDAR",
+            "--b--",
+            "",
+        });
+        var (svc, handler) = Make(url =>
+              url.Contains("/me?")   ? (HttpStatusCode.OK, MeJson)
+            : url.Contains("$value") ? (HttpStatusCode.OK, raw)
+            : (HttpStatusCode.OK, detail));
+
+        var account = GraphAccount();
+        await svc.ConnectAsync(account, ct: TestContext.Current.CancellationToken);
+        var d = await svc.GetMessageDetailAsync(account.Id, "inbox", "m1", TestContext.Current.CancellationToken);
+
+        Assert.Contains(handler.Requests, u => u.Contains("/messages/m1/$value"));
+        Assert.Equal("generic-graph-ics", d.CalendarInvite?.Uid);
+        Assert.Equal("PUBLISH", d.CalendarInvite?.Method);
+        Assert.Equal("event.ics", Assert.Single(d.Attachments).FileName);
+    }
+
+    [Fact]
     public async Task GetMessageDetailAsync_MeetingMessageWithoutCalendarPart_OpensWithoutInvite()
     {
         // A meeting-typed message whose raw MIME carries no text/calendar part (e.g. a malformed or

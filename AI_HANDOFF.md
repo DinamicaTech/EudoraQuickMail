@@ -152,6 +152,8 @@ Before work, run `git rev-parse --show-toplevel` and require
 ### 4.7 Calendar, shell and maintenance
 
 - Google Calendar OAuth, FullCalendar views, day sync and direct event actions.
+- Incoming ICS recognition for POP3/IMAP/Graph, with RSVP cards for meeting requests and explicit
+  Add to Calendar for standalone publications; the original `.ics` remains an attachment.
 - Compact Today agenda with calendar selector.
 - Separate taskbar notification/tray-icon settings and custom received icon.
 - Early splash, single-instance recovery, shutdown hardening and structured performance log.
@@ -483,6 +485,14 @@ Duplicate/Share/Delete. Share opens a new message with blank To, subject `Reserv
 and an in-memory `.ics` attachment. Duplicate opens a new-event editor with copied content,
 schedule, recurrence and calendar but a fresh event identity. If any Google calendar is linked,
 use it as default new-event target, not Local.
+
+Incoming calendar MIME handling accepts both `text/calendar` and a `.ics` filename even when the
+sender labels it `application/octet-stream`. Preserve the raw body in `calendar_ics` and expose it
+as a normal downloadable attachment. `METHOD:REQUEST` renders Accept/Tentative/Decline and is
+harvested into the pending-invitation calendar; `METHOD:CANCEL` cancels the matching event.
+`METHOD:PUBLISH` (and a standalone ICS without an invitation method) renders **Add to Calendar**,
+opens a new-event editor with a fresh UID and the usual preferred target, and is not silently
+harvested. `METHOD:REPLY` is informational and must never offer RSVP controls.
 
 Drag/drop day rescheduling is feasible but not yet implemented. It must be restricted to writable
 single events, preserve duration/all-day/time-zone semantics, push the change to Google before

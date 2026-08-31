@@ -4686,6 +4686,8 @@ public partial class MainWindow : Window
             _vm.TentativeInviteCommand.Execute(null);
         else if (uri.StartsWith("quickmail:ics-decline", StringComparison.OrdinalIgnoreCase))
             _vm.DeclineInviteCommand.Execute(null);
+        else if (uri.StartsWith("quickmail:ics-add", StringComparison.OrdinalIgnoreCase))
+            _vm.AddCalendarItemCommand.Execute(null);
     }
 
     // Message content is untrusted; only allow-listed schemes (http/https/mailto)
@@ -7047,6 +7049,7 @@ public partial class MainWindow : Window
                 LogService.Log("MessageWindow invite response", ex);
             }
         };
+        win.CalendarAddRequested += detail => _vm.AddCalendarItemFromMessage(detail);
         _openMessageWindows.Add(win);
         // Wire mail action delegates so the window has full message operations.
         // Each delegate syncs MainViewModel selection to the window's current message

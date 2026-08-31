@@ -10,6 +10,11 @@ before a public release.
 
 ## Unreleased
 
+- Incoming iCalendar content is now handled consistently across POP3, IMAP and Graph: both
+  `text/calendar` parts and generically typed `.ics` attachments are recognized, the raw ICS is
+  cached and remains visible/downloadable as an attachment, `METHOD:REQUEST` keeps its RSVP
+  controls, and standalone publications offer an explicit **Add to Calendar** editor instead of
+  being silently harvested. POP3 no longer discards calendar MIME parts.
 - IMAP special folders excluded from the All Mail view are now still synchronized: opening the
   canonical Out folder refreshes each connected account's real Sent folder, periodic/startup-wide
   sweeps no longer mistake `ExcludeFromAllMail` for `DoNotSync`, and successful immediate or

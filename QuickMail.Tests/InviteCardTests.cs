@@ -57,6 +57,21 @@ public class InviteCardTests
     }
 
     [Fact]
+    public void EventCard_PublishedCalendarItem_OffersAddInsteadOfRsvp()
+    {
+        var invite = DetailWithInvite().CalendarInvite!;
+        invite.Method = "PUBLISH";
+
+        var html = QuickMail.Helpers.EventCardHtmlBuilder.Build(invite, themeService: null);
+
+        Assert.Contains("Calendar Event", html);
+        Assert.Contains("quickmail:ics-add", html);
+        Assert.Contains("Add to Calendar", html);
+        Assert.DoesNotContain("quickmail:ics-accept", html);
+        Assert.DoesNotContain("quickmail:ics-decline", html);
+    }
+
+    [Fact]
     public async Task Rsvp_WhenInviteDataMissing_RaisesActionableCardStatus()
     {
         // The #297 cache-reconstruction race: the card is shown but CalendarInvite is null. Pressing

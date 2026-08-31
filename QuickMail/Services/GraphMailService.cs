@@ -9,6 +9,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using MimeKit;
+using QuickMail.Helpers;
 using QuickMail.Models;
 using QuickMail.Services.Graph;
 
@@ -255,27 +256,23 @@ public class GraphMailService : IMailService, IConnectionProbe
         return detail;
     }
 
-    // Graph's message JSON never surfaces the text/calendar MIME part, so a meeting request arrives
-    // with no invite to drive the reading-pane Accept/Decline card. For those messages only, fetch
-    // the raw RFC 822 MIME ($value) and extract the ICS — reusing IcsModel and the existing IMAP RSVP
-    // flow (MainViewModel.RespondToCalendarInviteAsync). CalendarIcs is set alongside CalendarInvite so
-    // the invite survives caching (see the ImapMailService note; same prefetch-vs-open race). Issue #332.
+    // Graph's message JSON never surfaces the text/calendar body, so meeting messages and ordinary
+    // messages carrying a visible .ics attachment need one raw RFC 822 MIME ($value) fetch. The
+    // shared extractor accepts both the canonical MIME type and generic content types identified by
+    // filename. CalendarIcs is set alongside CalendarInvite so the item survives caching.
     private async Task TryAttachCalendarInviteAsync(
         Guid accountId, string messageId, GraphMessage m, MailMessageDetail detail, CancellationToken ct)
     {
-        if (!IsMeetingMessage(m.ODataType)) return;
+        var hasCalendarAttachment = (m.Attachments ?? [])
+            .Any(a => string.Equals(Path.GetExtension(a.Name), ".ics", StringComparison.OrdinalIgnoreCase) ||
+                      string.Equals(a.ContentType, "text/calendar", StringComparison.OrdinalIgnoreCase));
+        if (!IsMeetingMessage(m.ODataType) && !hasCalendarAttachment) return;
         try
         {
             var mime = await _client.GetBytesAsync(Account(accountId), $"/me/messages/{messageId}/$value", GraphHeaders.ImmutableId, ct);
             using var stream = new MemoryStream(mime);
             var message = await MimeMessage.LoadAsync(stream, ct);
-            var calendar = message.BodyParts.OfType<TextPart>()
-                .FirstOrDefault(p => p.ContentType.IsMimeType("text", "calendar"));
-            if (calendar != null && !string.IsNullOrWhiteSpace(calendar.Text))
-            {
-                detail.CalendarIcs = calendar.Text;
-                detail.CalendarInvite = IcsModel.Parse(calendar.Text);
-            }
+            CalendarMimeHelper.Populate(detail, CalendarMimeHelper.FindCalendarText(message), "GraphMailService");
         }
         catch (Exception ex)
         {
