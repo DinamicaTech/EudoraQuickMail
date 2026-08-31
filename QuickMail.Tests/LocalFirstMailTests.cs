@@ -711,7 +711,15 @@ public sealed class LocalFirstMailTests : IDisposable
         message.From.Add(MailboxAddress.Parse("organizer@example.test"));
         message.To.Add(MailboxAddress.Parse("user@example.test"));
 
-        var mapped = Pop3ReceiveService.MapMessage(Guid.NewGuid(), "ics-uidl", message);
+        // Round-trip through the MIME parser so body-part content is backed by the same kind of
+        // stream returned by a real POP3 transport (the regression did not reproduce on a freshly
+        // constructed TextPart).
+        using var wire = new MemoryStream();
+        message.WriteTo(wire);
+        wire.Position = 0;
+        var parsedMessage = MimeMessage.Load(wire);
+
+        var mapped = Pop3ReceiveService.MapMessage(Guid.NewGuid(), "ics-uidl", parsedMessage);
 
         Assert.Equal(ics, mapped.CalendarIcs);
         Assert.Equal("pop3-invite", mapped.CalendarInvite?.Uid);

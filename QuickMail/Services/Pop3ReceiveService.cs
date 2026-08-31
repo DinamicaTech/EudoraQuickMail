@@ -138,6 +138,11 @@ public sealed class Pop3ReceiveService : IPop3ReceiveService
             recipients = FirstNonEmptyHeader(message, "Delivered-To", "X-Original-To", "Envelope-To")
                          ?? fallbackRecipient
                          ?? string.Empty;
+        // Parse before materializing attachments: decoding a MimeContent may consume the backing
+        // stream for messages loaded from POP3. Parsing after ExtractMimeResources therefore saw
+        // an empty text/calendar part in real mail even though constructed unit-test parts survived.
+        var rawCalendarIcs = CalendarMimeHelper.FindCalendarText(message);
+        var attachments = ExtractMimeResources(message);
         var detail = new MailMessageDetail
         {
             MessageId = StableMessageId(accountId, uidl),
@@ -157,9 +162,9 @@ public sealed class Pop3ReceiveService : IPop3ReceiveService
             PlainTextBody = plain,
             HtmlBody = html,
             RawHeaders = SerializeHeaders(message.Headers),
-            Attachments = ExtractMimeResources(message),
+            Attachments = attachments,
         };
-        CalendarMimeHelper.Populate(detail, CalendarMimeHelper.FindCalendarText(message), "Pop3ReceiveService");
+        CalendarMimeHelper.Populate(detail, rawCalendarIcs, "Pop3ReceiveService");
         return detail;
     }
 

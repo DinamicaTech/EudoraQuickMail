@@ -494,6 +494,11 @@ harvested into the pending-invitation calendar; `METHOD:CANCEL` cancels the matc
 opens a new-event editor with a fresh UID and the usual preferred target, and is not silently
 harvested. `METHOD:REPLY` is informational and must never offer RSVP controls.
 
+For POP3, extract/parse calendar text **before** materializing attachments: decoding the
+`MimeContent` may consume the transport-backed stream. `LoadDetailAsync` also repairs an empty
+`calendar_ics` from a materialized local `.ics` attachment (maximum 2 MB) and persists the repair;
+this supports messages downloaded by the brief affected build without requiring redelivery.
+
 Drag/drop day rescheduling is feasible but not yet implemented. It must be restricted to writable
 single events, preserve duration/all-day/time-zone semantics, push the change to Google before
 committing the local row, and revert the FullCalendar drag on server failure. Recurring and

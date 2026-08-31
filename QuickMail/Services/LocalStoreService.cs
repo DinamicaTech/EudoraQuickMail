@@ -8,6 +8,7 @@ using System.Text.RegularExpressions;
 using System.Text.Json;
 using System.Threading.Tasks;
 using Microsoft.Data.Sqlite;
+using QuickMail.Helpers;
 using QuickMail.Models;
 
 namespace QuickMail.Services;
@@ -2519,6 +2520,12 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
         }
 
         var calendarIcs = r.IsDBNull(11) ? string.Empty : r.GetString(11);
+        var recoveredCalendarIcs = false;
+        if (string.IsNullOrWhiteSpace(calendarIcs))
+        {
+            calendarIcs = CalendarMimeHelper.FindCalendarText(attachments) ?? string.Empty;
+            recoveredCalendarIcs = !string.IsNullOrWhiteSpace(calendarIcs);
+        }
         var storedComposeMode = !r.IsDBNull(13) && Enum.IsDefined(typeof(ComposeMode), r.GetInt32(13))
             ? (ComposeMode)r.GetInt32(13)
             : ComposeMode.PlainText;
@@ -2531,7 +2538,7 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
         var bcc = r.IsDBNull(2) ? string.Empty : r.GetString(2);
         if (string.IsNullOrWhiteSpace(bcc)) bcc = ExtractHeaderValue(rawHeaders, "Bcc");
 
-        return new MailMessageDetail
+        var detail = new MailMessageDetail
         {
             MessageId     = messageId,
             AccountId     = accountId,
@@ -2554,6 +2561,24 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
             Direction      = r.IsDBNull(15) ? MessageDirection.Unknown : (MessageDirection)r.GetInt64(15),
             CalendarInvite = string.IsNullOrWhiteSpace(calendarIcs) ? null : IcsModel.Parse(calendarIcs),
         };
+        if (recoveredCalendarIcs)
+        {
+            // Persist the repair so subsequent opens and the calendar harvester use the recovered
+            // event without reading the attachment again.
+            await r.DisposeAsync();
+            await using var repair = conn.CreateCommand();
+            repair.CommandText = """
+                UPDATE MessageDetail SET calendar_ics=$ics
+                WHERE unique_id=$uid AND account_id=$aid AND folder_name=$fn
+                  AND (calendar_ics IS NULL OR calendar_ics='');
+                """;
+            repair.Parameters.AddWithValue("$ics", calendarIcs);
+            repair.Parameters.AddWithValue("$uid", messageId);
+            repair.Parameters.AddWithValue("$aid", accountId.ToString());
+            repair.Parameters.AddWithValue("$fn", folderName);
+            await repair.ExecuteNonQueryAsync();
+        }
+        return detail;
     }
 
     public async Task<IReadOnlyDictionary<string, RuleMatchData>> LoadRuleMatchDataAsync(

@@ -619,6 +619,43 @@ public class CalendarStoreTests : IDisposable
         Assert.Null(loaded!.CalendarInvite);
     }
 
+    [Fact]
+    public async Task LoadDetail_RecoversAndPersistsCalendarIcsFromMaterializedAttachment()
+    {
+        const string ics = "BEGIN:VCALENDAR\r\nMETHOD:PUBLISH\r\nBEGIN:VEVENT\r\nUID:recovered-item\r\n" +
+                           "SUMMARY:Recovered event\r\nDTSTART:20260904T100000Z\r\nEND:VEVENT\r\nEND:VCALENDAR";
+        var path = Path.Combine(_tempDir, "received-event.ics");
+        await File.WriteAllTextAsync(path, ics, TestContext.Current.CancellationToken);
+        var accountId = Guid.NewGuid();
+        await _store.SaveLocalMessageAsync(new MailMessageDetail
+        {
+            MessageId = "msg-recover-ics",
+            AccountId = accountId,
+            FolderName = "In",
+            Subject = "Calendar file",
+            Date = DateTimeOffset.UtcNow,
+            Attachments =
+            [
+                new AttachmentModel
+                {
+                    FileName = "received-event.ics",
+                    ContentType = "text/calendar",
+                    FileSize = new FileInfo(path).Length,
+                    PartSpecifier = path,
+                },
+            ],
+        }, TestContext.Current.CancellationToken);
+
+        var recovered = await _store.LoadDetailAsync(accountId, "In", "msg-recover-ics");
+        Assert.Equal("recovered-item", recovered?.CalendarInvite?.Uid);
+
+        // The repair was persisted: reopening still works after the physical attachment disappears.
+        File.Delete(path);
+        var persisted = await _store.LoadDetailAsync(accountId, "In", "msg-recover-ics");
+        Assert.Equal("recovered-item", persisted?.CalendarInvite?.Uid);
+        Assert.Equal(ics, persisted?.CalendarIcs);
+    }
+
     // ── Orphaned-account purge (duplicate appointments after remove/re-add) ───────
     // An account removed and re-added gets a new id; its old id's calendar events linger and show as
     // duplicates. The startup purge drops events for accounts not in the current set, but keeps local

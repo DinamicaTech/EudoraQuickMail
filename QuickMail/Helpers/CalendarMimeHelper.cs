@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Collections.Generic;
 using MimeKit;
 using QuickMail.Models;
 using QuickMail.Services;
@@ -41,6 +42,41 @@ internal static class CalendarMimeHelper
         return firstReadable;
     }
 
+    /// <summary>
+    /// Recovers calendar text from a materialized attachment. This repairs POP3 messages written
+    /// by the short-lived build that decoded the MIME stream before parsing it, leaving
+    /// calendar_ics empty even though the valid .ics file was safely stored on disk.
+    /// </summary>
+    internal static string? FindCalendarText(IReadOnlyList<AttachmentModel> attachments)
+    {
+        foreach (var attachment in attachments)
+        {
+            var isCalendar = string.Equals(Path.GetExtension(attachment.FileName), ".ics", StringComparison.OrdinalIgnoreCase) ||
+                             attachment.ContentType.StartsWith("text/calendar", StringComparison.OrdinalIgnoreCase);
+            if (!isCalendar) continue;
+
+            try
+            {
+                if (attachment.Content is { Length: > 0 } bytes && bytes.Length <= MaxCalendarBytes)
+                {
+                    using var memory = new MemoryStream(bytes, writable: false);
+                    return ReadText(memory);
+                }
+
+                if (string.IsNullOrWhiteSpace(attachment.PartSpecifier) ||
+                    !File.Exists(attachment.PartSpecifier)) continue;
+                var info = new FileInfo(attachment.PartSpecifier);
+                if (info.Length == 0 || info.Length > MaxCalendarBytes) continue;
+                using var stream = new FileStream(attachment.PartSpecifier, FileMode.Open, FileAccess.Read,
+                                                  FileShare.ReadWrite | FileShare.Delete);
+                return ReadText(stream);
+            }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+        return null;
+    }
+
     internal static string? ReadCalendarText(MimePart part)
     {
         if (part.Content is null) return null;
@@ -63,6 +99,13 @@ internal static class CalendarMimeHelper
             catch { /* RFC 5545 defaults to UTF-8; retain that safe fallback. */ }
         }
         using var reader = new StreamReader(stream, encoding, detectEncodingFromByteOrderMarks: true);
+        return reader.ReadToEnd();
+    }
+
+    private static string ReadText(Stream stream)
+    {
+        using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true,
+                                            bufferSize: 1024, leaveOpen: true);
         return reader.ReadToEnd();
     }
 

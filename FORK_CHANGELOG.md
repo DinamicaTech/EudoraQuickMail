@@ -14,7 +14,9 @@ before a public release.
   `text/calendar` parts and generically typed `.ics` attachments are recognized, the raw ICS is
   cached and remains visible/downloadable as an attachment, `METHOD:REQUEST` keeps its RSVP
   controls, and standalone publications offer an explicit **Add to Calendar** editor instead of
-  being silently harvested. POP3 no longer discards calendar MIME parts.
+  being silently harvested. POP3 parses calendar data before materializing/consuming its MIME
+  stream, and messages cached by the affected interim build repair `calendar_ics` automatically
+  from their safely materialized `.ics` file when opened.
 - IMAP special folders excluded from the All Mail view are now still synchronized: opening the
   canonical Out folder refreshes each connected account's real Sent folder, periodic/startup-wide
   sweeps no longer mistake `ExcludeFromAllMail` for `DoNotSync`, and successful immediate or
