@@ -276,7 +276,7 @@ public sealed class LocalFirstMailTests : IDisposable
         var localMail = new LocalMailService(store, accounts);
         await localMail.AppendDraftAsync(account.Id, compose, null);
         using (var scheduled = new ScheduledSendService(
-                   profile, new StubSmtpService(), accounts, new StubCredentialService(), store))
+                   profile, new StubSmtpService(), accounts, new StubCredentialService(), store, localMail))
             await scheduled.ScheduleAsync(compose, DateTimeOffset.Now.AddHours(1));
 
         var physical = (await store.LoadFoldersAsync())[account.Id];
@@ -290,6 +290,79 @@ public sealed class LocalFirstMailTests : IDisposable
             folder.Bindings.Any(binding => binding.AccountId == account.Id));
         Assert.Contains(canonical.Folders, folder => folder.Kind == SpecialFolderKind.Scheduled &&
             folder.Bindings.Any(binding => binding.AccountId == account.Id));
+    }
+
+    [Fact]
+    public async Task ScheduledSend_WhenOffline_RemainsScheduledWithErrorAndNeverBecomesDraft()
+    {
+        var account = new AccountModel
+        {
+            Id = Guid.NewGuid(), AccountName = "POP", Username = "sender@example.test",
+            BackendKind = BackendKind.Pop3Smtp, FolderTreeRootId = Guid.NewGuid(),
+            FolderTreeRootName = "Local mail", IsActive = true,
+        };
+        var store = CreateStore();
+        var profile = new ProfileContext(_directory);
+        var accounts = new AccountService(profile);
+        accounts.SaveAccounts([account]);
+        var smtp = new StubSmtpService { SendFailure = new IOException("network unavailable") };
+        var localMail = new LocalMailService(store, accounts);
+        using var scheduled = new ScheduledSendService(
+            profile, smtp, accounts, new StubCredentialService(), store, localMail);
+
+        await scheduled.ScheduleAsync(new ComposeModel
+        {
+            AccountId = account.Id, To = "recipient@example.test", Subject = "offline",
+            Body = "body", Mode = ComposeMode.Html, HtmlBody = "<p>body</p>",
+        }, DateTimeOffset.Now.AddMilliseconds(25));
+        await Task.Delay(75);
+
+        var failures = await scheduled.DispatchDueAsync(manual: true);
+
+        var queued = Assert.Single(await scheduled.GetSnapshotAsync());
+        Assert.Equal(1, queued.Attempts);
+        Assert.Contains("network unavailable", queued.LastError);
+        Assert.Single(failures);
+        Assert.Equal(1, (await store.LoadLocalPageAsync(account.Id, "Scheduled", 10, 0)).TotalMatches);
+        Assert.Equal(0, (await store.LoadLocalPageAsync(account.Id, "Draft", 10, 0)).TotalMatches);
+        Assert.Equal(0, (await store.LoadLocalPageAsync(account.Id, "Sent", 10, 0)).TotalMatches);
+    }
+
+    [Fact]
+    public async Task ScheduledSend_AfterSmtpAcceptance_MovesLocalCopyFromScheduledToSent()
+    {
+        var account = new AccountModel
+        {
+            Id = Guid.NewGuid(), AccountName = "POP", Username = "sender@example.test",
+            BackendKind = BackendKind.Pop3Smtp, FolderTreeRootId = Guid.NewGuid(),
+            FolderTreeRootName = "Local mail", IsActive = true,
+        };
+        var store = CreateStore();
+        var profile = new ProfileContext(_directory);
+        var accounts = new AccountService(profile);
+        accounts.SaveAccounts([account]);
+        var localMail = new LocalMailService(store, accounts);
+        using var scheduled = new ScheduledSendService(
+            profile, new StubSmtpService(), accounts, new StubCredentialService(), store, localMail);
+        Guid? changedAccount = null;
+        scheduled.SentMailChanged += id => changedAccount = id;
+
+        await scheduled.ScheduleAsync(new ComposeModel
+        {
+            AccountId = account.Id, To = "recipient@example.test", Subject = "scheduled",
+            Body = "body", Mode = ComposeMode.Html, HtmlBody = "<p>body</p>",
+        }, DateTimeOffset.Now.AddMilliseconds(25));
+        await Task.Delay(75);
+
+        var failures = await scheduled.DispatchDueAsync(manual: true);
+
+        Assert.Empty(failures);
+        Assert.Empty(await scheduled.GetSnapshotAsync());
+        Assert.Equal(account.Id, changedAccount);
+        Assert.Equal(0, (await store.LoadLocalPageAsync(account.Id, "Scheduled", 10, 0)).TotalMatches);
+        var sent = await store.LoadLocalPageAsync(account.Id, "Sent", 10, 0);
+        Assert.Equal(1, sent.TotalMatches);
+        Assert.Equal(MessageDirection.Outgoing, Assert.Single(sent.Messages).Direction);
     }
 
     [Fact]

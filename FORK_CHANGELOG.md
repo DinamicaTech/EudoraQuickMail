@@ -10,6 +10,12 @@ before a public release.
 
 ## Unreleased
 
+- IMAP special folders excluded from the All Mail view are now still synchronized: opening the
+  canonical Out folder refreshes each connected account's real Sent folder, periodic/startup-wide
+  sweeps no longer mistake `ExcludeFromAllMail` for `DoNotSync`, and successful immediate or
+  scheduled sends refresh Out. A scheduled SMTP failure remains safely queued in Scheduled with
+  its error/retry state rather than being downgraded to Draft; successful scheduled mail is moved
+  to Sent without risking a duplicate SMTP retry when saving the Sent copy fails.
 - Added `AI_HANDOFF.md`, a self-contained continuation specification covering the fork's
   complete functional inventory, architecture, persistent-data and folder invariants, Eudora
   migration contract, search/rule grammar, build/installer workflow, regression checklist and

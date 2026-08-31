@@ -492,7 +492,8 @@ public partial class App : Application
                 }
             }
             splash?.SetStatus("Preparing folders, messages and search services…");
-            if (!probeMode) ScheduledSender = new ScheduledSendService(profile, effectiveSmtp, accountService, credentialService, localStore);
+            if (!probeMode) ScheduledSender = new ScheduledSendService(profile, effectiveSmtp,
+                accountService, credentialService, localStore, effectiveMail);
 
             // One-time immutable-id cache rebuild (#366): clear cached mail for Graph accounts so the
             // next sync repopulates with immutable ids (mutable and immutable ids must not be mixed).
@@ -710,6 +711,7 @@ public partial class App : Application
                             mainWindow.ShowBackgroundMailFailure(account, "Receive email (POP3)", error));
                 };
             if (ScheduledSender is not null)
+            {
                 ScheduledSender.Failed += (failure, manual) =>
                 {
                     if (!manual)
@@ -717,6 +719,9 @@ public partial class App : Application
                             mainWindow.ShowBackgroundMailFailure(
                                 failure.Account, failure.Operation, failure.Error));
                 };
+                ScheduledSender.SentMailChanged += accountId =>
+                    mainWindow.Dispatcher.BeginInvoke(() => mainVm.RefreshSentAfterSendAsync(accountId));
+            }
 
             if (splash is not null)
             {

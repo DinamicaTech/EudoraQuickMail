@@ -3916,7 +3916,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
                         if (!_cachedFolders.TryGetValue(account.Id, out var folders)) continue;
                         foreach (var folder in folders)
                         {
-                            if (folder.ExcludeFromAllMail) continue;
+                            // ExcludeFromAllMail controls only aggregate presentation. Special
+                            // folders still need a local cache so Out/Draft/Trash/Junk reflect
+                            // server changes. Every folder in this list is selectable; IMAP
+                            // NoSelect folders were filtered while the list was built.
                             var isInbox = folder.Kind == Models.SpecialFolderKind.Inbox ||
                                           string.Equals(folder.FullName, "INBOX", StringComparison.OrdinalIgnoreCase);
                             jobs.Add((account, folder, isInbox));
@@ -7871,6 +7874,46 @@ public partial class MainViewModel : ObservableObject, IDisposable
         return failures;
     }
 
+    /// <summary>
+    /// Makes an SMTP-accepted message visible in the canonical Out folder without waiting for the
+    /// next periodic all-folder sweep. Local/POP3 backends have already written their Sent copy;
+    /// IMAP/Graph backends synchronize the real server Sent folder first.
+    /// </summary>
+    public async Task RefreshSentAfterSendAsync(Guid accountId)
+    {
+        var account = Accounts.FirstOrDefault(candidate => candidate.Id == accountId);
+        if (account == null) return;
+
+        try
+        {
+            if (account.BackendKind is BackendKind.ImapSmtp or BackendKind.MicrosoftGraph
+                && _connectedAccountIds.Contains(accountId)
+                && _cachedFolders.TryGetValue(accountId, out var folders))
+            {
+                foreach (var sent in folders.Where(folder =>
+                             FolderMatchesSpecialKind(folder, SpecialFolderKind.Sent)))
+                    await _syncService.SyncFolderFullAsync(account, sent, CancellationToken.None);
+            }
+
+            await RefreshFolderListAsync(accountId);
+
+            var selected = SelectedFolder;
+            if (selected != null && IsFolderScopedAggregate(selected.FullName)
+                && FolderScopedAggregateSources(selected.FullName).Any(source =>
+                    source.Account.Id == accountId
+                    && FolderMatchesSpecialKind(source.Folder, SpecialFolderKind.Sent)))
+                await SelectFolderCommand.ExecuteAsync(selected);
+            else
+                ScheduleFolderCountRefresh(accountId);
+        }
+        catch (Exception ex)
+        {
+            // Delivery has already succeeded. A cache refresh must never turn that into a false
+            // send failure or tempt the operator to send a duplicate.
+            LogService.Log($"Refresh Sent after send/{account.AccountLabel}", ex);
+        }
+    }
+
     private async Task FetchVirtualFolderAsync(string fullName)
     {
         var displayName = FolderScopedAggregateDisplayName(fullName);
@@ -7889,6 +7932,18 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             var isRootAggregate = TryParseRootAggregate(fullName, out _, out var localAggregateKind);
             var isCanonicalLocal = TryParseCanonicalFolder(fullName, out var localCanonicalId);
+            if (isCanonicalLocal && _canonicalFolders.TryGetValue(localCanonicalId, out var canonicalScope))
+                localAggregateKind = canonicalScope.Kind;
+
+            // The canonical Out node is an aggregate over local Out plus each remote account's
+            // real Sent folder. Those IMAP/Graph folders are excluded from the All Mail VIEW, but
+            // that must not make their cache stale forever. Refresh them explicitly when the user
+            // opens Out, before reading the authoritative local aggregate.
+            if ((isRootAggregate || isCanonicalLocal)
+                && localAggregateKind == SpecialFolderKind.Sent
+                && _localStore is ILocalMailboxStore)
+                await SyncRemoteAggregateSourcesAsync(fullName, SpecialFolderKind.Sent, ct);
+
             if (isCanonicalLocal && _canonicalFolders.TryGetValue(localCanonicalId, out var selectedCanonical) &&
                 selectedCanonical.ParentFolderId == null && _localStore is ILocalMailboxStore rootStore)
             {
@@ -7914,8 +7969,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
             }
             if ((isRootAggregate || isCanonicalLocal) && _localStore is ILocalMailboxStore)
             {
-                if (isCanonicalLocal && _canonicalFolders.TryGetValue(localCanonicalId, out var localCanonical))
-                    localAggregateKind = localCanonical.Kind;
                 foreach (var source in FolderScopedAggregateSources(fullName))
                     all.AddRange(await _localStore.LoadFolderSummariesAsync(
                         source.Account.Id, source.Folder.FullName));
@@ -8013,6 +8066,38 @@ public partial class MainViewModel : ObservableObject, IDisposable
             if (loadVersion == _folderLoadVersion)
                 IsBusy = false;
         }
+    }
+
+    private async Task SyncRemoteAggregateSourcesAsync(
+        string aggregateFullName, SpecialFolderKind kind, CancellationToken ct)
+    {
+        var sources = FolderScopedAggregateSources(aggregateFullName, connectedOnly: true)
+            .Where(source => FolderMatchesSpecialKind(source.Folder, kind)
+                && source.Account.BackendKind is BackendKind.ImapSmtp or BackendKind.MicrosoftGraph)
+            .DistinctBy(source => (source.Account.Id, source.Folder.FullName.ToUpperInvariant()))
+            .ToList();
+        if (sources.Count == 0) return;
+
+        var started = Stopwatch.GetTimestamp();
+        PerformanceLogService.Marker("Folder selection: remote aggregate sync BEGIN",
+            $"kind={kind}; sources={sources.Count}");
+        foreach (var source in sources)
+        {
+            ct.ThrowIfCancellationRequested();
+            try
+            {
+                await _syncService.SyncFolderFullAsync(source.Account, source.Folder, ct);
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex)
+            {
+                // One unavailable account must not hide the cached Sent mail belonging to all
+                // remaining accounts. The ordinary folder load continues with what is local.
+                LogService.Log($"Aggregate {kind} sync {source.Account.AccountLabel}/{source.Folder.FullName}", ex);
+            }
+        }
+        PerformanceLogService.Record("Folder selection: remote aggregate sync END",
+            Stopwatch.GetElapsedTime(started), $"kind={kind}; sources={sources.Count}");
     }
 
     private bool IsCurrentFolderLoad(int loadVersion, MailFolderModel? expectedFolder) =>

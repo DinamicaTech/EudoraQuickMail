@@ -70,7 +70,9 @@ public class StartupSyncScopeTests : IDisposable
         Folder("INBOX", "Inbox", SpecialFolderKind.Inbox),
         Folder("INBOX/Projects", "Projects"),
         Folder("Archive", "Archive", SpecialFolderKind.Archive),
-        Folder("Sent", "Sent", SpecialFolderKind.Sent),          // ExcludeFromAllMail is false here
+        // Exclusion controls aggregate presentation, never synchronization.
+        new() { FullName = "Sent", DisplayName = "Sent", Kind = SpecialFolderKind.Sent,
+            ExcludeFromAllMail = true },
     ];
 
     private static readonly List<MailFolderModel> HomeFolders =
@@ -106,7 +108,7 @@ public class StartupSyncScopeTests : IDisposable
     }
 
     [Fact]
-    public async Task ScopeAll_SyncsEveryNonExcludedFolderOnEveryAccount()
+    public async Task ScopeAll_SyncsEveryFolder_IncludingOnesExcludedFromAllMailView()
     {
         var fetched = await RunAsync(c => c.StartupSyncScope = ConfigModel.StartupSyncScopeAll);
 

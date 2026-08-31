@@ -11,24 +11,27 @@ public sealed record ScheduledMail(Guid Id, DateTimeOffset SendAtUtc, ComposeMod
 public sealed class ScheduledSendService : IDisposable
 {
     public event Action<MailOperationFailure, bool>? Failed;
+    public event Action<Guid>? SentMailChanged;
     private readonly string _path;
     private readonly ISendMailService _sender;
     private readonly IAccountService _accounts;
     private readonly ICredentialService _credentials;
     private readonly LocalStoreService _store;
+    private readonly IMailService _mail;
     private readonly Timer _timer;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly CancellationTokenSource _stop = new();
     private int _disposed;
 
     public ScheduledSendService(ProfileContext profile, ISendMailService sender, IAccountService accounts,
-        ICredentialService credentials, LocalStoreService store)
+        ICredentialService credentials, LocalStoreService store, IMailService mail)
     {
         _path = Path.Combine(profile.ProfileDir, "scheduled-mail.json");
         _sender = sender;
         _accounts = accounts;
         _credentials = credentials;
         _store = store;
+        _mail = mail;
         _timer = new Timer(_ => _ = DispatchDueAsync(), null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(30));
     }
 
@@ -135,6 +138,17 @@ public sealed class ScheduledSendService : IDisposable
                 {
                     var password = account.BackendKind == BackendKind.Pop3Smtp ? null : _credentials.GetPassword(account.Id);
                     await _sender.SendAsync(item.Message, account, password, _stop.Token);
+                    try
+                    {
+                        // SMTP acceptance is authoritative. Saving/synchronizing the Sent copy is
+                        // best effort: if it fails we must still dequeue the item, otherwise the
+                        // next timer pass sends a duplicate to the recipient.
+                        await _mail.AppendToSentAsync(account.Id, item.Message, _stop.Token);
+                    }
+                    catch (Exception ex)
+                    {
+                        LogService.Log($"Scheduled send {item.Id}: failed to save Sent copy", ex);
+                    }
                     if (item.Message.ReplySourceAccountId is { } sourceAccountId
                         && !string.IsNullOrWhiteSpace(item.Message.ReplySourceFolderName)
                         && !string.IsNullOrWhiteSpace(item.Message.ReplySourceMessageId))
@@ -156,6 +170,7 @@ public sealed class ScheduledSendService : IDisposable
                         await _store.DeleteLocalMessagesAsync(item.Message.AccountId, "Scheduled", [item.LocalMessageId], _stop.Token);
                     queue.Remove(item);
                     changed = true;
+                    SentMailChanged?.Invoke(account.Id);
                 }
                 catch (Exception ex)
                 {

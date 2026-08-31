@@ -6680,6 +6680,8 @@ public partial class MainWindow : Window
                     if (_vm.SelectedFolder?.Kind is SpecialFolderKind.Drafts or SpecialFolderKind.Scheduled)
                         await _vm.SelectFolderCommand.ExecuteAsync(_vm.SelectedFolder);
                 });
+            composeVm.SentMailChanged += accountId =>
+                Dispatcher.InvokeAsync(() => _vm.RefreshSentAfterSendAsync(accountId));
             OpenComposeSurface(composeVm);
         }, DispatcherPriority.Input);
     }

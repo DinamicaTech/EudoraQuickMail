@@ -149,9 +149,12 @@ public class SyncService : ISyncService
         var scope      = ConfigModel.ParseStartupSyncScope(startupCfg.StartupSyncScope);
         var inScope    = BuildStartupScopeFilter(startupCfg, scope, cachedFolders);
 
+        // ExcludeFromAllMail is a VIEW flag, not a synchronization flag. Sent/Drafts/Trash/Junk
+        // must still be cached: otherwise the unified system folders are permanently empty for
+        // IMAP accounts (Gmail's [Gmail]/Sent Mail was the visible symptom).
         int totalFolders = accountList.Sum(a =>
             cachedFolders.TryGetValue(a.Id, out var fl)
-                ? fl.Count(f => !f.ExcludeFromAllMail && inScope(a, f)) : 0);
+                ? fl.Count(f => inScope(a, f)) : 0);
 
         // int[] so Interlocked.Increment works inside async lambdas (can't use ref locals there).
         int[] completedFolders = { 0 };
@@ -173,7 +176,7 @@ public class SyncService : ISyncService
                     foreach (var folder in folders)
                     {
                         ct.ThrowIfCancellationRequested();
-                        if (folder.ExcludeFromAllMail || !folderFilter(folder)) continue;
+                        if (!folderFilter(folder)) continue;
                         if (!inScope(account, folder)) continue;
                         try
                         {

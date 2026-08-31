@@ -224,6 +224,10 @@ folders, not hidden aliases.
 - Receive means MIME parsed, rows committed and local visibility established before server
   deletion is attempted.
 - Sent mail is local outgoing mail with delivery status.
+- A scheduled SMTP failure remains in Scheduled with its error/attempt state and is retried by a
+  later dispatcher pass; it never becomes Draft merely because the Internet connection was down.
+- Successful normal and scheduled sends refresh the real remote/local Sent source immediately.
+  `ExcludeFromAllMail` is only a view flag and must never suppress synchronization.
 - Errors name account/server and likely remedies: password, certificate, protocol or port.
 
 ### 7.2 IMAP

@@ -19,6 +19,8 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
 {
     /// <summary>Raised after a local Draft or Scheduled folder may have been created.</summary>
     public event Action<Guid>? LocalFolderChanged;
+    /// <summary>Raised after SMTP accepted a message and its Sent copy has been handled.</summary>
+    public event Action<Guid>? SentMailChanged;
     private readonly ISendMailService _smtp;
     private readonly IAccountService _accountService;
     private readonly ICredentialService _credentials;
@@ -576,9 +578,10 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
             SetStatusOutcome("Message sent.");
             _isSent = true;
 
-            // Append to Sent folder (best-effort — fire and forget so it doesn't block the UI).
-            // Providers that auto-save sent mail (e.g. Gmail) may produce a duplicate; that is
-            // harmless and the background sync will eventually deduplicate via UID tracking.
+            // Append to Sent folder (best-effort — fire and forget so it doesn't block the UI),
+            // then tell the main mailbox to synchronize/refresh its canonical Out aggregate.
+            // Previously the remote append succeeded but Sent was excluded from every cache sweep,
+            // leaving Gmail with hundreds of server Sent messages and zero local rows.
             _ = Task.Run(async () =>
             {
                 try
@@ -589,6 +592,10 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
                 catch (Exception ex)
                 {
                     LogService.Log("SendAsync: failed to append to Sent folder", ex);
+                }
+                finally
+                {
+                    SentMailChanged?.Invoke(account.Id);
                 }
             });
 
