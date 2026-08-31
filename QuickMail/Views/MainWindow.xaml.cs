@@ -156,6 +156,9 @@ public partial class MainWindow : Window
     private string? _pendingStatusText;
     private string? _statusBeforeLinkHover;
     private string? _currentLinkHoverStatus;
+    private Point _readingPaneAttachmentDragStart;
+    private AttachmentModel? _readingPaneAttachmentDragItem;
+    private bool _readingPaneAttachmentDragPreparing;
     // Category captured at queue time (issue #317) so delete/archive chatter announces under the
     // MessageAction toggle while sync/loading updates stay Status. Last queued write wins.
     private AnnouncementCategory _pendingStatusCategory = AnnouncementCategory.Status;
@@ -5150,6 +5153,53 @@ public partial class MainWindow : Window
         {
             await _vm.OpenAttachmentCommand.ExecuteAsync(attachment);
             e.Handled = true;
+        }
+    }
+
+    private void ReadingPaneAttachmentList_PreviewMouseLeftButtonDown(
+        object sender, MouseButtonEventArgs e)
+    {
+        _readingPaneAttachmentDragStart = e.GetPosition(ReadingPaneAttachmentList);
+        _readingPaneAttachmentDragItem = e.OriginalSource is DependencyObject source
+            && ItemsControl.ContainerFromElement(ReadingPaneAttachmentList, source) is ListBoxItem item
+                ? item.DataContext as AttachmentModel
+                : null;
+    }
+
+    private async void ReadingPaneAttachmentList_PreviewMouseMove(object sender, MouseEventArgs e)
+    {
+        if (_readingPaneAttachmentDragPreparing || _readingPaneAttachmentDragItem is null) return;
+        if (e.LeftButton != MouseButtonState.Pressed)
+        {
+            _readingPaneAttachmentDragItem = null;
+            return;
+        }
+
+        var current = e.GetPosition(ReadingPaneAttachmentList);
+        if (Math.Abs(current.X - _readingPaneAttachmentDragStart.X) < SystemParameters.MinimumHorizontalDragDistance
+            && Math.Abs(current.Y - _readingPaneAttachmentDragStart.Y) < SystemParameters.MinimumVerticalDragDistance)
+            return;
+
+        var attachment = _readingPaneAttachmentDragItem;
+        _readingPaneAttachmentDragItem = null;
+        _readingPaneAttachmentDragPreparing = true;
+        e.Handled = true;
+
+        try
+        {
+            var path = await EnsureAttachmentLocalPathAsync(attachment);
+            if (path is null || Mouse.LeftButton != MouseButtonState.Pressed) return;
+            AttachmentFileDragDrop.Begin(ReadingPaneAttachmentList, path);
+            _vm.StatusText = $"Attachment copied by drag and drop: {attachment.FileName}";
+        }
+        catch (Exception ex)
+        {
+            LogService.Log("Drag attachment from reading pane", ex);
+            _vm.StatusText = $"Could not drag the attachment: {ex.Message}";
+        }
+        finally
+        {
+            _readingPaneAttachmentDragPreparing = false;
         }
     }
 

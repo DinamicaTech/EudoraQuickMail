@@ -40,6 +40,9 @@ public partial class MessageWindow : Window
     private readonly CoreWebView2Environment? _sharedEnv;
     private readonly IThemeService?      _themeService;
     private readonly IConfigService?     _configService;
+    private Point _attachmentDragStart;
+    private AttachmentModel? _attachmentDragItem;
+    private bool _attachmentDragPreparing;
 
     // Local command registry for the command palette (issue 53).
     private readonly CommandRegistry _localRegistry = new();
@@ -769,6 +772,55 @@ public partial class MessageWindow : Window
             var win = new PropertiesWindow(new PropertiesViewModel(title, sections)) { Owner = this };
             win.ShowDialog();
             e.Handled = true;
+        }
+    }
+
+    private void AttachmentList_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        _attachmentDragStart = e.GetPosition(AttachmentList);
+        _attachmentDragItem = e.OriginalSource is DependencyObject source
+            && ItemsControl.ContainerFromElement(AttachmentList, source) is ListBoxItem item
+                ? item.DataContext as AttachmentModel
+                : null;
+    }
+
+    private async void AttachmentList_PreviewMouseMove(object sender, MouseEventArgs e)
+    {
+        if (_attachmentDragPreparing || _attachmentDragItem is null) return;
+        if (e.LeftButton != MouseButtonState.Pressed)
+        {
+            _attachmentDragItem = null;
+            return;
+        }
+
+        var current = e.GetPosition(AttachmentList);
+        if (Math.Abs(current.X - _attachmentDragStart.X) < SystemParameters.MinimumHorizontalDragDistance
+            && Math.Abs(current.Y - _attachmentDragStart.Y) < SystemParameters.MinimumVerticalDragDistance)
+            return;
+
+        var attachment = _attachmentDragItem;
+        _attachmentDragItem = null;
+        _attachmentDragPreparing = true;
+        e.Handled = true;
+
+        try
+        {
+            if (_vm.MessageDetail is null) return;
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+            var path = await AttachmentPathMaterializer.EnsureLocalPathAsync(
+                attachment, _vm.MessageDetail, _imap, cts.Token);
+            if (Mouse.LeftButton != MouseButtonState.Pressed) return;
+            AttachmentFileDragDrop.Begin(AttachmentList, path);
+        }
+        catch (Exception ex)
+        {
+            LogService.Log("Drag attachment from message window", ex);
+            MessageBox.Show(this, $"Could not drag the attachment:\n\n{ex.Message}",
+                "Drag Attachment", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            _attachmentDragPreparing = false;
         }
     }
 

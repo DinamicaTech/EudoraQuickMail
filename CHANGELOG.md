@@ -4,6 +4,7 @@
 
 ### Bug Fixes
 
+- **Attachments can be dragged to File Explorer** — Attachment tiles in both the integrated preview and standalone message window now initiate a native file-copy drag. Remote attachments are materialized first, and Explorer receives the actual file rather than text or a shortcut.
 - **Folder analysis results are now actionable** — The result window no longer retains the wait cursor, and double-clicking a sender domain opens those messages as a FROM search in the analyzed folder. The quick-search history also has a single explicit drop-down button so its ten persisted entries remain accessible in editable mode without showing a redundant native arrow.
 - **Adding a new account no longer disconnects existing accounts** — Fixed a race condition where opening the Account Manager and adding a new account caused all existing accounts to appear disconnected. The event handler for account reachability changes was bound to stale account objects after the collection was refreshed. (#126)
 - **Shift+Tab from the message body returns focus to the header fields** — In both plain-text and HTML compose modes, pressing Shift+Tab from the message body now moves focus back to the Subject field (and from there through the other header fields). Previously, `AcceptsTab` on the editor blocked WPF's normal reverse-tab navigation and left focus stranded in the body. List-item indentation (Tab to indent, Shift+Tab to dedent) continues to work correctly in Markdown and HTML modes. (#131)

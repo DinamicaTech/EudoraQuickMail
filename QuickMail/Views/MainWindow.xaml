@@ -1166,6 +1166,8 @@
                                      KeyboardNavigation.DirectionalNavigation="Contained"
                                      AutomationProperties.Name="Attachments"
                                      PreviewKeyDown="ReadingPaneAttachmentList_PreviewKeyDown"
+                                     PreviewMouseLeftButtonDown="ReadingPaneAttachmentList_PreviewMouseLeftButtonDown"
+                                     PreviewMouseMove="ReadingPaneAttachmentList_PreviewMouseMove"
                                      MouseDoubleClick="ReadingPaneAttachmentList_MouseDoubleClick"
                                      GotKeyboardFocus="ReadingPaneAttachmentList_GotKeyboardFocus">
                                 <ListBox.ItemContainerStyle>
