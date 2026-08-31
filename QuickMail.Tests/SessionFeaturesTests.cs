@@ -552,9 +552,12 @@ public class TabModeMessageListVisibilityTests
     }
 
     [Fact]
-    public void ReadingPaneMode_ActivateMessageListTab_ReturnsFalse()
+    public void ReadingPaneMode_ActivateMessageListTab_SelectsThePermanentListTab()
     {
-        var vm = MakeVm(); // ReadingPane — no message-list tab exists
-        Assert.False(vm.ActivateMessageListTab());
+        var vm = MakeVm(); // ReadingPane still owns the permanent navigation tab.
+        vm.OpenMessageTab(Msg("1"));
+
+        Assert.True(vm.ActivateMessageListTab());
+        Assert.IsType<MessageListTabViewModel>(vm.ActiveTab);
     }
 }

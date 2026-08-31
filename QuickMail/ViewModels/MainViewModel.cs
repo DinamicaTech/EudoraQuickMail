@@ -1928,7 +1928,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     public void OpenMessageTab(MailMessageSummary summary)
     {
-        EnsureMessageListTab(); // no-op unless Tab mode is active
+        EnsureMessageListTab(); // permanent navigation tabs are shared by every open mode
 
         // Duplicate: activate the existing tab if already open.
         var existing = OpenTabs.OfType<MessageTabViewModel>()
@@ -1968,7 +1968,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     public void OpenComposeTab(ComposeTabViewModel tab)
     {
-        EnsureMessageListTab(force: true);
+        EnsureMessageListTab();
         UpdateMessageListTabTitle(SelectedFolder?.DisplayName);
         OpenTabs.Add(tab);
         ActiveTab = tab;
@@ -2115,7 +2115,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// Ensures the permanent Calendar and message-list navigation tabs exist. They remain visible
     /// in every message-open mode; the mode only controls how individual messages are opened.
     /// </summary>
-    public void EnsureMessageListTab(bool force = false)
+    public void EnsureMessageListTab()
     {
         if (CalendarVm != null && _configService.Load().ShowCalendar &&
             !OpenTabs.OfType<CalendarTabViewModel>().Any())
@@ -2146,7 +2146,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         var folder = ResolveRuleTargetFolder(rule.TargetFolder);
         if (folder == null) return;
 
-        EnsureMessageListTab(force: true);
+        EnsureMessageListTab();
         var main = OpenTabs.OfType<MessageListTabViewModel>().FirstOrDefault();
         if (main != null && main.Folder == null) main.Folder = SelectedFolder;
         var tab = OpenTabs.OfType<FilteredFolderTabViewModel>().FirstOrDefault();
@@ -2159,21 +2159,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
         else
         {
             tab.Update(folder, movedMessage);
-        }
-        OnPropertyChanged(nameof(ShowTabStrip));
-    }
-
-    /// <summary>Removes the message-list tab when leaving Tab mode.</summary>
-    private void RemoveMessageListTab()
-    {
-        var tab = OpenTabs.OfType<MessageListTabViewModel>().FirstOrDefault();
-        if (tab == null) return;
-        OpenTabs.Remove(tab);
-        if (ActiveTab == tab)
-        {
-            ActiveTab     = OpenTabs.Count > 0 ? OpenTabs[0] : null;
-            IsMessageOpen = false;
-            MessageDetail = null;
         }
         OnPropertyChanged(nameof(ShowTabStrip));
     }

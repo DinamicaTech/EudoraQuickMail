@@ -9,18 +9,18 @@ namespace QuickMail.Tests;
 /// <summary>
 /// Tab management on <see cref="MainViewModel"/>, deferred from PR #38 (issue #40).
 ///
-/// Two distinct arrangements are covered, because they behave differently and both ship:
+/// The permanent navigation tabs are present in every message-open mode. The mode controls how
+/// an individual message opens; it does not remove the message-list navigation surface:
 ///
 /// <list type="bullet">
-/// <item><b>Tab mode</b> — a permanent <see cref="MessageListTabViewModel"/> sits at index 0.
-/// The strip never hides, tabs never move left of index 0, and closing the last message tab
-/// falls back to the list tab rather than to nothing.</item>
-/// <item><b>Reading-pane mode</b> — no list tab exists, but message tabs can still be opened
-/// (e.g. the explicit "open in tab" command). Closing the last one leaves no active tab and
-/// hides the strip.</item>
+/// <item><b>All modes</b> — a permanent <see cref="MessageListTabViewModel"/> follows the optional
+/// Calendar tab. Message tabs never move ahead of those navigation tabs, and closing the last
+/// message tab falls back to the list.</item>
+/// <item><b>Tab mode</b> opens selected messages as tabs by default; reading-pane and window modes
+/// can still create an explicit message tab, and it follows the same navigation-tab invariants.</item>
 /// </list>
 ///
-/// Getting these two confused is the likely regression, so every test states which it is in.
+/// Tests exercise both modes so a future mode-specific change cannot break those shared invariants.
 /// </summary>
 public class MainViewModelTabTests
 {
@@ -49,6 +49,8 @@ public class MainViewModelTabTests
     private static MainViewModel ReadingPaneMode() => MakeVm(MessageOpenMode.ReadingPane);
 
     private static int MessageTabCount(MainViewModel vm) => vm.OpenTabs.OfType<MessageTabViewModel>().Count();
+    private static MessageTabViewModel[] MessageTabs(MainViewModel vm) =>
+        vm.OpenTabs.OfType<MessageTabViewModel>().ToArray();
 
     // ── Construction ─────────────────────────────────────────────────────────────
 
@@ -64,13 +66,14 @@ public class MainViewModelTabTests
     }
 
     [Fact]
-    public void ReadingPaneMode_HasNoTabsAndNoStrip()
+    public void ReadingPaneMode_StillSeedsThePermanentMessageListTab()
     {
         var vm = ReadingPaneMode();
 
-        Assert.Empty(vm.OpenTabs);
-        Assert.Null(vm.ActiveTab);
-        Assert.False(vm.ShowTabStrip);
+        Assert.Single(vm.OpenTabs);
+        Assert.IsType<MessageListTabViewModel>(vm.OpenTabs[0]);
+        Assert.Same(vm.OpenTabs[0], vm.ActiveTab);
+        Assert.True(vm.ShowTabStrip);
     }
 
     // ── OpenMessageTab ───────────────────────────────────────────────────────────
@@ -82,7 +85,8 @@ public class MainViewModelTabTests
 
         vm.OpenMessageTab(Msg("1", "hello"));
 
-        var tab = Assert.IsType<MessageTabViewModel>(Assert.Single(vm.OpenTabs));
+        Assert.IsType<MessageListTabViewModel>(vm.OpenTabs[0]);
+        var tab = Assert.Single(MessageTabs(vm));
         Assert.Same(tab, vm.ActiveTab);
         Assert.Equal("hello", tab.Title);
         Assert.True(vm.ShowTabStrip);
@@ -96,7 +100,7 @@ public class MainViewModelTabTests
 
         vm.OpenMessageTab(Msg("1", accountId: accountId));
 
-        var tab = Assert.IsType<MessageTabViewModel>(vm.OpenTabs[0]);
+        var tab = Assert.Single(MessageTabs(vm));
         Assert.Equal("INBOX", tab.SourceFolderName);
         Assert.Equal(accountId, tab.AccountId);
     }
@@ -107,7 +111,7 @@ public class MainViewModelTabTests
         var vm = ReadingPaneMode();
         vm.OpenMessageTab(Msg("1"));
         vm.OpenMessageTab(Msg("2"));
-        var first = vm.OpenTabs[0];
+        var first = MessageTabs(vm)[0];
 
         vm.OpenMessageTab(Msg("1")); // already open
 
@@ -148,11 +152,12 @@ public class MainViewModelTabTests
         var vm = ReadingPaneMode();
         vm.OpenMessageTab(Msg("1"));
         vm.OpenMessageTab(Msg("2"));
-        var first = vm.OpenTabs[0];
+        var first = MessageTabs(vm)[0];
 
         vm.CloseTab(first);
 
-        Assert.Single(vm.OpenTabs);
+        Assert.Single(MessageTabs(vm));
+        Assert.Equal(2, vm.OpenTabs.Count); // permanent list + remaining message
         Assert.DoesNotContain(first, vm.OpenTabs);
     }
 
@@ -163,8 +168,9 @@ public class MainViewModelTabTests
         vm.OpenMessageTab(Msg("1"));
         vm.OpenMessageTab(Msg("2"));
         vm.OpenMessageTab(Msg("3"));
-        var middle = vm.OpenTabs[1];
-        var third  = vm.OpenTabs[2];
+        var messageTabs = MessageTabs(vm);
+        var middle = messageTabs[1];
+        var third  = messageTabs[2];
         vm.ActiveTab = middle;
 
         vm.CloseTab(middle);
@@ -179,8 +185,9 @@ public class MainViewModelTabTests
         var vm = ReadingPaneMode();
         vm.OpenMessageTab(Msg("1"));
         vm.OpenMessageTab(Msg("2"));
-        var first = vm.OpenTabs[0];
-        var last  = vm.OpenTabs[1];
+        var messageTabs = MessageTabs(vm);
+        var first = messageTabs[0];
+        var last  = messageTabs[1];
         vm.ActiveTab = last;
 
         vm.CloseTab(last);
@@ -194,8 +201,9 @@ public class MainViewModelTabTests
         var vm = ReadingPaneMode();
         vm.OpenMessageTab(Msg("1"));
         vm.OpenMessageTab(Msg("2"));
-        var first  = vm.OpenTabs[0];
-        var active = vm.OpenTabs[1];
+        var messageTabs = MessageTabs(vm);
+        var first  = messageTabs[0];
+        var active = messageTabs[1];
         vm.ActiveTab = active;
 
         vm.CloseTab(first);
@@ -204,16 +212,16 @@ public class MainViewModelTabTests
     }
 
     [Fact]
-    public void CloseTab_LastTabInReadingPaneMode_ClearsActiveTabAndHidesStrip()
+    public void CloseTab_LastMessageTabInReadingPaneMode_FallsBackToTheListTab()
     {
         var vm = ReadingPaneMode();
         vm.OpenMessageTab(Msg("1"));
 
-        vm.CloseTab(vm.OpenTabs[0]);
+        vm.CloseTab(Assert.Single(MessageTabs(vm)));
 
-        Assert.Empty(vm.OpenTabs);
-        Assert.Null(vm.ActiveTab);
-        Assert.False(vm.ShowTabStrip);
+        var listTab = Assert.IsType<MessageListTabViewModel>(Assert.Single(vm.OpenTabs));
+        Assert.Same(listTab, vm.ActiveTab);
+        Assert.True(vm.ShowTabStrip);
         Assert.False(vm.IsMessageOpen);
         Assert.Null(vm.MessageDetail);
     }
@@ -253,7 +261,8 @@ public class MainViewModelTabTests
 
         vm.CloseTab(stranger);
 
-        Assert.Single(vm.OpenTabs);
+        Assert.Single(MessageTabs(vm));
+        Assert.Equal(2, vm.OpenTabs.Count);
     }
 
     // Note: MainViewModel.OpenMessageTab subscribes to each tab's CloseRequested, but
@@ -269,11 +278,12 @@ public class MainViewModelTabTests
         var vm = ReadingPaneMode();
         vm.OpenMessageTab(Msg("1"));
         vm.OpenMessageTab(Msg("2"));
-        vm.ActiveTab = vm.OpenTabs[0];
+        var messageTabs = MessageTabs(vm);
+        vm.ActiveTab = messageTabs[0];
 
         vm.ActivateNextTab();
 
-        Assert.Same(vm.OpenTabs[1], vm.ActiveTab);
+        Assert.Same(messageTabs[1], vm.ActiveTab);
     }
 
     [Fact]
@@ -282,11 +292,12 @@ public class MainViewModelTabTests
         var vm = ReadingPaneMode();
         vm.OpenMessageTab(Msg("1"));
         vm.OpenMessageTab(Msg("2"));
-        vm.ActiveTab = vm.OpenTabs[1];
+        var messageTabs = MessageTabs(vm);
+        vm.ActiveTab = messageTabs[1];
 
         vm.ActivateNextTab();
 
-        Assert.Same(vm.OpenTabs[0], vm.ActiveTab);
+        Assert.Same(messageTabs[0], vm.ActiveTab);
     }
 
     [Fact]
@@ -295,11 +306,12 @@ public class MainViewModelTabTests
         var vm = ReadingPaneMode();
         vm.OpenMessageTab(Msg("1"));
         vm.OpenMessageTab(Msg("2"));
-        vm.ActiveTab = vm.OpenTabs[0];
+        var messageTabs = MessageTabs(vm);
+        vm.ActiveTab = messageTabs[0];
 
         vm.ActivatePrevTab();
 
-        Assert.Same(vm.OpenTabs[1], vm.ActiveTab);
+        Assert.Same(messageTabs[1], vm.ActiveTab);
     }
 
     [Fact]
@@ -355,7 +367,7 @@ public class MainViewModelTabTests
     [Theory]
     [InlineData(0)]
     [InlineData(-1)]
-    [InlineData(3)]
+    [InlineData(4)]
     [InlineData(int.MaxValue)]
     public void ActivateTabByIndex_OutOfBounds_IsANoOp(int index)
     {
@@ -370,13 +382,14 @@ public class MainViewModelTabTests
     }
 
     [Fact]
-    public void ActivateLastTab_WithNoTabs_IsANoOp()
+    public void ActivateLastTab_WithOnlyPermanentListTab_IsANoOp()
     {
         var vm = ReadingPaneMode();
+        var listTab = Assert.IsType<MessageListTabViewModel>(Assert.Single(vm.OpenTabs));
 
         vm.ActivateLastTab();
 
-        Assert.Null(vm.ActiveTab);
+        Assert.Same(listTab, vm.ActiveTab);
     }
 
     [Fact]
@@ -384,11 +397,12 @@ public class MainViewModelTabTests
     {
         var vm = ReadingPaneMode();
         vm.OpenMessageTab(Msg("1"));
+        var onlyMessage = Assert.Single(MessageTabs(vm));
         vm.ActiveTab = null;
 
         vm.ActivateLastTab();
 
-        Assert.Same(vm.OpenTabs[0], vm.ActiveTab);
+        Assert.Same(onlyMessage, vm.ActiveTab);
     }
 
     [Fact]
@@ -398,11 +412,12 @@ public class MainViewModelTabTests
         vm.OpenMessageTab(Msg("1"));
         vm.OpenMessageTab(Msg("2"));
         vm.OpenMessageTab(Msg("3"));
-        vm.ActiveTab = vm.OpenTabs[0];
+        var messageTabs = MessageTabs(vm);
+        vm.ActiveTab = messageTabs[0];
 
         vm.ActivateLastTab();
 
-        Assert.Same(vm.OpenTabs[2], vm.ActiveTab);
+        Assert.Same(messageTabs[2], vm.ActiveTab);
     }
 
     [Fact]
@@ -416,12 +431,13 @@ public class MainViewModelTabTests
     }
 
     [Fact]
-    public void ActivateMessageListTab_OutsideTabMode_ReportsFailure()
+    public void ActivateMessageListTab_OutsideTabMode_SelectsThePermanentListTab()
     {
         var vm = ReadingPaneMode();
         vm.OpenMessageTab(Msg("1"));
 
-        Assert.False(vm.ActivateMessageListTab());
+        Assert.True(vm.ActivateMessageListTab());
+        Assert.IsType<MessageListTabViewModel>(vm.ActiveTab);
     }
 
     // ── Reordering ───────────────────────────────────────────────────────────────
@@ -432,12 +448,13 @@ public class MainViewModelTabTests
         var vm = ReadingPaneMode();
         vm.OpenMessageTab(Msg("1", "first"));
         vm.OpenMessageTab(Msg("2", "second"));
-        var second = vm.OpenTabs[1];
+        var second = MessageTabs(vm)[1];
         vm.ActiveTab = second;
 
         vm.MoveTabLeft();
 
-        Assert.Same(second, vm.OpenTabs[0]);
+        Assert.IsType<MessageListTabViewModel>(vm.OpenTabs[0]);
+        Assert.Same(second, vm.OpenTabs[1]);
         Assert.Same(second, vm.ActiveTab); // the moved tab stays active
     }
 
@@ -447,12 +464,13 @@ public class MainViewModelTabTests
         var vm = ReadingPaneMode();
         vm.OpenMessageTab(Msg("1"));
         vm.OpenMessageTab(Msg("2"));
-        var first = vm.OpenTabs[0];
+        var first = MessageTabs(vm)[0];
         vm.ActiveTab = first;
 
         vm.MoveTabLeft();
 
-        Assert.Same(first, vm.OpenTabs[0]);
+        Assert.IsType<MessageListTabViewModel>(vm.OpenTabs[0]);
+        Assert.Same(first, vm.OpenTabs[1]);
     }
 
     [Fact]
@@ -476,12 +494,12 @@ public class MainViewModelTabTests
         var vm = ReadingPaneMode();
         vm.OpenMessageTab(Msg("1"));
         vm.OpenMessageTab(Msg("2"));
-        var first = vm.OpenTabs[0];
+        var first = MessageTabs(vm)[0];
         vm.ActiveTab = first;
 
         vm.MoveTabRight();
 
-        Assert.Same(first, vm.OpenTabs[1]);
+        Assert.Same(first, vm.OpenTabs[2]);
     }
 
     [Fact]
@@ -490,12 +508,12 @@ public class MainViewModelTabTests
         var vm = ReadingPaneMode();
         vm.OpenMessageTab(Msg("1"));
         vm.OpenMessageTab(Msg("2"));
-        var last = vm.OpenTabs[1];
+        var last = MessageTabs(vm)[1];
         vm.ActiveTab = last;
 
         vm.MoveTabRight();
 
-        Assert.Same(last, vm.OpenTabs[1]);
+        Assert.Same(last, vm.OpenTabs[2]);
     }
 
     [Fact]
@@ -520,12 +538,14 @@ public class MainViewModelTabTests
         vm.OpenMessageTab(Msg("1"));
         vm.OpenMessageTab(Msg("2"));
         vm.OpenMessageTab(Msg("3"));
-        var keep = vm.OpenTabs[1];
+        var keep = MessageTabs(vm)[1];
         vm.ActiveTab = keep;
 
         vm.CloseAllOtherTabs();
 
-        Assert.Same(keep, Assert.Single(vm.OpenTabs));
+        Assert.Equal(2, vm.OpenTabs.Count);
+        Assert.IsType<MessageListTabViewModel>(vm.OpenTabs[0]);
+        Assert.Same(keep, vm.OpenTabs[1]);
         Assert.Same(keep, vm.ActiveTab);
     }
 
@@ -546,15 +566,17 @@ public class MainViewModelTabTests
     }
 
     [Fact]
-    public void CloseAllOtherTabs_WithASingleTab_IsANoOp()
+    public void CloseAllOtherTabs_WithASingleMessageTab_IsANoOp()
     {
         var vm = ReadingPaneMode();
         vm.OpenMessageTab(Msg("1"));
-        var only = vm.OpenTabs[0];
+        var only = Assert.Single(MessageTabs(vm));
 
         vm.CloseAllOtherTabs();
 
-        Assert.Same(only, Assert.Single(vm.OpenTabs));
+        Assert.Equal(2, vm.OpenTabs.Count);
+        Assert.IsType<MessageListTabViewModel>(vm.OpenTabs[0]);
+        Assert.Same(only, vm.OpenTabs[1]);
     }
 
     [Fact]
@@ -567,6 +589,7 @@ public class MainViewModelTabTests
 
         vm.CloseAllOtherTabs();
 
-        Assert.Equal(2, vm.OpenTabs.Count);
+        Assert.Equal(3, vm.OpenTabs.Count);
+        Assert.Equal(2, MessageTabCount(vm));
     }
 }
