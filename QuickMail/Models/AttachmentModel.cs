@@ -68,6 +68,7 @@ public class AttachmentModel
             ".mov"  => "video/quicktime",
             ".avi"  => "video/x-msvideo",
             ".eml"  => "message/rfc822",
+            ".ics"  => "text/calendar",
             _       => "application/octet-stream",
         };
 }

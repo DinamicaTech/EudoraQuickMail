@@ -435,6 +435,7 @@ public partial class MainWindow : Window
             vm.CalendarVm.ListFocusRequested += () =>
                 Dispatcher.InvokeAsync(FocusCalendarList, DispatcherPriority.Input);
             vm.CalendarVm.ExportRequested += SaveAppointmentIcs;
+            vm.CalendarVm.ShareRequested += OpenComposeWindow;
             vm.CalendarVm.Events.CollectionChanged += (_, _) => _ = RefreshFullCalendarAsync();
             vm.CalendarVm.PropertyChanged += (_, e) =>
             {
@@ -897,7 +898,9 @@ public partial class MainWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
-        (Application.Current as App)?.BeginShutdown();
+        var currentApplication = Application.Current;
+        if (currentApplication?.Dispatcher.CheckAccess() == true)
+            (currentApplication as App)?.BeginShutdown();
         _statusClockTimer.Stop();
         _statusClockTimer.Tick -= StatusClockTimer_Tick;
         _vm.FolderSelectionDataReady -= OnFolderSelectionDataReady;
@@ -925,8 +928,12 @@ public partial class MainWindow : Window
         // The dispatcher then remains alive with no visible window and continues holding the
         // per-profile single-instance mutex. Reaching OnClosed means this was a real close (the
         // close-to-tray path cancels OnClosing), so explicitly end the application dispatcher.
-        if (!Application.Current.Dispatcher.HasShutdownStarted)
-            Application.Current.Shutdown();
+        // A hosted/test window can live on a different STA from the process Application. Never
+        // ask an Application owned by another dispatcher to shut down from this window's thread.
+        // Production creates both on the same STA, so the normal explicit shutdown is unchanged.
+        if (currentApplication?.Dispatcher.CheckAccess() == true
+            && !currentApplication.Dispatcher.HasShutdownStarted)
+            currentApplication.Shutdown();
     }
 
     private void StatusClockTimer_Tick(object? sender, EventArgs e) => UpdateStatusClock();
@@ -4170,6 +4177,8 @@ public partial class MainWindow : Window
         </style><script>{{{bundle}}}</script></head><body><div id="calendar"></div>
         <div id="calendar-menu">
           <button type="button" data-action="edit">Edit appointment</button>
+          <button type="button" data-action="duplicate">Duplicate appointment</button>
+          <button type="button" data-action="share">Share appointment</button>
           <button type="button" data-action="delete">Delete appointment</button>
           <div class="separator"></div>
           <button type="button" data-action="new">New appointment</button>
@@ -4208,7 +4217,7 @@ public partial class MainWindow : Window
           menuEventId=eventElement?.dataset.calendarEventId||'';
           menuDate=eventElement?.dataset.calendarEventDate||cell?.dataset.date||'';
           menuAllDay=eventElement?eventElement.dataset.calendarEventAllDay==='true':true;
-          menu.querySelectorAll('[data-action="edit"],[data-action="delete"]').forEach(
+          menu.querySelectorAll('[data-action="edit"],[data-action="duplicate"],[data-action="share"],[data-action="delete"]').forEach(
             button=>button.style.display=menuEventId?'block':'none');
           menu.querySelector('.separator').style.display=menuEventId?'block':'none';
           menu.style.left=e.clientX+'px';menu.style.top=e.clientY+'px';
@@ -4223,7 +4232,7 @@ public partial class MainWindow : Window
           if(!action)return;
           menu.style.display='none';
           if(action==='new'&&menuDate)postNewAppointment(menuDate,menuAllDay);
-          else if((action==='edit'||action==='delete')&&menuEventId)
+          else if((action==='edit'||action==='duplicate'||action==='share'||action==='delete')&&menuEventId)
             chrome.webview.postMessage({type:action,id:menuEventId});
         });
         document.addEventListener('pointerdown',e=>{if(!menu.contains(e.target))menu.style.display='none'});
@@ -4315,6 +4324,8 @@ public partial class MainWindow : Window
             _vm.CalendarVm.SelectedEvent = calendarEvent;
             if (type == "open") ActivateSelectedCalendarEvent();
             else if (type == "edit") _vm.CalendarVm.EditEventCommand.Execute(calendarEvent);
+            else if (type == "duplicate") _vm.CalendarVm.DuplicateEventCommand.Execute(calendarEvent);
+            else if (type == "share") _vm.CalendarVm.ShareEventCommand.Execute(calendarEvent);
             else if (type == "delete") _vm.CalendarVm.DeleteEventCommand.Execute(calendarEvent);
         }
         catch (Exception ex) { LogService.Log("FullCalendar message handling failed", ex); }

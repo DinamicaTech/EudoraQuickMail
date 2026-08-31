@@ -464,6 +464,8 @@ tab; do not destabilize the editor to force it.
   does not keep changing automatically.
 - Switching language reloads the right dictionary without losing text/caret.
 - Catalan uses a public Softcatalà-compatible Hunspell dictionary.
+- Catalan proofing preserves the caret with temporary DOM boundary markers while it rebuilds
+  underlined spans; contextual suggestions replace the word atomically on the first selection.
 - Context command labels stay English even if Chromium suggestions localize.
 - Translation affects selected text only. Argos is local/free; DeepL optional with protected
   key, provider setup/test/models and balance query.
@@ -477,7 +479,15 @@ Credential Manager. Mail transport credentials and calendar authorization are in
 
 Calendar is first main tab, In second—not a pseudo-folder. FullCalendar provides day/week/
 month, visible Refresh (`F5`), day sync, click/double-click creation and context New/Edit/
-Delete. If any Google calendar is linked, use it as default new-event target, not Local.
+Duplicate/Share/Delete. Share opens a new message with blank To, subject `Reserva: [event name]`
+and an in-memory `.ics` attachment. Duplicate opens a new-event editor with copied content,
+schedule, recurrence and calendar but a fresh event identity. If any Google calendar is linked,
+use it as default new-event target, not Local.
+
+Drag/drop day rescheduling is feasible but not yet implemented. It must be restricted to writable
+single events, preserve duration/all-day/time-zone semantics, push the change to Google before
+committing the local row, and revert the FullCalendar drag on server failure. Recurring and
+read-only/shared events should remain non-draggable until their scope/permission behavior exists.
 
 Compact Today agenda can replace Accounts and includes All/Local/specific dropdown. Empty
 text is “No appointments today. Click + to schedule an appointment.” With no Google link,

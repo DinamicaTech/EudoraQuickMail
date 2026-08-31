@@ -344,6 +344,50 @@ public partial class EventEditorViewModel : ObservableObject
     }
 
     /// <summary>
+    /// Creates a NEW appointment populated from <paramref name="source"/>. Identity and
+    /// server-side metadata are deliberately not copied: saving the editor must create another
+    /// event, never overwrite the source. The original calendar is preselected when it is one of
+    /// the available targets.
+    /// </summary>
+    public static EventEditorViewModel CreateDuplicate(
+        CalendarEvent source,
+        IReadOnlyList<CalendarSaveTarget>? accountTargets = null)
+    {
+        var start = source.StartTime ?? DateTime.Now;
+        var editor = new EventEditorViewModel(start, accountTargets)
+        {
+            Title = source.Summary,
+            Location = source.Location,
+            Notes = source.Description,
+            Start = start,
+            End = source.IsAllDay
+                ? (source.EndTime ?? start).Date
+                : source.EndTime ?? start.AddMinutes(30),
+            IsAllDay = source.IsAllDay,
+        };
+
+        var rule = Models.RecurrenceRule.Parse(source.RecurrenceRule);
+        if (rule != null)
+        {
+            editor.RepeatIndex = rule.Frequency switch
+            {
+                RecurrenceFrequency.Daily => 1,
+                RecurrenceFrequency.Weekly => 2,
+                RecurrenceFrequency.Monthly => 3,
+                RecurrenceFrequency.Yearly => 4,
+                _ => 0,
+            };
+            editor.RepeatInterval = rule.Interval;
+            editor.RepeatUntil = rule.Until;
+            foreach (var day in rule.ByDay)
+                editor.SetRepeatDay(day, true);
+        }
+
+        editor.SelectTarget(source.AccountId, source.CalendarId);
+        return editor;
+    }
+
+    /// <summary>
     /// Preselects the save target matching the user's default calendar (issue #497), and reports
     /// whether one was found. Prefers the exact calendar; falls back to any target on the same
     /// account, because the tree offers a node per discovered calendar while a Microsoft or Google

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using QuickMail.Models;
@@ -172,6 +173,64 @@ public class CalendarViewModelTests
         Assert.NotNull(editor);
         Assert.Equal(new DateTime(2026, 8, 29, 10, 15, 0), editor!.Start);
         Assert.Equal(new DateTime(2026, 8, 29, 10, 45, 0), editor.End);
+    }
+
+    [Fact]
+    public void ShareEvent_CreatesNewMessageWithBlankRecipientAndIcsAttachment()
+    {
+        var evt = MakeEvent("share", new DateTime(2026, 9, 2, 11, 30, 0));
+        evt.Summary = "Family lunch";
+        var vm = MakeVm([evt]);
+        ComposeModel? compose = null;
+        vm.ShareRequested += model => compose = model;
+
+        vm.ShareEventCommand.Execute(evt);
+
+        Assert.NotNull(compose);
+        Assert.Equal("Reserva: Family lunch", compose!.Subject);
+        Assert.Empty(compose.To);
+        var attachment = Assert.Single(compose.Attachments);
+        Assert.Equal("Family lunch.ics", attachment.FileName);
+        Assert.Equal("text/calendar; charset=utf-8", attachment.ContentType);
+        Assert.Equal(attachment.Content!.LongLength, attachment.FileSize);
+        var body = Encoding.UTF8.GetString(attachment.Content);
+        Assert.Contains("BEGIN:VCALENDAR", body);
+        Assert.Contains("SUMMARY:Family lunch", body);
+    }
+
+    [Fact]
+    public void DuplicateEvent_OpensNewEditorWithCopiedFieldsAndFreshIdentity()
+    {
+        var original = new CalendarEvent
+        {
+            Uid = "original-id",
+            AccountId = CalendarEvent.LocalAccountId,
+            Summary = "Planning",
+            Location = "Meeting room",
+            Description = "Bring figures",
+            StartTimeTicks = new DateTime(2026, 9, 3, 9, 0, 0).ToUniversalTime().Ticks,
+            EndTimeTicks = new DateTime(2026, 9, 3, 10, 0, 0).ToUniversalTime().Ticks,
+            ResponseStatus = CalendarResponseStatus.Accepted,
+        };
+        var svc = new StubCalendarService { StoredEvents = [original] };
+        var vm = new CalendarViewModel(svc, onlineMode: false, showDeclinedEvents: false);
+        EventEditorViewModel? editor = null;
+        vm.EditorRequested += value => editor = value;
+
+        vm.DuplicateEventCommand.Execute(original);
+
+        Assert.NotNull(editor);
+        Assert.False(editor!.IsEdit);
+        Assert.Equal("Planning", editor.Title);
+        Assert.Equal("Meeting room", editor.Location);
+        Assert.Equal("Bring figures", editor.Notes);
+        Assert.Equal(original.StartTime, editor.Start);
+        Assert.Equal(original.EndTime, editor.End);
+
+        editor.SaveCommand.Execute(null);
+        Assert.Equal(2, svc.StoredEvents.Count);
+        var duplicate = Assert.Single(svc.StoredEvents.Where(e => e.Uid != original.Uid));
+        Assert.Equal(original.Summary, duplicate.Summary);
     }
 
     [Fact]
@@ -866,7 +925,8 @@ public class CalendarViewModelTests
         // Wait for the async refresh to complete.
         await Task.Delay(100);
 
-        Assert.Contains(announcements, a => a.text == "Refreshing calendar." && a.cat == AnnouncementCategory.Status);
+        Assert.Contains(announcements, a => a.text == "Rebuilding calendar in the background."
+                                             && a.cat == AnnouncementCategory.Status);
         Assert.Contains(announcements, a => a.text.Contains("Calendar updated") && a.cat == AnnouncementCategory.Result);
     }
 

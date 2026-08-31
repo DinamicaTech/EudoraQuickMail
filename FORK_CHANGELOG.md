@@ -68,6 +68,8 @@ before a public release.
   even when one remote account is unavailable.
 - Google OAuth Client ID/Secret can now be maintained in Settings and are validated before browser authorization, replacing invalid `client_id`-less requests with an actionable local error.
 - Any non-shared mail account can now link an independent Google Calendar identity without changing its POP3/SMTP authentication; calendar refresh tokens are isolated in Windows Credential Manager and the account manager supports connect, reconnect, and disconnect.
+- Added FullCalendar appointment actions to duplicate an event into a fresh editable copy and to
+  share it by opening a new message with an RFC-compatible ICS attachment.
 - Folder-tree roots are now selectable recursive mail views, with paging, sorting, and search constrained to the accounts sharing that root; Settings can hide Combined views and Calendar independently.
 - Read/unread changes now update recursive folder badges immediately, and badge counts use the current regional thousands separator.
 - Scheduled rows now show `Scheduled` or `SMTP error` in the Status column; folder badges count unread mail recursively and total items for Trash/Scheduled.
@@ -170,6 +172,9 @@ before a public release.
   underlining, contextual suggestions, and integration with QuickMail's personal dictionary.
 - Preserved the exact caret/selection offsets while Catalan proofing reshapes HTML text nodes, so
   live underlining no longer moves the insertion point backwards while typing.
+- Made Catalan contextual replacements apply on the first click as a single undoable edit, and
+  replaced fragile cross-paragraph text offsets with DOM boundary markers so Enter no longer
+  returns the caret to the previous paragraph during live proofing.
 - Added selected-text translation while composing, with a local Argos Translate provider and an
   optional DeepL provider. Provider configuration includes setup/testing, local model management,
   a persistent default, privacy guidance, and Windows DPAPI protection for the DeepL API key.

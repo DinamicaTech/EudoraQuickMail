@@ -85,6 +85,43 @@
       quickMailEditor.selection.setRng(range);
     };
 
+    // Proofing rewrites text nodes to add/remove wavy-underlined spans. Character offsets are not
+    // stable across paragraph boundaries (Range.toString and the text-node walker disagree about
+    // block separators), which made Enter appear to jump back to the previous line. DOM markers
+    // survive the synchronous rewrite and restore the exact boundary instead.
+    const markDomSelection = () => {
+      if (!quickMailEditor) return null;
+      const body = quickMailEditor.getBody(), doc = body.ownerDocument;
+      const range = quickMailEditor.selection.getRng();
+      if (!body.contains(range.startContainer) || !body.contains(range.endContainer)) return null;
+      const marker = kind => {
+        const node = doc.createElement('span');
+        node.dataset.quickmailSelectionMarker = kind;
+        node.setAttribute('data-mce-bogus', 'all');
+        node.style.display = 'none';
+        return node;
+      };
+      const end = marker('end'), endRange = range.cloneRange();
+      endRange.collapse(false); endRange.insertNode(end);
+      if (range.collapsed) return { start: end, end, collapsed: true };
+      const start = marker('start'), startRange = range.cloneRange();
+      startRange.collapse(true); startRange.insertNode(start);
+      return { start, end, collapsed: false };
+    };
+
+    const restoreDomSelection = saved => {
+      if (!saved?.start?.isConnected || !saved?.end?.isConnected) return;
+      const doc = quickMailEditor.getDoc(), range = doc.createRange();
+      if (saved.collapsed) {
+        range.setStartBefore(saved.end); range.collapse(true);
+      } else {
+        range.setStartAfter(saved.start); range.setEndBefore(saved.end);
+      }
+      quickMailEditor.selection.setRng(range);
+      if (!saved.collapsed) saved.start.remove();
+      saved.end.remove();
+    };
+
     window.quickmailCaptureTextSelection = () => captureTextSelection();
     window.quickmailRestoreTextSelection = saved => {
       restoreTextSelection(saved);
@@ -97,7 +134,14 @@
       item.style.cssText = 'display:block;width:100%;border:0;background:transparent;padding:6px 18px;text-align:left;color:#111';
       item.onmouseenter = () => item.style.background = '#e8f0fe';
       item.onmouseleave = () => item.style.background = 'transparent';
-      item.onmousedown = event => { event.preventDefault(); action(); closeQuickMailMenu(); };
+      item.onmousedown = event => {
+        event.preventDefault();
+        // Remove the focus-stealing popup before editing and make the replacement one undoable
+        // transaction. This also avoids Chromium consuming the first suggestion click merely to
+        // restore the editor selection.
+        closeQuickMailMenu();
+        quickMailEditor.undoManager.transact(action);
+      };
       menu.appendChild(item);
     };
 
@@ -114,7 +158,10 @@
       if (spelling) {
         const suggestions = JSON.parse(spelling.dataset.suggestions || '[]');
         suggestions.forEach(value => addMenuButton(menu, value, () => {
-          spelling.replaceWith(spelling.ownerDocument.createTextNode(value)); emitContent(); requestCatalanProofing();
+          const replacement = spelling.ownerDocument.createTextNode(value);
+          spelling.replaceWith(replacement);
+          quickMailEditor.selection.setCursorLocation(replacement, replacement.data.length);
+          quickMailEditor.focus(); emitContent(); requestCatalanProofing();
         }));
         if (suggestions.length) menu.appendChild(doc.createElement('hr'));
         addMenuButton(menu, 'Add to Dictionary', () => chrome.webview.postMessage(JSON.stringify({
@@ -140,7 +187,7 @@
     window.quickmailApplyCatalanProofing = errors => {
       if (!quickMailEditor || quickMailLanguage !== 'ca-ES') return;
       const body = quickMailEditor.getBody();
-      const savedSelection = captureTextSelection();
+      const savedSelection = markDomSelection();
       body.querySelectorAll('[data-quickmail-spelling]').forEach(span => span.replaceWith(...span.childNodes));
       const lookup = new Map(Object.entries(errors).map(([word, suggestions]) => [word.toLocaleLowerCase('ca'), suggestions]));
       const walker = body.ownerDocument.createTreeWalker(body, NodeFilter.SHOW_TEXT);
@@ -159,7 +206,7 @@
         }
         if (changed) { fragment.append(node.data.slice(last)); node.replaceWith(fragment); }
       }
-      try { restoreTextSelection(savedSelection); } catch { /* content may have changed */ }
+      try { restoreDomSelection(savedSelection); } catch { /* content may have changed */ }
     };
 
     window.quickmailLoad = sourceBase64 => {

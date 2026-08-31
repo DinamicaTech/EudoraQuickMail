@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -77,6 +78,9 @@ public partial class CalendarViewModel : ObservableObject
     /// file name and writes the supplied file body.
     /// </summary>
     public event Action<string, string>? ExportRequested;
+
+    /// <summary>Raised when an appointment must be shared in a new message as an ICS attachment.</summary>
+    public event Action<ComposeModel>? ShareRequested;
 
     [ObservableProperty]
     private BatchObservableCollection<CalendarEvent> _events = [];
@@ -463,28 +467,7 @@ public partial class CalendarViewModel : ObservableObject
     public void NewEventAt(DateTime defaultStart)
     {
         if (_onlineMode) { Announce("Calendar is unavailable in online mode.", AnnouncementCategory.Result); return; }
-
-        // Save targets: the local calendar (always, default; added by the editor) plus each
-        // server-backed account. Microsoft/Google contribute one target (their default calendar);
-        // an iCloud account contributes one target PER discovered calendar so the user picks Home
-        // vs. Family.
-        var sources = _calendarSourcesProvider?.Invoke() ?? [];
-        var accountTargets = new List<CalendarSaveTarget>();
-        foreach (var a in _graphAccountsProvider?.Invoke() ?? [])
-        {
-            if (IsICloudAccount(a))
-            {
-                foreach (var (_, calId, calName) in sources.Where(s => s.AccountId == a.Id))
-                    accountTargets.Add(new CalendarSaveTarget($"{a.AccountLabel}: {calName}", a.Id, calId, calName));
-                // No discovered calendars yet (never synced) → offer nothing rather than a target
-                // that can't resolve a collection to PUT to.
-            }
-            else
-            {
-                accountTargets.Add(new CalendarSaveTarget(a.AccountLabel, a.Id));
-            }
-        }
-        var editor = new EventEditorViewModel(defaultStart, accountTargets);
+        var editor = new EventEditorViewModel(defaultStart, BuildSaveTargets());
         // An explicit user default wins. Otherwise prefer a Google account whose calendar sync is
         // enabled: silently creating a local-only reservation while a cloud calendar is available
         // is a much more dangerous default than choosing the first synced Google calendar.
@@ -500,6 +483,28 @@ public partial class CalendarViewModel : ObservableObject
         }
         editor.Saved += evt => _ = SaveNewEventAsync(evt);
         EditorRequested?.Invoke(editor);
+    }
+
+    private List<CalendarSaveTarget> BuildSaveTargets()
+    {
+        // Microsoft/Google contribute their default calendar; iCloud contributes one target per
+        // discovered calendar so Home and Family remain distinct destinations.
+        var sources = _calendarSourcesProvider?.Invoke() ?? [];
+        var targets = new List<CalendarSaveTarget>();
+        foreach (var account in _graphAccountsProvider?.Invoke() ?? [])
+        {
+            if (IsICloudAccount(account))
+            {
+                foreach (var (_, calendarId, calendarName) in sources.Where(s => s.AccountId == account.Id))
+                    targets.Add(new CalendarSaveTarget(
+                        $"{account.AccountLabel}: {calendarName}", account.Id, calendarId, calendarName));
+            }
+            else
+            {
+                targets.Add(new CalendarSaveTarget(account.AccountLabel, account.Id));
+            }
+        }
+        return targets;
     }
 
     /// <summary>
@@ -612,6 +617,50 @@ public partial class CalendarViewModel : ObservableObject
         foreach (var c in System.IO.Path.GetInvalidFileNameChars())
             baseName = baseName.Replace(c, '_');
         ExportRequested?.Invoke(baseName + ".ics", ics);
+    }
+
+    /// <summary>Creates a mail composition containing the selected appointment as an ICS file.</summary>
+    [RelayCommand]
+    private void ShareEvent(CalendarEvent? evt)
+    {
+        evt ??= SelectedEvent;
+        if (evt == null) return;
+
+        var master = _calendarService.Events.FirstOrDefault(x => x.Uid == evt.Uid && x.AccountId == evt.AccountId) ?? evt;
+        var ics = IcsModel.ExportEvent(master);
+        var baseName = string.IsNullOrWhiteSpace(master.Summary) ? "appointment" : master.Summary;
+        foreach (var c in System.IO.Path.GetInvalidFileNameChars()) baseName = baseName.Replace(c, '_');
+
+        ShareRequested?.Invoke(new ComposeModel
+        {
+            Kind = ComposeKind.NewMessage,
+            Subject = $"Reserva: {(string.IsNullOrWhiteSpace(master.Summary) ? "(no title)" : master.Summary)}",
+            Attachments =
+            [
+                new AttachmentModel
+                {
+                    FileName = baseName + ".ics",
+                    ContentType = "text/calendar; charset=utf-8",
+                    Content = Encoding.UTF8.GetBytes(ics),
+                    FileSize = Encoding.UTF8.GetByteCount(ics),
+                },
+            ],
+        });
+    }
+
+    /// <summary>Copies the selected appointment into a new-event editor with a fresh identity.</summary>
+    [RelayCommand]
+    private void DuplicateEvent(CalendarEvent? evt)
+    {
+        evt ??= SelectedEvent;
+        if (evt == null) return;
+        if (_onlineMode) { Announce("Calendar is unavailable in online mode.", AnnouncementCategory.Result); return; }
+
+        // Use the visible occurrence rather than the stored series master: duplicating the
+        // appointment the user clicked must retain that occurrence's displayed date/time.
+        var editor = EventEditorViewModel.CreateDuplicate(evt, BuildSaveTargets());
+        editor.Saved += duplicated => _ = SaveNewEventAsync(duplicated);
+        EditorRequested?.Invoke(editor);
     }
 
     /// <summary>Deletes the selected local event (with confirmation). Bound to Delete.</summary>

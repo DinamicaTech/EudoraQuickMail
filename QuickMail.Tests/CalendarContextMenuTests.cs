@@ -1,5 +1,6 @@
 using System;
 using System.Linq;
+using System.Reflection;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
@@ -138,5 +139,18 @@ public class CalendarContextMenuTests
             Assert.All(names, n => Assert.DoesNotContain(".", n));
         }
         finally { window.Close(); }
+    }
+
+    [Fact]
+    public void FullCalendarEventMenu_OffersShareAndDuplicateAndPostsBothActions()
+    {
+        var builder = typeof(MainWindow).GetMethod("BuildFullCalendarHtml",
+            BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(builder);
+        var html = Assert.IsType<string>(builder!.Invoke(null, [string.Empty]));
+
+        Assert.Contains("data-action=\"share\">Share appointment", html);
+        Assert.Contains("data-action=\"duplicate\">Duplicate appointment", html);
+        Assert.Contains("action==='duplicate'||action==='share'", html);
     }
 }
