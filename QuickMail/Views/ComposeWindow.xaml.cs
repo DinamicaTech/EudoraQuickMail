@@ -337,6 +337,8 @@ public partial class ComposeWindow : Window
             == MessageBoxResult.Yes;
         vm.ErrorDialogRequested += (title, message) =>
             MessageBox.Show(DialogOwner, message, title, MessageBoxButton.OK, MessageBoxImage.Error);
+        vm.WarningDialogRequested += (message, title) =>
+            MessageBox.Show(DialogOwner, message, title, MessageBoxButton.OK, MessageBoxImage.Warning);
 
         // Win32 file dialogs are View-layer (CLAUDE.md MVVM rules); the VM requests
         // paths and the View owns the dialog.
@@ -1991,6 +1993,25 @@ public partial class ComposeWindow : Window
                             case "grammar-check":
                                 await CheckHtmlContextGrammarAsync(
                                     root.GetProperty("text").GetString() ?? string.Empty);
+                                return;
+                            case "attachment-drop":
+                                var fileName = root.GetProperty("name").GetString() ?? "attachment";
+                                var contentBase64 = root.GetProperty("contentBase64").GetString() ?? string.Empty;
+                                var content = Convert.FromBase64String(contentBase64);
+                                var contentType = root.TryGetProperty("contentType", out var contentTypeElement)
+                                    ? contentTypeElement.GetString()
+                                    : null;
+                                _vm.AddAttachmentFromContent(fileName, content, contentType);
+                                _vm.StatusText = $"Attached {AttachmentSafety.SanitizeFileName(Path.GetFileName(fileName))}.";
+                                AccessibilityHelper.Announce(this, "1 file attached",
+                                    category: AnnouncementCategory.Result);
+                                return;
+                            case "attachment-drop-error":
+                                _vm.StatusText = root.TryGetProperty("message", out var dropError)
+                                    ? dropError.GetString() ?? "Could not attach the dropped file."
+                                    : "Could not attach the dropped file.";
+                                AccessibilityHelper.Announce(this, _vm.StatusText,
+                                    interrupt: true, category: AnnouncementCategory.Result);
                                 return;
                         }
                     }

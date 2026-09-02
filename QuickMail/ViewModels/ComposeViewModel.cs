@@ -17,6 +17,7 @@ namespace QuickMail.ViewModels;
 
 public partial class ComposeViewModel : ObservableObject, IDisposable
 {
+    private const long AttachmentWarningThresholdBytes = 25_000_000;
     /// <summary>Raised after a local Draft or Scheduled folder may have been created.</summary>
     public event Action<Guid>? LocalFolderChanged;
     /// <summary>Raised after SMTP accepted a message and its Sent copy has been handled.</summary>
@@ -192,6 +193,7 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
     /// </summary>
     public Func<string, string, bool>? ConfirmationRequested { get; set; }
     public event Action<string, string>? ErrorDialogRequested;
+    public event Action<string, string>? WarningDialogRequested;
 
     /// <summary>
     /// The IAccountService this compose window was built with. Exposed so the address book
@@ -392,12 +394,6 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
             return;
         }
 
-        if (Attachments.Sum(a => a.FileSize) > 25_000_000)
-        {
-            SetStatusOutcome("Total attachment size exceeds 25 MB. Please remove some attachments.");
-            return;
-        }
-
         IsBusy = true;
         SetProgress("Saving draft…");
         try
@@ -535,11 +531,7 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
             return;
         }
 
-        if (Attachments.Sum(a => a.FileSize) > 25_000_000)
-        {
-            SetStatusOutcome("Total attachment size exceeds 25 MB. Please remove some attachments.");
-            return;
-        }
+        WarnIfAttachmentsExceedRecommendedSize();
 
         // The From header is built from this address, so an account whose "email address" is not one
         // — a login name typed into the field before it was validated at save time — produces
@@ -632,6 +624,7 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
     {
         if (string.IsNullOrWhiteSpace(To)) { SetStatusOutcome("Please enter at least one recipient."); return; }
         if (SenderAccount is not { } account) { SetStatusOutcome("Please select a sender account."); return; }
+        WarnIfAttachmentsExceedRecommendedSize();
         var requested = PromptScheduleTimeRequested?.Invoke(_scheduledAt?.LocalDateTime ?? DateTime.Now.AddMinutes(10));
         if (requested is not { } local) return;
         if (local <= DateTime.Now) { SetStatusOutcome("Enter a future local date and time for scheduled sending."); return; }
@@ -921,13 +914,28 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
         if (!File.Exists(path)) return;
         var info  = new FileInfo(path);
         var bytes = await File.ReadAllBytesAsync(path);
+        AddAttachmentFromContent(info.Name, bytes,
+            AttachmentModel.ContentTypeFromFileName(info.Name), info.FullName);
+    }
+
+    /// <summary>
+    /// Adds attachment bytes supplied by an editor-hosted file drop. WebView2 deliberately does
+    /// not expose the source file's local path, so the HTML editor transfers its name and bytes.
+    /// </summary>
+    public void AddAttachmentFromContent(
+        string fileName, byte[] content, string? contentType = null, string? sourcePath = null)
+    {
+        ArgumentNullException.ThrowIfNull(content);
+        var safeFileName = AttachmentSafety.SanitizeFileName(Path.GetFileName(fileName));
         Attachments.Add(new AttachmentModel
         {
-            FileName    = info.Name,
-            ContentType = AttachmentModel.ContentTypeFromFileName(info.Name),
-            FileSize    = info.Length,
-            PartSpecifier = info.FullName,
-            Content     = bytes,
+            FileName = safeFileName,
+            ContentType = string.IsNullOrWhiteSpace(contentType)
+                ? AttachmentModel.ContentTypeFromFileName(safeFileName)
+                : contentType,
+            FileSize = content.LongLength,
+            PartSpecifier = sourcePath,
+            Content = content,
         });
     }
 
@@ -938,7 +946,18 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
             Attachments.Remove(attachment);
     }
 
-    /// <summary>e.g. "3 files, 1.8 MB of 25 MB limit"</summary>
+    private void WarnIfAttachmentsExceedRecommendedSize()
+    {
+        var totalBytes = Attachments.Sum(attachment => attachment.FileSize);
+        if (totalBytes <= AttachmentWarningThresholdBytes) return;
+
+        WarningDialogRequested?.Invoke(
+            $"The attachments total {totalBytes / 1_000_000.0:F1} MB. Many mail servers reject " +
+            "messages larger than 25 MB, but QuickMail will continue with this operation.",
+            "Large Attachments");
+    }
+
+    /// <summary>e.g. "3 files, 1.8 MB" or a warning above the common 25 MB threshold.</summary>
     public string AttachmentSummaryText
     {
         get
@@ -949,7 +968,10 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
             var totalDisplay = totalBytes >= 1_048_576
                 ? $"{totalBytes / 1_048_576.0:F1} MB"
                 : $"{totalBytes / 1_024.0:F0} KB";
-            return $"{count} file{(count == 1 ? "" : "s")}, {totalDisplay} of 25 MB limit";
+            var warning = totalBytes > AttachmentWarningThresholdBytes
+                ? " — warning: above 25 MB"
+                : string.Empty;
+            return $"{count} file{(count == 1 ? "" : "s")}, {totalDisplay}{warning}";
         }
     }
 

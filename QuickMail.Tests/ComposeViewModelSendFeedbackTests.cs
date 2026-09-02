@@ -153,6 +153,29 @@ public class ComposeViewModelSendFeedbackTests
     }
 
     [Fact]
+    public async Task AttachmentsAbove25Mb_WarnButDoNotPreventSending()
+    {
+        var (vm, smtp, _) = MakeVm();
+        vm.SenderAccount = Account();
+        vm.To = "someone@example.com";
+        vm.Attachments.Add(new AttachmentModel
+        {
+            FileName = "large.pdf",
+            ContentType = "application/pdf",
+            FileSize = 25_000_001,
+            Content = Array.Empty<byte>(),
+        });
+        string? warning = null;
+        vm.WarningDialogRequested += (message, _) => warning = message;
+
+        await vm.SendCommand.ExecuteAsync(null);
+
+        Assert.Contains("25 MB", warning);
+        Assert.Single(smtp.Sent);
+        Assert.True(vm.IsSent);
+    }
+
+    [Fact]
     public async Task RefusedSend_AnnouncesWhyAsAResult()
     {
         var (vm, smtp, status) = MakeVm();

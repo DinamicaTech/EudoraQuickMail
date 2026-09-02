@@ -73,4 +73,20 @@ public class ComposeViewModelAttachmentTests
 
         Assert.Empty(vm.Attachments);
     }
+
+    [Fact]
+    public void AddAttachmentFromContent_AcceptsPdfDroppedByHtmlEditor()
+    {
+        var vm = MakeVm();
+        var bytes = new byte[] { 0x25, 0x50, 0x44, 0x46 };
+
+        vm.AddAttachmentFromContent("document.pdf", bytes, "application/pdf");
+
+        var attachment = Assert.Single(vm.Attachments);
+        Assert.Equal("document.pdf", attachment.FileName);
+        Assert.Equal("application/pdf", attachment.ContentType);
+        Assert.Equal(bytes, attachment.Content);
+        Assert.Equal(bytes.Length, attachment.FileSize);
+        Assert.Null(attachment.PartSpecifier);
+    }
 }
