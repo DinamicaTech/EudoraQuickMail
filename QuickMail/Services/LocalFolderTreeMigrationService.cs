@@ -2,6 +2,7 @@ using System.IO;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.Data.Sqlite;
+using QuickMail.Helpers;
 using QuickMail.Models;
 
 namespace QuickMail.Services;
@@ -251,7 +252,7 @@ public sealed class LocalFolderTreeMigrationService
 
     private static string Canonicalize(string fullName, SpecialFolderKind kind)
     {
-        var path = fullName.Replace('\\', '/').Trim('/');
+        var path = FolderPathNormalizer.Normalize(fullName);
         // Only system Inbox aliases collapse. Names such as _In remain ordinary, meaningful Eudora
         // containers and therefore retain both their underscore and their hierarchy.
         if (!path.Contains('/') && kind == SpecialFolderKind.Inbox &&

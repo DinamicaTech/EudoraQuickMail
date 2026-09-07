@@ -361,6 +361,7 @@ public abstract partial class AccountEditorViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(IsImapBackend))]
     [NotifyPropertyChangedFor(nameof(IsPop3Backend))]
     [NotifyPropertyChangedFor(nameof(IsMailServerBackend))]
+    [NotifyPropertyChangedFor(nameof(CanCheckIncomingMail))]
     private BackendKind _backendKind = BackendKind.ImapSmtp;
 
     /// <summary>True when this account uses the Microsoft Graph backend (drives IMAP/SMTP field visibility).</summary>
@@ -370,6 +371,7 @@ public abstract partial class AccountEditorViewModel : ObservableObject
     public bool IsImapBackend => BackendKind == BackendKind.ImapSmtp;
     public bool IsPop3Backend => BackendKind == BackendKind.Pop3Smtp;
     public bool IsMailServerBackend => IsImapBackend || IsPop3Backend;
+    public bool CanCheckIncomingMail => BackendKind != BackendKind.LocalArchive;
 
     [ObservableProperty] private string _statusText = string.Empty;
 

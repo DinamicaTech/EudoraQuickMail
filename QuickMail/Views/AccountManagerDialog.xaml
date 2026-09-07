@@ -350,6 +350,12 @@
                                       Margin="0,0,0,6"/>
                         </StackPanel>
 
+                        <CheckBox Content="Check incoming email"
+                                  IsChecked="{Binding CheckIncomingMail}"
+                                  AutomationProperties.Name="Check incoming email"
+                                  Visibility="{Binding CanCheckIncomingMail, Converter={StaticResource BoolToVisibility}}"
+                                  Margin="0,6,0,6"/>
+
                         <Separator Margin="0,6"/>
 
                         <!-- Signature -->
@@ -399,6 +405,12 @@
                     AutomationProperties.Name="Edit account in full account form"
                     IsEnabled="{Binding IsEditing}"
                     MinWidth="80" Margin="0,0,6,0"/>
+            <Button DockPanel.Dock="Right"
+                    Content="D_uplicate account…"
+                    Click="DuplicateButton_Click"
+                    AutomationProperties.Name="Duplicate account"
+                    IsEnabled="{Binding CanDuplicateAccount}"
+                    MinWidth="120" Margin="0,0,6,0"/>
             <TextBlock VerticalAlignment="Center"
                        Text="{Binding StatusText}"
                        AutomationProperties.Name="Status"

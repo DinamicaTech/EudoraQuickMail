@@ -467,6 +467,20 @@ public partial class AddAccountViewModel : AccountEditorViewModel, IDisposable
     }
 
     /// <summary>
+    /// Seeds the add-account form from an existing account without carrying either login identity
+    /// or credentials into the copy. Provider/server settings deliberately remain selected so the
+    /// operator normally only has to enter the new address and password (or complete OAuth sign-in).
+    /// </summary>
+    public void SeedDuplicateFrom(AccountModel account)
+    {
+        SeedFrom(account, password: null);
+        Username = string.Empty;
+        LoginUsername = string.Empty;
+        Password = string.Empty;
+        StatusText = "Enter the new email address and credentials.";
+    }
+
+    /// <summary>
     /// Called from AddAccountDialog.OnClosed. Cancels before disposing so an in-flight lookup gets a
     /// clean OperationCanceledException rather than an ObjectDisposedException.
     /// </summary>

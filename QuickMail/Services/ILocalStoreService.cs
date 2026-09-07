@@ -67,6 +67,14 @@ public interface ILocalStoreService
         throw new NotSupportedException("Canonical local folder moves are not supported by this store.");
     Task<CanonicalFolderMoveResult> RenameCanonicalFolderAsync(Guid folderId, string newName) =>
         throw new NotSupportedException("Canonical local folder renaming is not supported by this store.");
+    /// <summary>
+    /// Trims leading/trailing whitespace from every canonical folder-name segment. Implementations
+    /// return the applied old/new path pairs so JSON-backed references can be rewritten by the
+    /// composition root. Calling this repeatedly is safe.
+    /// </summary>
+    Task<IReadOnlyList<CanonicalFolderMoveResult>> NormalizeCanonicalFolderWhitespaceAsync(
+        IReadOnlyCollection<Guid> localAccountIds) =>
+        Task.FromResult<IReadOnlyList<CanonicalFolderMoveResult>>([]);
     Task DeleteCanonicalFolderTreeAsync(Guid folderId) =>
         throw new NotSupportedException("Canonical local folder deletion is not supported by this store.");
 
@@ -96,6 +104,26 @@ public interface ILocalStoreService
 
     Task UpsertDetailAsync(MailMessageDetail detail);
     Task<MailMessageDetail?> LoadDetailAsync(Guid accountId, string folderName, string messageId);
+
+    // Persistent IMAP body-index queue. Defaults keep lightweight test/probe stores compatible.
+    Task<long> CountPendingImapBodiesAsync(IReadOnlyCollection<Guid> accountIds,
+        DateTimeOffset retryErrorsBefore, CancellationToken ct = default) => Task.FromResult(0L);
+    Task<IReadOnlyList<ImapBodyDownloadCandidate>> LoadPendingImapBodiesAsync(
+        IReadOnlyCollection<Guid> accountIds, int limit, DateTimeOffset retryErrorsBefore,
+        CancellationToken ct = default) =>
+        Task.FromResult<IReadOnlyList<ImapBodyDownloadCandidate>>([]);
+    Task<MailMessageDetail?> LoadCachedImapBodyByInternetMessageIdAsync(Guid accountId,
+        string internetMessageId, CancellationToken ct = default) => Task.FromResult<MailMessageDetail?>(null);
+    Task MarkImapBodyDownloadStartedAsync(ImapBodyDownloadCandidate candidate,
+        CancellationToken ct = default) => Task.CompletedTask;
+    Task MarkImapBodyDownloadErrorAsync(ImapBodyDownloadCandidate candidate, string failureMessage,
+        CancellationToken ct = default) => Task.CompletedTask;
+    async Task<int> SaveImapBodyAndCopiesAsync(ImapBodyDownloadCandidate candidate,
+        MailMessageDetail detail, ImapBodyCacheStatus status, CancellationToken ct = default)
+    {
+        await UpsertDetailAsync(detail);
+        return 1;
+    }
 
     /// <summary>Loads the body and secondary recipients needed while evaluating rules. The default
     /// implementation keeps test/probe stores source-compatible; SQLite overrides it with one

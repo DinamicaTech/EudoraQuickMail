@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using QuickMail.Models;
+using QuickMail.Helpers;
 
 namespace EudoraImporter;
 
@@ -141,7 +142,7 @@ internal static class EudoraFilterImporter
             .Select(part => part.EndsWith(".fol", StringComparison.OrdinalIgnoreCase) ||
                             part.EndsWith(".mbx", StringComparison.OrdinalIgnoreCase)
                 ? Path.GetFileNameWithoutExtension(part) : part);
-        var candidate = string.Join('/', parts);
+        var candidate = FolderPathNormalizer.Normalize(string.Join('/', parts));
         var folder = folders.FirstOrDefault(item =>
             item.FullName.Equals(candidate, StringComparison.OrdinalIgnoreCase));
         if (folder is null) return null;

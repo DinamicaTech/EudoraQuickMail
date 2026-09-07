@@ -293,6 +293,40 @@ public sealed class LocalFirstMailTests : IDisposable
     }
 
     [Fact]
+    public async Task SentSaveForAccountAddedAfterStartupCreatesAndBindsOutFolderOnDemand()
+    {
+        var account = new AccountModel
+        {
+            Id = Guid.NewGuid(), AccountName = "New POP", Username = "sender@example.test",
+            BackendKind = BackendKind.Pop3Smtp, FolderTreeRootId = Guid.NewGuid(),
+            FolderTreeRootName = "Local mail", IsActive = true,
+        };
+        var store = CreateStore();
+        var profile = new ProfileContext(_directory);
+        var accounts = new AccountService(profile);
+        accounts.SaveAccounts([account]);
+        var localMail = new LocalMailService(store, accounts);
+
+        await localMail.AppendToSentAsync(account.Id, new ComposeModel
+        {
+            AccountId = account.Id, To = "recipient@example.test", Subject = "sent after add",
+            Body = "body", Mode = ComposeMode.Html, HtmlBody = "<p>body</p>",
+        });
+
+        var sentFolder = Assert.Single((await store.LoadFoldersAsync())[account.Id]
+            .Where(folder => folder.Kind == SpecialFolderKind.Sent));
+        var saved = Assert.Single((await store.LoadLocalPageAsync(account.Id, sentFolder.FullName, 10, 0)).Messages);
+        Assert.Equal("sender@example.test", saved.From);
+        Assert.Equal("sent after add", saved.Subject);
+        Assert.Equal(MessageDirection.Outgoing, saved.Direction);
+
+        var canonical = await store.LoadCanonicalLocalFolderTreeAsync();
+        Assert.Contains(canonical!.Folders, folder => folder.Kind == SpecialFolderKind.Sent &&
+            folder.Bindings.Any(binding => binding.AccountId == account.Id &&
+                                           binding.LegacyFullName == sentFolder.FullName));
+    }
+
+    [Fact]
     public async Task ScheduledSend_WhenOffline_RemainsScheduledWithErrorAndNeverBecomesDraft()
     {
         var account = new AccountModel
@@ -392,6 +426,105 @@ public sealed class LocalFirstMailTests : IDisposable
         Assert.Contains(tree.Folders, folder => folder.FolderId == childId && folder.CanonicalPath == "Clients/Acme");
         Assert.Contains((await store.LoadFoldersAsync())[account.Id], folder =>
             folder.FullName == "Clients" && folder.DisplayName == "Clients");
+    }
+
+    [Fact]
+    public async Task FolderWhitespaceNormalization_CleansPhysicalPathsAndMessageIndexes()
+    {
+        var account = new AccountModel
+        {
+            Id = Guid.NewGuid(), AccountName = "POP", Username = "sender@example.test",
+            BackendKind = BackendKind.Pop3Smtp, FolderTreeRootId = Guid.NewGuid(),
+            FolderTreeRootName = "Local mail", IsActive = true,
+        };
+        var store = CreateStore();
+        const string dirtyPath = "Personal/Arnau /King's InterHigh ";
+        const string cleanPath = "Personal/Arnau/King's InterHigh";
+        await store.SaveFoldersAsync(account.Id,
+        [
+            Folder(account.Id, "Personal", container: true),
+            Folder(account.Id, "Personal/Arnau ", container: true),
+            Folder(account.Id, dirtyPath, container: false),
+        ]);
+        await store.SaveLocalMessageAsync(Message(account.Id, dirtyPath, "school-message", "unique school body"));
+        new LocalFolderTreeMigrationService().BuildShadowTree(
+            Path.Combine(_directory, "mail.db"), [account]);
+
+        var before = (await store.LoadCanonicalLocalFolderTreeAsync())!.Folders
+            .Single(folder => folder.CanonicalPath == cleanPath);
+        Assert.Contains(before.Bindings, binding => binding.LegacyFullName == dirtyPath);
+
+        var moves = await store.NormalizeCanonicalFolderWhitespaceAsync([account.Id]);
+
+        Assert.NotEmpty(moves);
+        Assert.Equal(1, (await store.LoadLocalPageAsync(account.Id, cleanPath, 10, 0)).TotalMatches);
+        Assert.Equal(0, (await store.LoadLocalPageAsync(account.Id, dirtyPath, 10, 0)).TotalMatches);
+        var folders = (await store.LoadFoldersAsync())[account.Id];
+        Assert.Contains(folders, folder => folder.FullName == cleanPath);
+        Assert.DoesNotContain(folders, folder => folder.FullName.Contains("Arnau ", StringComparison.Ordinal));
+        var after = (await store.LoadCanonicalLocalFolderTreeAsync())!.Folders
+            .Single(folder => folder.CanonicalPath == cleanPath);
+        Assert.Contains(after.Bindings, binding => binding.LegacyFullName == cleanPath);
+    }
+
+    [Fact]
+    public async Task FolderWhitespaceNormalization_MergesWithExistingCleanFolder()
+    {
+        var account = new AccountModel
+        {
+            Id = Guid.NewGuid(), AccountName = "POP", Username = "sender@example.test",
+            BackendKind = BackendKind.Pop3Smtp, FolderTreeRootId = Guid.NewGuid(),
+            FolderTreeRootName = "Local mail", IsActive = true,
+        };
+        var store = CreateStore();
+        await store.SaveFoldersAsync(account.Id,
+        [
+            Folder(account.Id, "Customers ", container: false),
+            Folder(account.Id, "Customers", container: false),
+        ]);
+        await store.SaveLocalMessageAsync(Message(account.Id, "Customers ", "dirty", "first"));
+        await store.SaveLocalMessageAsync(Message(account.Id, "Customers", "clean", "second"));
+        new LocalFolderTreeMigrationService().BuildShadowTree(
+            Path.Combine(_directory, "mail.db"), [account]);
+
+        var moves = await store.NormalizeCanonicalFolderWhitespaceAsync([account.Id]);
+
+        Assert.Contains(moves, move => move.OldPath == "Customers " &&
+            move.NewPath == "Customers" && move.WasMerged);
+        Assert.Equal(2, (await store.LoadLocalPageAsync(account.Id, "Customers", 10, 0)).TotalMatches);
+        Assert.Equal(0, (await store.LoadLocalPageAsync(account.Id, "Customers ", 10, 0)).TotalMatches);
+        var canonical = (await store.LoadCanonicalLocalFolderTreeAsync())!.Folders
+            .Single(folder => folder.CanonicalPath == "Customers");
+        Assert.Single(canonical.Bindings.Where(binding => binding.AccountId == account.Id));
+        Assert.Equal("Customers", canonical.Bindings.Single().LegacyFullName);
+    }
+
+    [Fact]
+    public async Task FolderWhitespaceNormalization_ResumesAfterPhysicalCommit()
+    {
+        var account = new AccountModel
+        {
+            Id = Guid.NewGuid(), AccountName = "POP", Username = "sender@example.test",
+            BackendKind = BackendKind.Pop3Smtp, FolderTreeRootId = Guid.NewGuid(),
+            FolderTreeRootName = "Local mail", IsActive = true,
+        };
+        var store = CreateStore();
+        await store.SaveFoldersAsync(account.Id, [Folder(account.Id, "Archive ", container: false)]);
+        await store.SaveLocalMessageAsync(Message(account.Id, "Archive ", "resume", "body"));
+        new LocalFolderTreeMigrationService().BuildShadowTree(
+            Path.Combine(_directory, "mail.db"), [account]);
+
+        // Simulate interruption after the physical transaction committed but before its shadow
+        // binding was updated. The next startup must finish metadata repair without moving twice.
+        await store.RenameFolderPathAsync(account.Id, "Archive ", "Archive");
+
+        var moves = await store.NormalizeCanonicalFolderWhitespaceAsync([account.Id]);
+
+        Assert.Contains(moves, move => move.OldPath == "Archive " && move.NewPath == "Archive");
+        Assert.Equal(1, (await store.LoadLocalPageAsync(account.Id, "Archive", 10, 0)).TotalMatches);
+        var node = (await store.LoadCanonicalLocalFolderTreeAsync())!.Folders
+            .Single(folder => folder.CanonicalPath == "Archive");
+        Assert.Equal("Archive", Assert.Single(node.Bindings).LegacyFullName);
     }
 
     [Fact]

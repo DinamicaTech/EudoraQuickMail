@@ -3,10 +3,10 @@
 > Living specification and technical handoff for continuing the project without the
 > original conversation history.
 
-- Last reviewed: 2026-08-29
+- Last reviewed: 2026-09-07
 - Code snapshot audited: `codex/local-first-fork` at `3b2a1f6`
 - Fork base: upstream QuickMail commit `deb82e88aa80cdca9e2f087a345c727c9b3ab9f9`
-- Current product version: `0.8.60`
+- Current product version: `0.8.62`
 
 ## 1. Purpose
 
@@ -92,7 +92,9 @@ Before work, run `git rev-parse --show-toplevel` and require
 ### 4.1 Local-first mail and transport
 
 - Local-only SMTP send plus safe, destructive POP3 retrieval.
-- Multi-account operation, Active and `Check incoming email` flags.
+- Multi-account operation, Active and `Check incoming email` flags. Account management can duplicate
+  a normal account's technical/folder configuration into a fresh editable account, but must clear
+  username/login, passwords, OAuth/calendar identity, shared-mailbox linkage and default status.
 - Optional IMAP/manual synchronization integrated into the local model/search.
 - DPAPI-protected passwords and actionable connection/transport diagnostics.
 - Shared account roots and one canonical visible folder tree.
@@ -117,6 +119,7 @@ Before work, run `git rev-parse --show-toplevel` and require
 - Attachment count/name/content search over Office/PDF/text/archive formats, no OCR.
 - SHA-256 extraction reuse, repair/rebuild tools and detailed timing log.
 - Persistent last-ten quick-search history.
+- Explicit Search Everywhere action over all active non-shared accounts, independent of selection.
 - `Tools > Analyze Folder`: top 20 sender domains and double-click filtered navigation.
 
 ### 4.4 Folders and messages
@@ -176,6 +179,8 @@ Before work, run `git rev-parse --show-toplevel` and require
 9. **Large work shows progress before it starts.** No unexplained UI freeze.
 10. **Plain D&D only moves.** Modifier-assisted drags have separate documented semantics.
 11. **UI text stays English; regional values follow Windows.**
+12. **Folder paths have no padded segments.** Trim each newly created/imported segment; startup
+    repairs legacy local paths and their references, but never renames an existing IMAP alias.
 
 ## 6. Persistent data and canonical folders
 
@@ -213,6 +218,13 @@ This non-destructive design avoids rewriting hundreds of thousands of messages. 
 a legacy profile with data but no shadow tree and validates every source is mapped exactly
 once.
 
+At startup, local POP/archive bindings are normalized segment by segment. The repair moves or
+merges the physical folder transactionally, updates message/detail/FTS/attachment/calendar keys,
+and rewrites rules, startup/recent destinations and saved views. It is idempotent. IMAP/Graph
+physical names remain server-owned aliases; only newly created remote names are trimmed. Canonical
+bindings are also evidence that an active account belongs in a root view when an older
+`accounts.json` is missing `FolderTreeRootId`.
+
 System folders sort first: **In, Draft, Scheduled, Out/Sent, Trash, Junk**. Root-level
 `Inbox`/`INBOX` bind into visible `In`. `_In`, `_Out`, `_Trash` are ordinary historical
 folders, not hidden aliases.
@@ -238,6 +250,14 @@ IMAP is optional, local-cache oriented and must not be the architectural authori
 sync downloads/refreshes into the same model with detailed progress. IMAP messages must be
 included in local search and canonical In. Do not run opaque long operations on the UI
 thread; background continuations must respect shutdown/cancellation disposal.
+
+Summary sync intentionally remains cheap (`Envelope`, flags and preview). After synchronization,
+`ImapBodyBackfillService` downloads every locally cached IMAP body still missing from
+`MessageDetail` through the background IMAP lease and without setting `Seen`. Its durable
+`ImapBodyCacheState` rows distinguish Pending, Downloaded, NoTextBody and Error; interrupted work
+resumes next start and errors retry after a delay. Copies sharing an RFC Message-ID (notably Gmail
+labels) are fetched once and the body is propagated to each physical cache row, preserving unread
+state. Progress is visible in the main status field.
 
 ### 7.3 Shared roots
 
@@ -319,7 +339,9 @@ excludes Draft/Scheduled. UI search is operator-synchronous with visible progres
 
 `F3` opens/focuses search; Search button executes, Clear removes active filter. Editable
 combo retains ten distinct searches and has an explicit dropdown; hide the redundant native
-arrow.
+arrow. **Search Everywhere** reruns the same textbox query over all active non-shared accounts
+without changing the selected folder; like root search it includes Trash and excludes Draft and
+Scheduled.
 
 ### 9.2 Attachment index
 
@@ -358,9 +380,14 @@ stable targets and separately offers removal of imported rules pointing to In.
 
 ### 10.3 Keyboard and drag workflows
 
-- `Shift+F`: apply compatible rules to selected messages.
+- `Shift+F`: apply compatible rules to selected messages. If the reference message has no enabled
+  compatible rule, open the new-rule editor prefilled from that message instead.
 - `Ctrl+Shift+F`: show/select matching filters; only create if none exists.
 - `Ctrl+Shift+A`: Filter all like this—find all compatible rules and apply to current folder.
+  Partition execution by physical account/folder: one unavailable remote source must not roll
+  back or conceal successful sources. Refresh successful moves and report partial failures with
+  the affected account; `invalid_grant` requires the Google account to be linked again. If no
+  enabled compatible rule exists, open a prefilled new-rule editor just as `Shift+F` does.
 - Plain message D&D: move only; never open Rules Manager.
 - Shift-drop on container: ask/create/reuse subfolder, move there, offer rule creation.
 - Shift-drop on leaf: move there and open a rule with that target.

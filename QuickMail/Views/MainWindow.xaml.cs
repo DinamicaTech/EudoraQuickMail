@@ -1017,18 +1017,21 @@ public partial class MainWindow : Window
 
     private void MenuSearch_Click(object sender, RoutedEventArgs e) => OpenSearch();
 
-    private void ExecuteSearch()
+    private async Task ExecuteSearchAsync(bool everywhere = false)
     {
-        SearchBox.GetBindingExpression(ComboBox.TextProperty)?.UpdateSource();
         var updated = QuickSearchHistory.Add(_quickSearchHistory, SearchBox.Text);
         _quickSearchHistory.Clear();
         foreach (var search in updated) _quickSearchHistory.Add(search);
         var config = _configService.Load();
         config.QuickSearchHistory = updated;
         _configService.Save(config);
+        await _vm.RunQuickSearchAsync(SearchBox.Text, everywhere);
     }
 
-    private void SearchButton_Click(object sender, RoutedEventArgs e) => ExecuteSearch();
+    private async void SearchButton_Click(object sender, RoutedEventArgs e) => await ExecuteSearchAsync();
+
+    private async void SearchEverywhereButton_Click(object sender, RoutedEventArgs e) =>
+        await ExecuteSearchAsync(everywhere: true);
 
     private void SearchHistoryButton_Click(object sender, RoutedEventArgs e)
     {
@@ -1053,11 +1056,11 @@ public partial class MainWindow : Window
         window.Show();
     }
 
-    private void SearchBox_PreviewKeyDown(object sender, KeyEventArgs e)
+    private async void SearchBox_PreviewKeyDown(object sender, KeyEventArgs e)
     {
         if (e.Key == Key.Enter)
         {
-            ExecuteSearch();
+            await ExecuteSearchAsync();
             e.Handled = true;
         }
         else if (e.Key == Key.Escape)
@@ -4929,6 +4932,23 @@ public partial class MainWindow : Window
         OpenRulesManager(template);
     }
 
+    private MailRule CreateRuleTemplateFromMessage(MailMessageSummary message)
+    {
+        var sender = MainViewModel.SenderMailbox(message.From);
+        return new MailRule
+        {
+            Name = $"Rule for {sender}",
+            FromContains = sender,
+            UseFromCondition = true,
+            SubjectContains = string.IsNullOrWhiteSpace(message.Subject) ? null : message.Subject,
+            AccountId = null,
+            Action = RuleAction.MoveToFolder,
+            AlsoMarkAsRead = true,
+            ApplyAutomatically = false,
+            AlsoFilterOutMailbox = _configService.Load().MarkAlsoFilterOutMailboxByDefault,
+        };
+    }
+
     private async Task<string?> LoadCompleteBodyForRuleMatchAsync(MailMessageSummary message)
     {
         var detail = await _localStore.LoadDetailAsync(
@@ -4956,6 +4976,8 @@ public partial class MainWindow : Window
         PerformanceLogService.Marker("Rules: filter all like this BEGIN", perf);
         _vm.IsBusy = true;
         _vm.IsStatusHighlighted = true;
+        var createRuleInstead = false;
+        MailMessageSummary? newRuleSource = null;
         _vm.StatusText = "Finding filters applicable to the selected message…";
         await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Render);
         try
@@ -4969,7 +4991,9 @@ public partial class MainWindow : Window
                 Stopwatch.GetElapsedTime(started), perf + $"; applicable={applicable.Count}");
             if (applicable.Count == 0)
             {
-                Report("No enabled filters match the selected message.");
+                createRuleInstead = true;
+                newRuleSource = sample;
+                Report("No compatible filter was found. Creating a new filter…");
                 return;
             }
 
@@ -4981,6 +5005,7 @@ public partial class MainWindow : Window
                 outgoingCandidates = await _vm.LoadOutFolderSummariesForRulesAsync(folder);
             var totalMatches = 0;
             var removed = new List<MailMessageSummary>();
+            var failures = new List<string>();
             MailRule? latestMoveRule = null;
             MailMessageSummary? latestMovedMessage = null;
             using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(10));
@@ -4994,18 +5019,46 @@ public partial class MainWindow : Window
                     ? candidates.Concat(outgoingCandidates).DistinctBy(message =>
                         (message.AccountId, message.FolderName, message.MessageId)).ToList()
                     : candidates;
-                var result = await _ruleService.ApplyRuleToMessagesAsync(
-                    rule, ruleCandidates, _localStore, cts.Token);
-                totalMatches += result.MatchedCount;
-                removed.AddRange(result.RemovedMessages);
-                if (result.RemovedMessages.Count > 0 && rule.Action == RuleAction.MoveToFolder)
+                var ruleMatched = 0;
+                var ruleRemoved = new List<MailMessageSummary>();
+
+                // A unified folder can contain local POP mail and one or more IMAP accounts.
+                // Apply each physical source independently: an expired OAuth token in one account
+                // must not hide successful moves in the remaining accounts or prevent the UI from
+                // refreshing those successful changes.
+                foreach (var source in ruleCandidates.GroupBy(message =>
+                             (message.AccountId, message.FolderName)))
+                {
+                    try
+                    {
+                        var result = await _ruleService.ApplyRuleToMessagesAsync(
+                            rule, source.ToList(), _localStore, cts.Token);
+                        ruleMatched += result.MatchedCount;
+                        ruleRemoved.AddRange(result.RemovedMessages);
+                    }
+                    catch (OperationCanceledException) { throw; }
+                    catch (Exception ex)
+                    {
+                        var account = _vm.Accounts.FirstOrDefault(candidate =>
+                            candidate.Id == source.Key.AccountId)?.AccountLabel
+                            ?? source.Key.AccountId.ToString();
+                        var reason = ex.GetBaseException().Message;
+                        failures.Add($"{account} / {source.Key.FolderName}: {reason}");
+                        LogService.Log(
+                            $"Filter all like this: rule '{rule.Name}' failed for {account} / {source.Key.FolderName}", ex);
+                    }
+                }
+
+                totalMatches += ruleMatched;
+                removed.AddRange(ruleRemoved);
+                if (ruleRemoved.Count > 0 && rule.Action == RuleAction.MoveToFolder)
                 {
                     latestMoveRule = rule;
-                    latestMovedMessage = result.RemovedMessages[0];
+                    latestMovedMessage = ruleRemoved[0];
                 }
-                if (result.RemovedMessages.Count > 0)
+                if (ruleRemoved.Count > 0)
                 {
-                    var keys = result.RemovedMessages.Select(message =>
+                    var keys = ruleRemoved.Select(message =>
                         (message.AccountId, message.FolderName, message.MessageId)).ToHashSet();
                     candidates.RemoveAll(message => keys.Contains(
                         (message.AccountId, message.FolderName, message.MessageId)));
@@ -5014,7 +5067,7 @@ public partial class MainWindow : Window
                 }
                 PerformanceLogService.Record("Rules: filter all like this/rule",
                     Stopwatch.GetElapsedTime(ruleStarted),
-                    perf + $"; index={index + 1}; rule={rule.Name}; matched={result.MatchedCount}");
+                    perf + $"; index={index + 1}; rule={rule.Name}; matched={ruleMatched}; failures={failures.Count}");
             }
 
             if (removed.Count > 0)
@@ -5024,7 +5077,27 @@ public partial class MainWindow : Window
             RestoreMessageListContinuation(continuation);
             if (latestMoveRule != null)
                 _vm.ShowLatestFilteredDestination(latestMoveRule, latestMovedMessage);
-            Report($"Applied {applicable.Count:N0} matching filter{(applicable.Count == 1 ? "" : "s")} to {folder.DisplayName}: {totalMatches:N0} match{(totalMatches == 1 ? "" : "es")}.");
+            var outcome = $"Applied {applicable.Count:N0} matching filter{(applicable.Count == 1 ? "" : "s")} " +
+                          $"to {folder.DisplayName}: {totalMatches:N0} match{(totalMatches == 1 ? "" : "es")}.";
+            if (failures.Count == 0)
+            {
+                Report(outcome);
+            }
+            else
+            {
+                Report($"{outcome} {failures.Count:N0} source{(failures.Count == 1 ? "" : "s")} failed.");
+                var details = string.Join(Environment.NewLine, failures.Distinct());
+                var reconnectHint = failures.Any(failure =>
+                    failure.Contains("invalid_grant", StringComparison.OrdinalIgnoreCase))
+                    ? Environment.NewLine + Environment.NewLine +
+                      "Google authorization has expired or was revoked. Open File > Manage Accounts, " +
+                      "edit the affected account and link it again."
+                    : string.Empty;
+                MessageBox.Show(this,
+                    $"{outcome}\n\nSome account folders could not be processed:\n{details}{reconnectHint}",
+                    "Filter All Like This completed with errors",
+                    MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
         }
         catch (Exception ex)
         {
@@ -5037,16 +5110,21 @@ public partial class MainWindow : Window
                 Stopwatch.GetElapsedTime(started), perf);
             _vm.IsBusy = false;
             _vm.IsStatusHighlighted = false;
+            if (createRuleInstead && newRuleSource != null)
+                OpenRulesManager(CreateRuleTemplateFromMessage(newRuleSource));
         }
     }
 
     private async Task ApplyRulesToSelectedMessagesAsync()
     {
         var selected = MessageList.SelectedItems.OfType<MailMessageSummary>().ToList();
+        if (selected.Count == 0) return;
         var continuation = CaptureMessageListContinuation(selected);
         var matched = 0;
         var removed = new List<MailMessageSummary>();
         MailRule? destinationRule = null;
+        var createRuleInstead = false;
+        MailMessageSummary? newRuleSource = null;
         _vm.IsBusy = true;
         _vm.IsStatusHighlighted = true;
         _vm.StatusText = $"Filtering {selected.Count:N0} selected messages…";
@@ -5057,9 +5135,17 @@ public partial class MainWindow : Window
             {
                 await _vm.EnsureSenderAddressAsync(sample);
                 var body = await LoadCompleteBodyForRuleMatchAsync(sample);
-                destinationRule = _ruleService.LoadRules().FirstOrDefault(rule =>
-                    rule.IsEnabled && rule.Action == RuleAction.MoveToFolder &&
-                    _ruleService.IsMatch(rule, sample, body));
+                var compatible = _ruleService.LoadRules().Where(rule =>
+                    rule.IsEnabled && _ruleService.IsMatch(rule, sample, body)).ToList();
+                if (compatible.Count == 0)
+                {
+                    createRuleInstead = true;
+                    newRuleSource = sample;
+                    _vm.StatusText = "No compatible filter was found. Creating a new filter…";
+                    return;
+                }
+                destinationRule = compatible.FirstOrDefault(rule =>
+                    rule.Action == RuleAction.MoveToFolder);
             }
             foreach (var accountGroup in selected.GroupBy(m => m.AccountId))
             {
@@ -5097,7 +5183,13 @@ public partial class MainWindow : Window
             _vm.StatusText = $"Filtering failed: {ex.Message}";
             AccessibilityHelper.Announce(this, _vm.StatusText, category: AnnouncementCategory.Result);
         }
-        finally { _vm.IsBusy = false; }
+        finally
+        {
+            _vm.IsBusy = false;
+            _vm.IsStatusHighlighted = false;
+            if (createRuleInstead && newRuleSource != null)
+                OpenRulesManager(CreateRuleTemplateFromMessage(newRuleSource));
+        }
     }
 
     private sealed record MessageListContinuationContext(
@@ -8250,7 +8342,7 @@ public partial class MainWindow : Window
                 {
                     _vm.IsSearchActive = true;
                     SearchBox.Text = $"F:@{analysis.SelectedDomain}";
-                    ExecuteSearch();
+                    await ExecuteSearchAsync();
                 }
             }
         }

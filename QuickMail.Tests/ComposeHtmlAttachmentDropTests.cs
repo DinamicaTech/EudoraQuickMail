@@ -11,8 +11,13 @@ public class ComposeHtmlAttachmentDropTests
             RepoRoot(), "QuickMail", "Assets", "HugeRte", "editor.html"));
 
         Assert.Contains("block_unsupported_drop: false", source, StringComparison.Ordinal);
+        Assert.Contains("paste_block_drop: false", source, StringComparison.Ordinal);
         Assert.Contains("type: 'attachment-drop'", source, StringComparison.Ordinal);
-        Assert.Contains("addEventListener('drop', handleAttachmentDrop)", source, StringComparison.Ordinal);
+        Assert.Contains("getDoc().addEventListener('drop', handleAttachmentDrop, true)", source,
+            StringComparison.Ordinal);
+        Assert.Contains("event.stopImmediatePropagation()", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("getBody().addEventListener('drop', handleAttachmentDrop)", source,
+            StringComparison.Ordinal);
     }
 
     private static string RepoRoot()

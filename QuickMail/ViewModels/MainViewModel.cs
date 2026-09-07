@@ -33,6 +33,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private readonly IOAuthService _oauthService;
     private readonly ISyncService _syncService;
     private readonly IContactSyncService? _contactSync;
+    private readonly IImapBodyBackfillService? _imapBodyBackfill;
     private readonly IConfigService _configService;
     private readonly IViewService _viewService;
     /// <summary>Per-folder presentation memory (#520). Null in tests that do not exercise it.</summary>
@@ -158,6 +159,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
         DrainCts(ref _prefetchCts);
         DrainCts(ref _bgSyncCts);
         DrainCts(ref _localSearchCts);
+        if (_imapBodyBackfill != null)
+            _imapBodyBackfill.ProgressChanged -= OnImapBodyBackfillProgress;
         foreach (var cts in _folderCountCts.Values)
         {
             try { cts.Cancel(); } catch { /* best effort at shutdown */ }
@@ -1288,18 +1291,38 @@ public partial class MainViewModel : ObservableObject, IDisposable
         : $"{LocalPageOffset + 1:N0}–{Math.Min(LocalPageOffset + LocalMailConstants.MaxRenderedMessages, LocalTotalMessages):N0} of {LocalTotalMessages:N0}";
     private CancellationTokenSource? _localSearchCts;
     private IReadOnlyList<AdvancedSearchCriterion>? _advancedSearchCriteria;
+    private bool _searchEverywhere;
+    private bool _suppressSearchTextExecution;
 
     /// <summary>Raised when the search box should receive focus (View concern).</summary>
     public event EventHandler? SearchRequested;
 
     partial void OnSearchTextChanged(string value)
     {
-        if (_suppressFilterRebuild) return;
+        if (_suppressFilterRebuild || _suppressSearchTextExecution) return;
+        _searchEverywhere = false;
         _advancedSearchCriteria = null;
         LocalPageOffset = 0;
         if (Accounts.Any(a => a.BackendKind is BackendKind.Pop3Smtp or BackendKind.LocalArchive)
             && _localStore is ILocalMailboxStore)
             _ = ApplyLocalSearchAsync(value);
+        else
+            ApplyFiltersAndSearch();
+    }
+
+    /// <summary>Runs the current quick search either in the selected folder or over every active
+    /// account. Draft and Scheduled remain excluded from the global materialized-mail scope.</summary>
+    public async Task RunQuickSearchAsync(string value, bool everywhere)
+    {
+        _suppressSearchTextExecution = true;
+        try { SearchText = value ?? string.Empty; }
+        finally { _suppressSearchTextExecution = false; }
+        _searchEverywhere = everywhere;
+        _advancedSearchCriteria = null;
+        LocalPageOffset = 0;
+        IsSearchActive = true;
+        if (_localStore is ILocalMailboxStore)
+            await ApplyLocalSearchAsync(SearchText);
         else
             ApplyFiltersAndSearch();
     }
@@ -1322,25 +1345,32 @@ public partial class MainViewModel : ObservableObject, IDisposable
             IsBusy = true;
             StatusText = "Searching messages…";
             var sort = LocalSortFor(ActiveSort);
-            Guid? accountScope = SelectedFolder switch
+            Guid? accountScope = _searchEverywhere ? null : SelectedFolder switch
             {
                 { AccountId: var aid } scopedFolder when aid != Guid.Empty && !IsVirtualFolder(scopedFolder) => aid,
                 null when SelectedAccount?.BackendKind is BackendKind.Pop3Smtp or BackendKind.LocalArchive
                     => SelectedAccount.Id,
                 _ => null,
             };
-            var realFolder = SelectedFolder is { IsHeader: false } selected && !IsVirtualFolder(selected)
+            var realFolder = !_searchEverywhere && SelectedFolder is { IsHeader: false } selected && !IsVirtualFolder(selected)
                 ? selected.FullName : null;
-            var rootAccountIds = RootAccountIdsFor(SelectedFolder);
-            var folderScopes = SearchFolderScopesFor(SelectedFolder);
-            var excludedFolderScopes = RootExcludedFolderScopesFor(SelectedFolder);
+            var rootAccountIds = _searchEverywhere
+                ? Accounts.Where(a => a.IsActive && !a.IsShared).Select(a => a.Id).Distinct().ToArray()
+                : RootAccountIdsFor(SelectedFolder);
+            var folderScopes = _searchEverywhere ? null : SearchFolderScopesFor(SelectedFolder);
+            var excludedFolderScopes = _searchEverywhere
+                ? EverywhereExcludedFolderScopes()
+                : RootExcludedFolderScopesFor(SelectedFolder);
             var query = new LocalSearchQuery(value, accountScope, realFolder,
                 LocalMailConstants.MaxRenderedMessages, LocalPageOffset, sort,
-                SelectedFolder?.IsContainer == true, rootAccountIds, folderScopes, excludedFolderScopes);
+                !_searchEverywhere && SelectedFolder?.IsContainer == true, rootAccountIds, folderScopes, excludedFolderScopes);
             var found = await ((ILocalMailboxStore)_localStore).SearchLocalMessagesAsync(query, cts.Token);
             if (cts.IsCancellationRequested) return;
-            await ResolveFlagNamesAsync(found.Messages);
-            IEnumerable<MailMessageSummary> visible = found.Messages;
+            var aggregateScope = rootAccountIds != null || folderScopes != null;
+            var logicalMessages = CollapseAggregateSearchPage(found, aggregateScope,
+                query.Offset, query.Limit, out var logicalTotal);
+            await ResolveFlagNamesAsync(logicalMessages);
+            IEnumerable<MailMessageSummary> visible = logicalMessages;
             if (ActiveFilter != MessageFilter.All) visible = visible.Where(MatchesFilter);
             visible = ActiveSort switch
             {
@@ -1361,10 +1391,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
             };
             Messages = new BatchObservableCollection<MailMessageSummary>(visible);
             var shown = Messages.Count;
-            LocalTotalMessages = found.TotalMatches;
-            StatusText = found.TotalMatches > shown
-                ? $"Showing {shown:N0} of {found.TotalMatches:N0} matches"
-                : $"{found.TotalMatches:N0} matches";
+            LocalTotalMessages = logicalTotal;
+            StatusText = logicalTotal > shown
+                ? $"Showing {shown:N0} of {logicalTotal:N0} matches"
+                : $"{logicalTotal:N0} matches";
             SearchAnnouncement = StatusText;
         }
         catch (OperationCanceledException) { }
@@ -1387,17 +1417,42 @@ public partial class MainViewModel : ObservableObject, IDisposable
             && aid != Guid.Empty && !IsVirtualFolder(folder) ? aid : null;
         var folderScope = SelectedFolder is { IsHeader: false } selected && !IsVirtualFolder(selected)
             ? selected.FullName : null;
+        var rootAccountIds = RootAccountIdsFor(SelectedFolder);
+        var folderScopes = SearchFolderScopesFor(SelectedFolder);
         var found = await store.SearchLocalMessagesAdvancedAsync(new AdvancedSearchQuery(
             criteria, accountScope, folderScope, LocalMailConstants.MaxRenderedMessages, 0,
             LocalSortFor(ActiveSort), SelectedFolder?.IsContainer == true,
-            RootAccountIdsFor(SelectedFolder), SearchFolderScopesFor(SelectedFolder),
+            rootAccountIds, folderScopes,
             RootExcludedFolderScopesFor(SelectedFolder)));
-        Messages = new BatchObservableCollection<MailMessageSummary>(found.Messages);
+        var logicalMessages = CollapseAggregateSearchPage(found,
+            rootAccountIds != null || folderScopes != null, 0, LocalMailConstants.MaxRenderedMessages,
+            out var logicalTotal);
+        Messages = new BatchObservableCollection<MailMessageSummary>(logicalMessages);
         _advancedSearchCriteria = criteria.ToList();
         LocalPageOffset = 0;
-        LocalTotalMessages = found.TotalMatches;
+        LocalTotalMessages = logicalTotal;
         IsSearchActive = true;
-        StatusText = $"Advanced search: showing {Messages.Count:N0} of {found.TotalMatches:N0} matches";
+        StatusText = $"Advanced search: showing {Messages.Count:N0} of {logicalTotal:N0} matches";
+    }
+
+    private IReadOnlyList<MailMessageSummary> CollapseAggregateSearchPage(
+        LocalSearchResult result, bool aggregateScope, int offset, int limit, out long logicalTotal)
+    {
+        if (!aggregateScope)
+        {
+            logicalTotal = result.TotalMatches;
+            return result.Messages;
+        }
+
+        var collapsed = MessageDeduplicator.CollapseForAggregate(result.Messages, ResolveFolderKind);
+        // SQLite counts physical per-folder copies. If the complete physical result fits in this
+        // page, the collapsed count is also the exact logical total. For a truncated result set we
+        // retain the physical total rather than claiming an inaccurate unique count; duplicates in
+        // the visible page are still removed.
+        logicalTotal = offset == 0 && result.TotalMatches <= limit
+            ? collapsed.Count
+            : result.TotalMatches;
+        return collapsed;
     }
 
     [RelayCommand(CanExecute = nameof(CanLoadPreviousLocalPage))]
@@ -1491,7 +1546,16 @@ public partial class MainViewModel : ObservableObject, IDisposable
         var live = Accounts
             .Where(a => (a.FolderTreeRootId ?? a.Id) == rootId)
             .Select(a => a.Id);
-        return persisted.Concat(live).Distinct().ToArray();
+        // A remote account may already project one or more physical folders into this canonical
+        // tree even when an older accounts.json forgot FolderTreeRootId. Those bindings are durable
+        // evidence of membership and must participate in a root search; otherwise moved IMAP mail
+        // is present in SQLite but appears to vanish from the root view.
+        var bound = _canonicalFolders.Values
+            .Where(candidate => candidate.RootId == rootId)
+            .SelectMany(candidate => candidate.Bindings)
+            .Select(binding => binding.AccountId)
+            .Where(id => Accounts.Any(account => account.Id == id && account.IsActive));
+        return persisted.Concat(live).Concat(bound).Distinct().ToArray();
     }
 
     private IReadOnlyCollection<LocalFolderScope>? SearchFolderScopesFor(MailFolderModel? folder)
@@ -1523,6 +1587,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
             .Distinct()
             .ToArray();
     }
+
+    private IReadOnlyCollection<LocalFolderScope> EverywhereExcludedFolderScopes() =>
+        _cachedFolders.SelectMany(pair => pair.Value
+            .Where(folder => folder.Kind is SpecialFolderKind.Drafts or SpecialFolderKind.Scheduled)
+            .Select(folder => new LocalFolderScope(pair.Key, folder.FullName)))
+            .Distinct().ToArray();
 
     /// <summary>Returns the most frequent sender domains in the currently selected folder scope.</summary>
     public async Task<IReadOnlyList<FolderDomainSummary>> AnalyzeSelectedFolderDomainsAsync(
@@ -2193,7 +2263,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
         IScreenshotCaptureService? screenshotCapture = null,
         IRowLayoutService? rowLayoutService = null,
         IWatchService? watchService = null,
-        IFolderViewStateService? folderViewState = null)
+        IFolderViewStateService? folderViewState = null,
+        IImapBodyBackfillService? imapBodyBackfill = null)
     {
         _folderViewState = folderViewState;
         _watchService = watchService;
@@ -2221,6 +2292,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _themeService         = themeService;
         _notifications        = notificationService;
         _contactSync          = contactSyncService;
+        _imapBodyBackfill     = imapBodyBackfill;
         _graphCalendarSync    = graphCalendarSyncService;
         OnlineMode            = onlineMode;
 
@@ -2268,6 +2340,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _syncService.MessagesRemoved += OnMessagesRemoved;
         _syncService.FolderReadStatesReconciled += OnFolderReadStatesReconciled;
         _syncService.RulesApplied    += OnRulesApplied;
+        if (_imapBodyBackfill != null)
+            _imapBodyBackfill.ProgressChanged += OnImapBodyBackfillProgress;
         if (_changeNotifier != null)
         {
             _changeNotifier.InboxNewMailDetected += OnInboxNewMailDetected;
@@ -3639,6 +3713,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             {
                 await FetchAllMailAsync();
                 StartGraphCalendarSyncTimer(); // this path skips the full sync below but still counts as "startup done"
+                StartImapBodyBackfill();
                 return;
             }
         }
@@ -3725,8 +3800,30 @@ public partial class MainViewModel : ObservableObject, IDisposable
             // are warm, so acquisition is silent), then every 15 minutes. In the finally so a sync
             // error or cancellation doesn't leave the calendar permanently unsynced.
             StartGraphCalendarSyncTimer();
+            StartImapBodyBackfill();
         }
     }
+
+    private void StartImapBodyBackfill()
+    {
+        if (_imapBodyBackfill == null || OnlineMode ||
+            _bgSyncCts is not { IsCancellationRequested: false } lifetime) return;
+        var accounts = Accounts.Where(a => a.IsActive && a.BackendKind == BackendKind.ImapSmtp
+                                           && _connectedAccountIds.Contains(a.Id)).ToArray();
+        if (accounts.Length == 0) return;
+        _imapBodyBackfill.RunAsync(accounts, lifetime.Token).LogFaults("IMAP body index background worker");
+    }
+
+    private void OnImapBodyBackfillProgress(ImapBodyBackfillProgress progress) => _ui.Post(() =>
+    {
+        if (Volatile.Read(ref _disposeState) != 0) return;
+        IsStatusHighlighted = progress.Total > 0 && progress.Completed < progress.Total;
+        StatusText = progress.Completed < progress.Total
+            ? $"Indexing IMAP message bodies: {progress.Completed:N0}/{progress.Total:N0}"
+            : progress.Errors == 0
+                ? $"IMAP body indexing complete: {progress.Total:N0} messages."
+                : $"IMAP body indexing complete: {progress.Total - progress.Errors:N0} indexed, {progress.Errors:N0} pending retry.";
+    });
 
     // Tracks the connected-account set the watchers were last started for, so WireUpWatchers only
     // restarts them when the set actually changes (StartWatchers is a full stop-and-restart). Extracted
@@ -4036,6 +4133,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
         // (in StartBackgroundSyncAsync) rather than folder-by-folder, so that
         // screen readers don't re-announce the focused message on every insert.
         if (_suppressFolderSyncUpdates) return;
+
+        if (incoming.Any(m => Accounts.Any(a => a.Id == m.AccountId && a.BackendKind == BackendKind.ImapSmtp)))
+            StartImapBodyBackfill();
 
         // Update sync time whenever any folder syncs (targeted IDLE syncs, manual refreshes, etc.)
         LastSyncText = DateTime.Now.ToString("T", CultureInfo.CurrentCulture);
@@ -6046,7 +6146,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 // The calendar harvest reads calendar_ics from this row; if the store
                 // hasn't completed, the event won't be harvestable and opening it from
                 // the calendar list will fail with "message not found".
-                await _localStore.UpsertDetailAsync(detail);
+                if (!detail.BodyFetchFailed)
+                    await _localStore.UpsertDetailAsync(detail);
             }
 
             if (loadVersion != _messageLoadVersion || SelectedMessage != summary)
@@ -6198,7 +6299,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
             var detail = await _imap.PrefetchMessageDetailAsync(
                 summary.AccountId, summary.FolderName, summary.MessageId, ct);
-            if (ct.IsCancellationRequested) return;
+            if (ct.IsCancellationRequested || detail.BodyFetchFailed) return;
             await _localStore.UpsertDetailAsync(detail);
             LogService.Debug($"Prefetched msgId={summary.MessageId} folder={summary.FolderName}");
         }
@@ -10874,6 +10975,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private async Task ClearSearchAsync()
     {
+        _searchEverywhere = false;
         _advancedSearchCriteria = null;
         ActiveFilter = MessageFilter.All;
         SetActiveFlagFilterId(null);

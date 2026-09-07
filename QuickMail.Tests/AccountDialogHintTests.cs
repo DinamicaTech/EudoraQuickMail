@@ -373,4 +373,21 @@ public class AccountDialogHintTests
         Assert.True(offenders.Count == 0,
             "AutomationProperties.Name must be a short label, not a sentence: " + string.Join(" | ", offenders));
     }
+
+    [Theory]
+    [InlineData("AddAccountDialog.xaml")]
+    [InlineData("AccountManagerDialog.xaml")]
+    public void CheckIncomingMail_IsAvailableToBothImapAndPop3Accounts(string fileName)
+    {
+        var xaml = ReadView(fileName);
+        var checkbox = System.Text.RegularExpressions.Regex.Match(xaml,
+            @"<CheckBox\s+Content=""Check incoming email""[\s\S]*?/>",
+            System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+        Assert.True(checkbox.Success, $"{fileName} has no Check incoming email checkbox.");
+        Assert.Contains("IsChecked=\"{Binding CheckIncomingMail}\"", checkbox.Value,
+            StringComparison.Ordinal);
+        Assert.Contains("Visibility=\"{Binding CanCheckIncomingMail", checkbox.Value,
+            StringComparison.Ordinal);
+    }
 }

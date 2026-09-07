@@ -612,6 +612,74 @@ public partial class App : Application
 
             var viewService = new ViewService(profile);
 
+            // Imported Eudora names can contain invisible leading/trailing spaces. Normalize the
+            // canonical/local projection once (subsequent starts are a cheap no-op) before the tree
+            // or saved references are loaded. Remote server aliases are not renamed by this pass.
+            if (!onlineMode && !probeMode)
+            {
+                splash?.SetStatus("Normalizing folder names…");
+                try
+                {
+                    var localAccountIds = accounts
+                        .Where(account => account.BackendKind is BackendKind.Pop3Smtp or BackendKind.LocalArchive)
+                        .Select(account => account.Id)
+                        .ToHashSet();
+                    var folderMoves = localStore
+                        .NormalizeCanonicalFolderWhitespaceAsync(localAccountIds)
+                        .GetAwaiter().GetResult();
+                    if (folderMoves.Count > 0)
+                    {
+                        var rewrittenRules = ruleService.RewriteFolderTargets(folderMoves);
+                        var configChanged = false;
+                        if (Guid.TryParse(startupCfg.StartupFolderAccount, out var startupAccount) &&
+                            localAccountIds.Contains(startupAccount))
+                        {
+                            var rewritten = FolderReferenceRewriter.Rewrite(startupCfg.StartupFolder, folderMoves);
+                            if (!string.Equals(rewritten, startupCfg.StartupFolder, StringComparison.Ordinal))
+                            {
+                                startupCfg.StartupFolder = rewritten;
+                                configChanged = true;
+                            }
+                        }
+                        foreach (var (accountId, accountConfig) in startupCfg.Accounts)
+                        {
+                            if (!localAccountIds.Contains(accountId)) continue;
+                            var move = FolderReferenceRewriter.Rewrite(accountConfig.LastMoveFolder, folderMoves);
+                            var copy = FolderReferenceRewriter.Rewrite(accountConfig.LastCopyFolder, folderMoves);
+                            if (!string.Equals(move, accountConfig.LastMoveFolder, StringComparison.Ordinal) ||
+                                !string.Equals(copy, accountConfig.LastCopyFolder, StringComparison.Ordinal))
+                            {
+                                accountConfig.LastMoveFolder = move;
+                                accountConfig.LastCopyFolder = copy;
+                                configChanged = true;
+                            }
+                        }
+                        if (configChanged) configService.Save(startupCfg);
+
+                        var views = viewService.Load();
+                        var rewrittenViews = 0;
+                        foreach (var folder in views.SelectMany(view => view.Folders)
+                                     .Where(folder => localAccountIds.Contains(folder.AccountId)))
+                        {
+                            var rewritten = FolderReferenceRewriter.Rewrite(folder.FolderFullName, folderMoves);
+                            if (string.Equals(rewritten, folder.FolderFullName, StringComparison.Ordinal)) continue;
+                            folder.FolderFullName = rewritten;
+                            folder.FolderDisplayName = rewritten.Split('/')[^1];
+                            rewrittenViews++;
+                        }
+                        if (rewrittenViews > 0) viewService.Save(views);
+                        LogService.Log($"Folder whitespace startup repair: {folderMoves.Count:N0} folder(s), " +
+                            $"{rewrittenRules:N0} rule(s), {rewrittenViews:N0} saved-view reference(s).");
+                    }
+                }
+                catch (Exception folderRepairEx)
+                {
+                    // A cleanup problem must not create a startup crash-loop. Each folder operation
+                    // is transactional and the next launch can safely retry the remaining names.
+                    LogService.Log("Folder whitespace startup repair failed; will retry next launch.", folderRepairEx);
+                }
+            }
+
             // One-time: convert an old "default view (applied on startup)" into the startup folder
             // setting that replaced it (#516). No-ops once a startup folder is configured, and
             // rewrites views.json so the retired IsDefault flag cannot come back.
@@ -640,6 +708,7 @@ public partial class App : Application
             var graphCalendarSync = new GraphCalendarSyncService(accountService, localStore, graphBackend.Client,
                                                                  _googleCalendarClient,
                                                                  _calDavCalendarClient, credentialService);
+            var imapBodyBackfill = new ImapBodyBackfillService(effectiveMail, localStore);
 
             _updateCheckService = new UpdateCheckService(configService, ParseUpdateFeed(e.Args));
             _bugReportService   = new BugReportService(credentialService);
@@ -666,7 +735,8 @@ public partial class App : Application
                 truthProbe: probeMode ? null : _truthProbe,
                 rowLayoutService: rowLayoutService,
                 watchService: watchService,
-                folderViewState: folderViewState);
+                folderViewState: folderViewState,
+                imapBodyBackfill: probeMode ? null : imapBodyBackfill);
             mainVm.RegisterAccountBackend = a => { if (!probeMode) mailRouter.RegisterAccount(a.Id, BackendFor(a)); };
             mainVm.ImmutableIdRebuildAnnouncePending = immutableIdRebuilt;   // #366 one-time re-sync notice
             // Registers/unregisters the Help command and shows or hides the menu item, and sets

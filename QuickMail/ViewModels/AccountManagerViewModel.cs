@@ -42,6 +42,7 @@ public partial class AccountManagerViewModel : AccountEditorViewModel
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsEditing))]
+    [NotifyPropertyChangedFor(nameof(CanDuplicateAccount))]
     [NotifyPropertyChangedFor(nameof(CanSyncContacts))]
     [NotifyPropertyChangedFor(nameof(CanSyncCalendar))]
     [NotifyPropertyChangedFor(nameof(ShowTestConnection))]
@@ -52,6 +53,7 @@ public partial class AccountManagerViewModel : AccountEditorViewModel
     private AccountModel? _selectedAccount;
 
     public bool IsEditing => SelectedAccount != null;
+    public bool CanDuplicateAccount => SelectedAccount is { IsShared: false };
 
     /// <summary>
     /// True when the selected account is a shared mailbox (#31). A shared mailbox has no credentials
@@ -410,6 +412,42 @@ public partial class AccountManagerViewModel : AccountEditorViewModel
             : _credentials.GetPassword(account.Id);
         vm.SeedFrom(account, password);
         return vm;
+    }
+
+    public AddAccountViewModel? CreateDuplicateAccountViewModel()
+    {
+        if (SelectedAccount is not { IsShared: false } account) return null;
+        var vm = CreateAddAccountViewModel();
+        vm.SeedDuplicateFrom(account);
+        return vm;
+    }
+
+    public void CommitDuplicatedAccount(AccountModel duplicate, string password)
+    {
+        if (SelectedAccount is not { IsShared: false } source) return;
+
+        // ToAccountModel already creates a fresh id and omits every credential payload. Assign a
+        // fresh id explicitly as a hard invariant in case that factory ever starts accepting one.
+        duplicate.Id = Guid.NewGuid();
+        duplicate.IsDefault = false;
+        duplicate.IsShared = false;
+        duplicate.ParentAccountId = null;
+        duplicate.SharedAddress = null;
+
+        // These are account configuration rather than login identity and are not represented by
+        // AddAccountDialog, so preserve them here. A Google calendar identity/token is deliberately
+        // not copied: it belongs to the old user and must be linked separately for the new account.
+        // A null root means that the source owns its visible tree. The duplicate must join that
+        // same tree rather than silently creating a second root of its own.
+        duplicate.FolderTreeRootId = source.FolderTreeRootId ?? source.Id;
+        duplicate.FolderTreeRootName = source.FolderTreeRootName;
+        duplicate.ArchiveFolderFullName = source.ArchiveFolderFullName;
+        duplicate.TenantId = source.TenantId;
+        duplicate.CalendarProvider = null;
+        duplicate.CalendarIdentity = null;
+
+        CommitNewAccount(duplicate, password);
+        StatusText = "Account duplicated.";
     }
 
     public void CommitEditedAccount(AccountModel edited, string password)

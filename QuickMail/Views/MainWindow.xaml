@@ -1303,6 +1303,10 @@
                             <Button DockPanel.Dock="Right" Content="Search" Margin="6,0,0,0"
                                     Click="SearchButton_Click" IsDefault="True"
                                     AutomationProperties.Name="Execute message search"/>
+                            <Button DockPanel.Dock="Right" Content="Search Everywhere" Margin="6,0,0,0"
+                                    Click="SearchEverywhereButton_Click"
+                                    AutomationProperties.Name="Search all mail folders"
+                                    ToolTip="Run this search across all materialized mail, regardless of the selected folder"/>
                             <Button DockPanel.Dock="Right" Content="Advanced Search" Margin="6,0,0,0"
                                     Click="AdvancedSearchButton_Click"
                                     AutomationProperties.Name="Open advanced message search"/>

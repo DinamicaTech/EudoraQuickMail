@@ -297,6 +297,32 @@ public class RuleServiceTests
         Assert.Single(result);
     }
 
+    [Fact]
+    public void RewriteFolderTargets_UpdatesExactAndDescendantReferences()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
+        try
+        {
+            var service = CreateService(dir);
+            service.SaveRules(
+            [
+                new MailRule { Name = "Exact", TargetFolder = "Personal/Arnau " },
+                new MailRule { Name = "Child", TargetFolder = "Personal/Arnau /School" },
+                new MailRule { Name = "Other", TargetFolder = "Personal/Arnau2" },
+            ]);
+
+            var changed = service.RewriteFolderTargets(
+            [new CanonicalFolderMoveResult("Personal/Arnau ", "Personal/Arnau", false)]);
+
+            Assert.Equal(2, changed);
+            var rules = service.LoadRules();
+            Assert.Equal("Personal/Arnau", rules.Single(rule => rule.Name == "Exact").TargetFolder);
+            Assert.Equal("Personal/Arnau/School", rules.Single(rule => rule.Name == "Child").TargetFolder);
+            Assert.Equal("Personal/Arnau2", rules.Single(rule => rule.Name == "Other").TargetFolder);
+        }
+        finally { if (Directory.Exists(dir)) Directory.Delete(dir, true); }
+    }
+
     [Theory]
     [InlineData("CC")]
     [InlineData("BCC")]
@@ -432,7 +458,7 @@ public class RuleServiceTests
     public void TestRule_BodyContains_NullPreview_NoMatch()
     {
         var svc = CreateService(Path.GetTempPath());
-        var rule = new MailRule { BodyContains = "text" };
+        var rule = new MailRule { UseBodyCondition = true, BodyContains = "text" };
         var msg = MakeMsg(preview: null!);
 
         var result = svc.TestRule(rule, new[] { msg });
@@ -591,8 +617,8 @@ public class RuleServiceTests
             var svc = CreateService(dir);
             svc.SaveRules(new List<MailRule>
             {
-                new() { Name = "Rule 1", FromContains = "alice", Action = RuleAction.MarkAsRead },
-                new() { Name = "Rule 2", SubjectContains = "news", Action = RuleAction.MarkAsRead },
+                new() { Name = "Rule 1", UseFromCondition = true, FromContains = "alice", Action = RuleAction.MarkAsRead },
+                new() { Name = "Rule 2", UseSubjectCondition = true, SubjectContains = "news", Action = RuleAction.MarkAsRead },
             });
 
             var accountId = Guid.NewGuid();

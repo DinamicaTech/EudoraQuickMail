@@ -1031,4 +1031,195 @@ public partial class LocalStoreService
         if (result is not null && Convert.ToInt64(result) != 0)
             throw new InvalidOperationException("A container folder cannot contain messages.");
     }
+
+    // ── Persistent IMAP body-index queue ──────────────────────────────────────
+
+    public async Task<long> CountPendingImapBodiesAsync(IReadOnlyCollection<Guid> accountIds,
+        DateTimeOffset retryErrorsBefore, CancellationToken ct = default)
+    {
+        if (accountIds.Count == 0) return 0;
+        await using var conn = await OpenAsync();
+        await using var command = conn.CreateCommand();
+        var accountSql = AddGuidList(command, "$ba", accountIds);
+        command.CommandText = $"""
+            SELECT COUNT(*) FROM (
+                SELECT s.account_id,
+                       CASE WHEN trim(s.internet_message_id, ' <>') <> ''
+                            THEN lower(trim(s.internet_message_id, ' <>'))
+                            ELSE s.folder_name || char(31) || s.unique_id END AS logical_id
+                  FROM MessageSummary s
+                  LEFT JOIN MessageDetail d USING(unique_id,account_id,folder_name)
+                  LEFT JOIN ImapBodyCacheState q USING(unique_id,account_id,folder_name)
+                 WHERE s.account_id IN ({accountSql})
+                   AND (d.unique_id IS NULL OR (d.plain_body='' AND d.html_body=''))
+                   AND COALESCE(q.status,0) NOT IN (1,2)
+                   AND (COALESCE(q.status,0)<>3 OR q.updated_ticks <= $retry)
+                 GROUP BY s.account_id,logical_id
+            );
+            """;
+        command.Parameters.AddWithValue("$retry", retryErrorsBefore.UtcTicks);
+        return Convert.ToInt64(await command.ExecuteScalarAsync(ct));
+    }
+
+    public async Task<IReadOnlyList<ImapBodyDownloadCandidate>> LoadPendingImapBodiesAsync(
+        IReadOnlyCollection<Guid> accountIds, int limit, DateTimeOffset retryErrorsBefore,
+        CancellationToken ct = default)
+    {
+        if (accountIds.Count == 0 || limit <= 0) return [];
+        await using var conn = await OpenAsync();
+        await using var command = conn.CreateCommand();
+        var accountSql = AddGuidList(command, "$bl", accountIds);
+        command.CommandText = $"""
+            WITH candidates AS (
+                SELECT s.account_id,s.folder_name,s.unique_id,s.internet_message_id,s.date_ticks,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY s.account_id,
+                               CASE WHEN trim(s.internet_message_id, ' <>') <> ''
+                                    THEN lower(trim(s.internet_message_id, ' <>'))
+                                    ELSE s.folder_name || char(31) || s.unique_id END
+                           ORDER BY CASE WHEN lower(s.folder_name) IN ('in','inbox') THEN 0 ELSE 1 END,
+                                    s.date_ticks DESC) AS rn
+                  FROM MessageSummary s
+                  LEFT JOIN MessageDetail d USING(unique_id,account_id,folder_name)
+                  LEFT JOIN ImapBodyCacheState q USING(unique_id,account_id,folder_name)
+                 WHERE s.account_id IN ({accountSql})
+                   AND (d.unique_id IS NULL OR (d.plain_body='' AND d.html_body=''))
+                   AND COALESCE(q.status,0) NOT IN (1,2)
+                   AND (COALESCE(q.status,0)<>3 OR q.updated_ticks <= $retry)
+            )
+            SELECT account_id,folder_name,unique_id,internet_message_id
+              FROM candidates WHERE rn=1
+             ORDER BY date_ticks DESC LIMIT $limit;
+            """;
+        command.Parameters.AddWithValue("$retry", retryErrorsBefore.UtcTicks);
+        command.Parameters.AddWithValue("$limit", limit);
+        var result = new List<ImapBodyDownloadCandidate>();
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+            result.Add(new ImapBodyDownloadCandidate(Guid.Parse(reader.GetString(0)), reader.GetString(1),
+                reader.GetString(2), reader.IsDBNull(3) ? string.Empty : reader.GetString(3)));
+        return result;
+    }
+
+    public async Task<MailMessageDetail?> LoadCachedImapBodyByInternetMessageIdAsync(Guid accountId,
+        string internetMessageId, CancellationToken ct = default)
+    {
+        var normalized = NormalizeInternetMessageId(internetMessageId);
+        if (normalized.Length == 0) return null;
+        await using var conn = await OpenAsync();
+        await using var command = conn.CreateCommand();
+        command.CommandText = """
+            SELECT s.folder_name,s.unique_id
+              FROM MessageSummary s
+              JOIN MessageDetail d USING(unique_id,account_id,folder_name)
+              LEFT JOIN ImapBodyCacheState q USING(unique_id,account_id,folder_name)
+             WHERE s.account_id=$aid
+               AND lower(trim(s.internet_message_id, ' <>'))=$imid
+               AND ((d.plain_body<>'' OR d.html_body<>'') OR q.status=2)
+             LIMIT 1;
+            """;
+        command.Parameters.AddWithValue("$aid", accountId.ToString());
+        command.Parameters.AddWithValue("$imid", normalized);
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        if (!await reader.ReadAsync(ct)) return null;
+        var folder = reader.GetString(0);
+        var uid = reader.GetString(1);
+        await reader.DisposeAsync();
+        return await LoadDetailAsync(accountId, folder, uid);
+    }
+
+    public Task MarkImapBodyDownloadStartedAsync(ImapBodyDownloadCandidate candidate,
+        CancellationToken ct = default) => SetImapBodyStateAsync(candidate, ImapBodyCacheStatus.Pending, string.Empty, ct);
+
+    public Task MarkImapBodyDownloadErrorAsync(ImapBodyDownloadCandidate candidate, string failureMessage,
+        CancellationToken ct = default) => SetImapBodyStateAsync(candidate, ImapBodyCacheStatus.Error, failureMessage, ct);
+
+    public async Task<int> SaveImapBodyAndCopiesAsync(ImapBodyDownloadCandidate candidate,
+        MailMessageDetail detail, ImapBodyCacheStatus status, CancellationToken ct = default)
+    {
+        var copies = new List<(string Folder, string Uid)>();
+        await using (var conn = await OpenAsync())
+        await using (var command = conn.CreateCommand())
+        {
+            var normalized = NormalizeInternetMessageId(candidate.InternetMessageId);
+            command.CommandText = normalized.Length == 0
+                ? "SELECT folder_name,unique_id FROM MessageSummary WHERE account_id=$aid AND folder_name=$fn AND unique_id=$uid;"
+                : "SELECT folder_name,unique_id FROM MessageSummary WHERE account_id=$aid AND lower(trim(internet_message_id, ' <>'))=$imid;";
+            command.Parameters.AddWithValue("$aid", candidate.AccountId.ToString());
+            command.Parameters.AddWithValue("$fn", candidate.FolderName);
+            command.Parameters.AddWithValue("$uid", candidate.MessageId);
+            command.Parameters.AddWithValue("$imid", normalized);
+            await using var reader = await command.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct)) copies.Add((reader.GetString(0), reader.GetString(1)));
+        }
+
+        if (copies.Count == 0) copies.Add((candidate.FolderName, candidate.MessageId));
+        foreach (var copy in copies)
+        {
+            ct.ThrowIfCancellationRequested();
+            await UpsertDetailAsync(CloneImapDetail(detail, candidate.AccountId, copy.Folder, copy.Uid));
+        }
+        await SetImapBodyStateAsync(candidate, status, string.Empty, ct);
+        return copies.Count;
+    }
+
+    private async Task SetImapBodyStateAsync(ImapBodyDownloadCandidate candidate,
+        ImapBodyCacheStatus status, string error, CancellationToken ct)
+    {
+        await using var conn = await OpenAsync();
+        await using var command = conn.CreateCommand();
+        var normalized = NormalizeInternetMessageId(candidate.InternetMessageId);
+        command.CommandText = normalized.Length == 0 ? """
+            INSERT INTO ImapBodyCacheState(unique_id,account_id,folder_name,status,attempt_count,last_error,updated_ticks)
+            VALUES($uid,$aid,$fn,$status,$attempt,$error,$ticks)
+            ON CONFLICT(unique_id,account_id,folder_name) DO UPDATE SET
+                status=excluded.status,attempt_count=ImapBodyCacheState.attempt_count+excluded.attempt_count,
+                last_error=excluded.last_error,updated_ticks=excluded.updated_ticks;
+            """ : """
+            INSERT INTO ImapBodyCacheState(unique_id,account_id,folder_name,status,attempt_count,last_error,updated_ticks)
+            SELECT unique_id,account_id,folder_name,$status,$attempt,$error,$ticks
+              FROM MessageSummary
+             WHERE account_id=$aid AND lower(trim(internet_message_id, ' <>'))=$imid
+            ON CONFLICT(unique_id,account_id,folder_name) DO UPDATE SET
+                status=excluded.status,attempt_count=ImapBodyCacheState.attempt_count+excluded.attempt_count,
+                last_error=excluded.last_error,updated_ticks=excluded.updated_ticks;
+            """;
+        command.Parameters.AddWithValue("$uid", candidate.MessageId);
+        command.Parameters.AddWithValue("$aid", candidate.AccountId.ToString());
+        command.Parameters.AddWithValue("$fn", candidate.FolderName);
+        command.Parameters.AddWithValue("$imid", normalized);
+        command.Parameters.AddWithValue("$status", (int)status);
+        command.Parameters.AddWithValue("$attempt", status == ImapBodyCacheStatus.Pending ? 1 : 0);
+        command.Parameters.AddWithValue("$error", error.Length > 1000 ? error[..1000] : error);
+        command.Parameters.AddWithValue("$ticks", DateTimeOffset.UtcNow.UtcTicks);
+        await command.ExecuteNonQueryAsync(ct);
+    }
+
+    private static string AddGuidList(SqliteCommand command, string prefix, IReadOnlyCollection<Guid> ids)
+    {
+        var names = new List<string>(ids.Count);
+        var index = 0;
+        foreach (var id in ids)
+        {
+            var name = $"{prefix}{index++}";
+            names.Add(name);
+            command.Parameters.AddWithValue(name, id.ToString());
+        }
+        return string.Join(',', names);
+    }
+
+    private static string NormalizeInternetMessageId(string? value) =>
+        (value ?? string.Empty).Trim().Trim('<', '>').ToLowerInvariant();
+
+    private static MailMessageDetail CloneImapDetail(MailMessageDetail source, Guid accountId,
+        string folderName, string messageId) => new()
+    {
+        MessageId = messageId, AccountId = accountId, FolderName = folderName,
+        To = source.To, Cc = source.Cc, Bcc = source.Bcc, ReplyTo = source.ReplyTo,
+        PlainTextBody = source.PlainTextBody, HtmlBody = source.HtmlBody,
+        RawHeaders = source.RawHeaders, Attachments = source.Attachments.ToList(),
+        CalendarIcs = source.CalendarIcs, CalendarInvite = source.CalendarInvite,
+        DraftComposeMode = source.DraftComposeMode, DraftSpellLanguage = source.DraftSpellLanguage,
+        InternetMessageId = source.InternetMessageId,
+    };
 }

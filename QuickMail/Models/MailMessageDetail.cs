@@ -4,6 +4,12 @@ namespace QuickMail.Models;
 
 public partial class MailMessageDetail : MailMessageSummary
 {
+    /// <summary>
+    /// Transient transport result. It is deliberately not persisted: an empty MIME body is valid,
+    /// whereas a body-part download failure must remain retryable by the IMAP indexing worker.
+    /// </summary>
+    public bool BodyFetchFailed { get; set; }
+
     public string ReplyTo { get; set; } = string.Empty;
     // InternetMessageId (the RFC 5322 Message-ID, used for reply threading) is inherited from
     // MailMessageSummary, which now carries it for cross-folder duplicate collapse (issue #220).

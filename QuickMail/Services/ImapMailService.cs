@@ -379,6 +379,7 @@ public class ImapMailService : IMailService, IChangeNotifier, IConnectionProbe
 
             string plainText = string.Empty;
             string htmlText  = string.Empty;
+            bool bodyFetchFailed = false;
 
             if (s.HtmlBody != null)
             {
@@ -389,6 +390,7 @@ public class ImapMailService : IMailService, IChangeNotifier, IConnectionProbe
                 }
                 catch (Exception ex)
                 {
+                    bodyFetchFailed = true;
                     LogService.Log($"ImapMailService: failed to fetch HTML body for UID {messageId} in {folderName}: {ex.Message}");
                 }
             }
@@ -402,6 +404,7 @@ public class ImapMailService : IMailService, IChangeNotifier, IConnectionProbe
                 }
                 catch (Exception ex)
                 {
+                    bodyFetchFailed = true;
                     LogService.Log($"ImapMailService: failed to fetch plain-text body for UID {messageId} in {folderName}: {ex.Message}");
                 }
             }
@@ -433,6 +436,7 @@ public class ImapMailService : IMailService, IChangeNotifier, IConnectionProbe
 
             var detail = new MailMessageDetail
             {
+                BodyFetchFailed = bodyFetchFailed && string.IsNullOrEmpty(plainText) && string.IsNullOrEmpty(htmlText),
                 MessageId     = messageId,
                 AccountId     = accountId,
                 FolderName    = folderName,
@@ -651,13 +655,25 @@ public class ImapMailService : IMailService, IChangeNotifier, IConnectionProbe
     private static async Task<IMailFolder> GetOrCreateFolderPathAsync(
         ImapClient client, string destinationFolder, CancellationToken ct)
     {
+        // Preserve a genuinely existing remote alias exactly as the server exposes it. Only a path
+        // that must be created is normalized; silently renaming server folders during startup or a
+        // move would be surprising and can break another client using that mailbox.
         try { return await client.GetFolderAsync(destinationFolder, ct); }
         catch (FolderNotFoundException) { }
+
+        var normalized = FolderPathNormalizer.Normalize(destinationFolder);
+        if (normalized.Length == 0)
+            throw new ArgumentException("The destination folder path cannot be empty.", nameof(destinationFolder));
+        if (!string.Equals(normalized, destinationFolder, StringComparison.Ordinal))
+        {
+            try { return await client.GetFolderAsync(normalized, ct); }
+            catch (FolderNotFoundException) { }
+        }
 
         if (client.PersonalNamespaces.Count == 0)
             throw new InvalidOperationException($"The IMAP account has no personal folder namespace for '{destinationFolder}'.");
         IMailFolder current = client.GetFolder(client.PersonalNamespaces[0]);
-        var segments = destinationFolder.Split(['/', '\\'], StringSplitOptions.RemoveEmptyEntries);
+        var segments = FolderPathNormalizer.Segments(normalized);
         foreach (var segment in segments)
         {
             try
@@ -678,6 +694,9 @@ public class ImapMailService : IMailService, IChangeNotifier, IConnectionProbe
 
     public async Task CreateFolderAsync(Guid accountId, string? parentFolderName, string name, CancellationToken ct = default)
     {
+        name = name.Trim();
+        if (name.Length == 0)
+            throw new ArgumentException("Folder names cannot be empty.", nameof(name));
         using var lease = await RentClientAsync(accountId, ImapLeasePriority.Foreground, ct);
         var client = lease.Client;
         IMailFolder parent = string.IsNullOrEmpty(parentFolderName)
@@ -711,6 +730,9 @@ public class ImapMailService : IMailService, IChangeNotifier, IConnectionProbe
 
     public async Task RenameFolderAsync(Guid accountId, string folderName, string newName, string? newParentFolderName, CancellationToken ct = default)
     {
+        newName = newName.Trim();
+        if (newName.Length == 0)
+            throw new ArgumentException("Folder names cannot be empty.", nameof(newName));
         using var lease = await RentClientAsync(accountId, ImapLeasePriority.Foreground, ct);
         var client = lease.Client;
         var folder = await client.GetFolderAsync(folderName, ct);

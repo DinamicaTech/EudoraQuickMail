@@ -1,5 +1,6 @@
 using MimeKit;
 using QuickMail.Models;
+using QuickMail.Helpers;
 using System.IO;
 
 namespace QuickMail.Services;
@@ -184,6 +185,17 @@ public sealed class LocalMailService : IMailService
 
     public async Task AppendToSentAsync(Guid accountId, ComposeModel sent, CancellationToken ct = default)
     {
+        var account = _accounts.GetValueOrDefault(accountId)
+            ?? _accountService?.LoadAccounts().FirstOrDefault(candidate => candidate.Id == accountId)
+            ?? throw new InvalidOperationException("The sender account no longer exists.");
+
+        // Accounts can be added while QuickMail is already running. Draft/Scheduled already repair
+        // their folders on first use, but Sent used to assume startup had created it. SMTP therefore
+        // succeeded while the local copy disappeared with "no Sent folder". Ensure both the physical
+        // folder and its binding to the shared canonical Out node before persisting the message.
+        if (account.BackendKind is BackendKind.Pop3Smtp or BackendKind.LocalArchive)
+            await _store.EnsureLocalSystemFoldersAsync([account]);
+
         var folder = (await GetFoldersAsync(accountId, ct)).FirstOrDefault(f => f.Kind == SpecialFolderKind.Sent)
             ?? throw new InvalidOperationException("This local account has no Sent folder.");
         await _store.SaveLocalMessageAsync(FromCompose(accountId, folder.FullName,
@@ -236,8 +248,12 @@ public sealed class LocalMailService : IMailService
     public async Task CreateFolderAsync(Guid accountId, string? parentFolderName, string name,
         CancellationToken ct = default)
     {
+        name = name.Trim();
+        if (name.Length == 0)
+            throw new ArgumentException("Folder name cannot be empty.", nameof(name));
         var all = await GetFoldersAsync(accountId, ct);
-        var fullName = string.IsNullOrEmpty(parentFolderName) ? name : parentFolderName + "/" + name;
+        var fullName = FolderPathNormalizer.Normalize(
+            string.IsNullOrEmpty(parentFolderName) ? name : parentFolderName + "/" + name);
         if (all.Any(f => f.FullName.Equals(fullName, StringComparison.OrdinalIgnoreCase)))
             throw new InvalidOperationException("A folder with that name already exists.");
         all.Add(new MailFolderModel
@@ -253,8 +269,11 @@ public sealed class LocalMailService : IMailService
         string? newParentFolderName, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
-        var newPath = string.IsNullOrWhiteSpace(newParentFolderName)
-            ? newName : newParentFolderName.TrimEnd('/', '.') + "/" + newName;
+        newName = newName.Trim();
+        if (newName.Length == 0)
+            throw new ArgumentException("Folder name cannot be empty.", nameof(newName));
+        var newPath = FolderPathNormalizer.Normalize(string.IsNullOrWhiteSpace(newParentFolderName)
+            ? newName : newParentFolderName + "/" + newName);
         var all = await GetFoldersAsync(accountId, ct);
         if (all.Any(folder => folder.FullName.Equals(newPath, StringComparison.OrdinalIgnoreCase)))
             await _store.MergeFolderPathAsync(accountId, folderName, newPath, ct);

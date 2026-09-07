@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using Microsoft.Data.Sqlite;
+using QuickMail.Helpers;
 using QuickMail.Models;
 using QuickMail.Services;
 
@@ -166,18 +167,19 @@ internal static class NativeProfileImportCommand
         var parents = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var mailbox in mailboxes)
         {
-            var parts = mailbox.Split('/', StringSplitOptions.RemoveEmptyEntries);
-            for (var i = 1; i <= parts.Length; i++)
+            var parts = FolderPathNormalizer.Segments(mailbox);
+            for (var i = 1; i <= parts.Count; i++)
             {
                 var path = string.Join('/', parts.Take(i));
                 allPaths.Add(path);
-                if (i < parts.Length) parents.Add(path);
+                if (i < parts.Count) parents.Add(path);
             }
         }
 
         // If Eudora has both Foo.mbx and Foo.fol, Foo becomes a virtual container and its own
         // messages live in an explicit child. No message can ever be assigned to the container.
-        foreach (var mailbox in mailboxes.Where(parents.Contains)) allPaths.Add(mailbox + "/Messages");
+        foreach (var mailbox in mailboxes.Select(FolderPathNormalizer.Normalize).Where(parents.Contains))
+            allPaths.Add(mailbox + "/Messages");
         return allPaths.OrderBy(p => p, StringComparer.OrdinalIgnoreCase).Select(path => new MailFolderModel
         {
             AccountId = accountId,
@@ -250,8 +252,11 @@ internal static class NativeProfileImportCommand
             while (await folderReader.ReadAsync())
             {
                 var name = folderReader.GetString(0);
+                var normalizedName = FolderPathNormalizer.Normalize(name);
                 original.Value = name;
-                destination.Value = containers.Contains(name) ? name + "/Messages" : name;
+                destination.Value = containers.Contains(normalizedName)
+                    ? normalizedName + "/Messages"
+                    : normalizedName;
                 await insertMap.ExecuteNonQueryAsync();
             }
         }

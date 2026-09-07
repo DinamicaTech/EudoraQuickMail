@@ -121,6 +121,23 @@ public class RuleService : IRuleService
         _loaded = true;
     }
 
+    public int RewriteFolderTargets(IReadOnlyList<CanonicalFolderMoveResult> moves)
+    {
+        if (moves.Count == 0) return 0;
+        var rules = LoadRules();
+        var changed = 0;
+        foreach (var rule in rules)
+        {
+            if (string.IsNullOrWhiteSpace(rule.TargetFolder)) continue;
+            var rewritten = Helpers.FolderReferenceRewriter.Rewrite(rule.TargetFolder, moves);
+            if (string.Equals(rewritten, rule.TargetFolder, StringComparison.Ordinal)) continue;
+            rule.TargetFolder = rewritten;
+            changed++;
+        }
+        if (changed > 0) SaveRules(rules);
+        return changed;
+    }
+
     public (MailRule Rule, bool Created) SaveOrUpdateQuickMoveRule(MailRule candidate)
     {
         ArgumentNullException.ThrowIfNull(candidate);
@@ -509,8 +526,11 @@ public class RuleService : IRuleService
             Guid.TryParse(targetFolder.AsSpan(canonicalPrefixLength), out var folderId))
             canonical = tree.Folders.FirstOrDefault(folder => folder.FolderId == folderId);
         else
+        {
+            var normalizedTarget = Helpers.FolderPathNormalizer.Normalize(targetFolder);
             canonical = tree.Folders.FirstOrDefault(folder =>
-                folder.CanonicalPath.Equals(targetFolder.Trim('/'), StringComparison.OrdinalIgnoreCase));
+                folder.CanonicalPath.Equals(normalizedTarget, StringComparison.OrdinalIgnoreCase));
+        }
 
         if (canonical == null)
         {

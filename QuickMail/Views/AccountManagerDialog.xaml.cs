@@ -236,6 +236,19 @@ public partial class AccountManagerDialog : Window
             _vm.CommitEditedAccount(editVm.ToAccountModel(), editVm.Password);
     }
 
+    private void DuplicateButton_Click(object sender, RoutedEventArgs e)
+    {
+        var duplicateVm = _vm.CreateDuplicateAccountViewModel();
+        if (duplicateVm == null) return;
+        var dialog = new AddAccountDialog(duplicateVm)
+        {
+            Owner = this,
+            Title = "Duplicate Account",
+        };
+        if (dialog.ShowDialog() == true)
+            _vm.CommitDuplicatedAccount(duplicateVm.ToAccountModel(), duplicateVm.Password);
+    }
+
     private void CloseButton_Click(object sender, RoutedEventArgs e)
     {
         DialogResult = true;

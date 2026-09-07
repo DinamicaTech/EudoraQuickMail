@@ -98,8 +98,8 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
         await using (var reader = await lookup.ExecuteReaderAsync())
         {
             if (!await reader.ReadAsync()) throw new InvalidOperationException("The destination folder no longer exists.");
-            path = reader.GetString(0);
-            name = reader.GetString(1);
+            path = FolderPathNormalizer.Normalize(reader.GetString(0));
+            name = reader.GetString(1).Trim();
             kind = reader.GetInt32(2);
             container = reader.GetInt32(3);
             existingBinding = reader.IsDBNull(4) ? null : reader.GetString(4);
@@ -108,6 +108,36 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
 
         if (existingBinding != null)
         {
+            // A binding is inserted before an IMAP CREATE is attempted. If CREATE failed, there is
+            // no physical Folder row and the old, whitespace-padded promise must not poison every
+            // retry. Existing server aliases are deliberately preserved byte-for-byte.
+            await using (var physical = connection.CreateCommand())
+            {
+                physical.Transaction = (SqliteTransaction)tx;
+                physical.CommandText = """
+                    SELECT 1 FROM Folder
+                     WHERE account_id=$account AND full_name=$path LIMIT 1;
+                    """;
+                physical.Parameters.AddWithValue("$account", accountId.ToString("D"));
+                physical.Parameters.AddWithValue("$path", existingBinding);
+                if (await physical.ExecuteScalarAsync() == null &&
+                    !string.Equals(existingBinding, path, StringComparison.Ordinal))
+                {
+                    await using var repair = connection.CreateCommand();
+                    repair.Transaction = (SqliteTransaction)tx;
+                    repair.CommandText = """
+                        UPDATE LocalFolderBinding_shadow SET legacy_full_name=$new
+                         WHERE account_id=$account AND folder_id=$folder AND legacy_full_name=$old;
+                        """;
+                    repair.Parameters.AddWithValue("$new", path);
+                    repair.Parameters.AddWithValue("$account", accountId.ToString("D"));
+                    repair.Parameters.AddWithValue("$folder", folderId.ToString("D"));
+                    repair.Parameters.AddWithValue("$old", existingBinding);
+                    await repair.ExecuteNonQueryAsync();
+                    existingBinding = path;
+                }
+            }
+
             // The canonical node is authoritative. A failed/aborted quick-filter creation could
             // previously turn an empty node into a leaf without updating its already-created
             // physical Folder row. MoveLocalMessagesAsync validates that physical row and then
@@ -355,7 +385,8 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
     }
 
     private async Task<CanonicalFolderMoveResult> MergeCanonicalFolderAsync(
-        Guid sourceFolderId, Guid destinationFolderId, string oldPath, string newPath)
+        Guid sourceFolderId, Guid destinationFolderId, string oldPath, string newPath,
+        IReadOnlySet<Guid>? physicalAccountScope = null)
     {
         var tree = await LoadCanonicalLocalFolderTreeAsync()
             ?? throw new InvalidOperationException("The canonical folder tree is unavailable.");
@@ -384,12 +415,15 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
         // A physical merge at an ancestor also moves all descendant paths. Record those mappings
         // so descendant shadow bindings can be rewritten without attempting the same move twice.
         var physicalMoves = new List<(Guid Account, string OldRoot, string NewRoot)>();
+        var physicalFolders = physicalAccountScope == null ? null : await LoadFoldersAsync();
         foreach (var source in sourceNodes)
         {
             if (targetIds[source.FolderId] == source.FolderId) continue;
             var target = tree.Folders.Single(folder => folder.FolderId == targetIds[source.FolderId]);
             foreach (var binding in source.Bindings)
             {
+                if (physicalAccountScope != null && !physicalAccountScope.Contains(binding.AccountId))
+                    continue;
                 if (physicalMoves.Any(move => move.Account == binding.AccountId &&
                     (binding.LegacyFullName.Equals(move.OldRoot, StringComparison.OrdinalIgnoreCase) ||
                      binding.LegacyFullName.StartsWith(move.OldRoot + "/", StringComparison.OrdinalIgnoreCase))))
@@ -398,6 +432,21 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
                     candidate.AccountId == binding.AccountId);
                 if (destinationBinding == null || destinationBinding.LegacyFullName.Equals(
                         binding.LegacyFullName, StringComparison.OrdinalIgnoreCase)) continue;
+                if (physicalFolders != null && physicalFolders.TryGetValue(binding.AccountId, out var folders))
+                {
+                    var sourceExists = folders.Any(folder => folder.FullName.Equals(
+                        binding.LegacyFullName, StringComparison.Ordinal));
+                    var destinationExists = folders.Any(folder => folder.FullName.Equals(
+                        destinationBinding.LegacyFullName, StringComparison.Ordinal));
+                    // A prior run may have committed the physical merge and stopped before the
+                    // shadow transaction. Finish the map without trying to move a missing source.
+                    if (!sourceExists && destinationExists)
+                    {
+                        physicalMoves.Add((binding.AccountId, binding.LegacyFullName,
+                            destinationBinding.LegacyFullName));
+                        continue;
+                    }
+                }
                 await MergeFolderPathAsync(binding.AccountId, binding.LegacyFullName,
                     destinationBinding.LegacyFullName);
                 physicalMoves.Add((binding.AccountId, binding.LegacyFullName,
@@ -504,7 +553,11 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
         return new CanonicalFolderMoveResult(oldPath, newPath, true);
     }
 
-    public async Task<CanonicalFolderMoveResult> RenameCanonicalFolderAsync(Guid folderId, string newName)
+    public Task<CanonicalFolderMoveResult> RenameCanonicalFolderAsync(Guid folderId, string newName) =>
+        RenameCanonicalFolderCoreAsync(folderId, newName, physicalAccountScope: null);
+
+    private async Task<CanonicalFolderMoveResult> RenameCanonicalFolderCoreAsync(
+        Guid folderId, string newName, IReadOnlySet<Guid>? physicalAccountScope)
     {
         newName = newName.Trim();
         if (newName.Length == 0 || newName.IndexOfAny(['/', '\\']) >= 0)
@@ -577,10 +630,32 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
 
         // Rename each physical projection first. Preserve its actual parent/prefix: imported
         // Eudora bindings are allowed to differ from the visible canonical path.
-        foreach (var binding in bindings.Where(candidate => !bindings.Any(ancestor =>
+        var physicalFolders = physicalAccountScope == null ? null : await LoadFoldersAsync();
+        foreach (var binding in bindings.Where(candidate =>
+                     (physicalAccountScope == null || physicalAccountScope.Contains(candidate.Account)) &&
+                     !bindings.Any(ancestor =>
+                     (physicalAccountScope == null || physicalAccountScope.Contains(ancestor.Account)) &&
                      ancestor.Account == candidate.Account && ancestor.CanonicalPath.Length < candidate.CanonicalPath.Length &&
                      candidate.CanonicalPath.StartsWith(ancestor.CanonicalPath + "/", StringComparison.OrdinalIgnoreCase))))
-            await RenameFolderPathAsync(binding.Account, binding.OldPath, PhysicalNewPath(binding));
+        {
+            var newPhysicalPath = PhysicalNewPath(binding);
+            if (physicalFolders != null && physicalFolders.TryGetValue(binding.Account, out var folders))
+            {
+                var sourceExists = folders.Any(folder => folder.FullName.Equals(
+                    binding.OldPath, StringComparison.Ordinal));
+                var destinationExists = folders.Any(folder => folder.FullName.Equals(
+                    newPhysicalPath, StringComparison.Ordinal));
+                // Resume after a prior physical commit, or merge an independently existing clean
+                // local folder before the canonical metadata transaction.
+                if (!sourceExists && destinationExists) continue;
+                if (sourceExists && destinationExists)
+                {
+                    await MergeFolderPathAsync(binding.Account, binding.OldPath, newPhysicalPath);
+                    continue;
+                }
+            }
+            await RenameFolderPathAsync(binding.Account, binding.OldPath, newPhysicalPath);
+        }
 
         await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync();
         await using (var updateNodes = connection.CreateCommand())
@@ -612,6 +687,10 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
             var bindingOld = updateBinding.Parameters.Add("$old", SqliteType.Text);
             foreach (var binding in bindings)
             {
+                // Existing remote folder names are aliases owned by their servers. A local-tree
+                // whitespace cleanup changes the visible canonical path, never those aliases.
+                if (physicalAccountScope != null && !physicalAccountScope.Contains(binding.Account))
+                    continue;
                 bindingNew.Value = PhysicalNewPath(binding);
                 bindingAccount.Value = binding.Account.ToString("D");
                 bindingOld.Value = binding.OldPath;
@@ -620,6 +699,141 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
         }
         await transaction.CommitAsync();
         return new CanonicalFolderMoveResult(oldPath, newPath, false);
+    }
+
+    public async Task<IReadOnlyList<CanonicalFolderMoveResult>> NormalizeCanonicalFolderWhitespaceAsync(
+        IReadOnlyCollection<Guid> localAccountIds)
+    {
+        var applied = new List<CanonicalFolderMoveResult>();
+        var blocked = new HashSet<Guid>();
+        var local = localAccountIds.ToHashSet();
+        using var timing = PerformanceLogService.Measure("Startup/splash: normalize folder whitespace");
+
+        while (true)
+        {
+            var tree = await LoadCanonicalLocalFolderTreeAsync();
+            if (tree == null) break;
+            var candidate = tree.Folders
+                .Where(folder => folder.ParentFolderId != null && !blocked.Contains(folder.FolderId) &&
+                    !string.Equals(folder.Name, folder.Name.Trim(), StringComparison.Ordinal))
+                .OrderBy(folder => folder.CanonicalPath.Count(ch => ch == '/'))
+                .ThenBy(folder => folder.CanonicalPath, StringComparer.OrdinalIgnoreCase)
+                .FirstOrDefault();
+            if (candidate == null) break;
+
+            var cleanName = candidate.Name.Trim();
+            if (cleanName.Length == 0)
+            {
+                blocked.Add(candidate.FolderId);
+                LogService.Log($"Folder whitespace normalization skipped an empty name at '{candidate.CanonicalPath}'.");
+                continue;
+            }
+
+            var slash = candidate.CanonicalPath.LastIndexOf('/');
+            var parentPath = slash < 0 ? string.Empty : candidate.CanonicalPath[..slash];
+            var cleanPath = parentPath.Length == 0 ? cleanName : parentPath + "/" + cleanName;
+            try
+            {
+                var collision = tree.Folders.FirstOrDefault(folder =>
+                    folder.FolderId != candidate.FolderId && folder.RootId == candidate.RootId &&
+                    string.Equals(folder.CanonicalPath, cleanPath, StringComparison.OrdinalIgnoreCase));
+                var result = collision == null
+                    ? await RenameCanonicalFolderCoreAsync(candidate.FolderId, cleanName, local)
+                    : await MergeCanonicalFolderAsync(candidate.FolderId, collision.FolderId,
+                        candidate.CanonicalPath, cleanPath, local);
+                applied.Add(result);
+            }
+            catch (Exception ex)
+            {
+                blocked.Add(candidate.FolderId);
+                LogService.Log($"Folder whitespace normalization failed for '{candidate.CanonicalPath}'", ex);
+            }
+        }
+
+        // A freshly rebuilt shadow tree is already canonicalized, but its bindings deliberately
+        // retain the original physical Eudora paths. Clean those local projections too so message,
+        // FTS, attachment-content and calendar keys stop carrying invisible whitespace. Remote
+        // bindings are intentionally outside 'local': their exact names belong to the server.
+        var blockedBindings = new HashSet<(Guid AccountId, string Path)>();
+        while (true)
+        {
+            var tree = await LoadCanonicalLocalFolderTreeAsync();
+            var candidate = tree?.Folders
+                .SelectMany(folder => folder.Bindings)
+                .Where(binding => local.Contains(binding.AccountId) &&
+                    !blockedBindings.Contains((binding.AccountId, binding.LegacyFullName)) &&
+                    !string.Equals(binding.LegacyFullName,
+                        FolderPathNormalizer.Normalize(binding.LegacyFullName), StringComparison.Ordinal))
+                .OrderBy(binding => binding.LegacyFullName.Count(ch => ch is '/' or '\\'))
+                .ThenBy(binding => binding.LegacyFullName, StringComparer.OrdinalIgnoreCase)
+                .FirstOrDefault();
+            if (candidate is null) break;
+
+            var oldPath = candidate.LegacyFullName;
+            var cleanPath = FolderPathNormalizer.Normalize(oldPath);
+            if (cleanPath.Length == 0)
+            {
+                blockedBindings.Add((candidate.AccountId, oldPath));
+                continue;
+            }
+
+            try
+            {
+                var affectedBindings = tree!.Folders
+                    .SelectMany(folder => folder.Bindings)
+                    .Where(binding => binding.AccountId == candidate.AccountId &&
+                        (binding.LegacyFullName.Equals(oldPath, StringComparison.OrdinalIgnoreCase) ||
+                         binding.LegacyFullName.StartsWith(oldPath + "/", StringComparison.OrdinalIgnoreCase)))
+                    .Select(binding => (Old: binding.LegacyFullName,
+                        New: cleanPath + binding.LegacyFullName[oldPath.Length..]))
+                    .OrderBy(binding => binding.Old.Length)
+                    .ToList();
+                var folders = await LoadFoldersAsync();
+                var sourceExists = folders.TryGetValue(candidate.AccountId, out var accountFolders) &&
+                    accountFolders.Any(folder => folder.FullName.Equals(oldPath, StringComparison.Ordinal));
+                var destinationExists = accountFolders?.Any(folder => folder.FullName.Equals(
+                    cleanPath, StringComparison.Ordinal)) == true;
+                var merges = sourceExists && destinationExists;
+                if (merges)
+                    await MergeFolderPathAsync(candidate.AccountId, oldPath, cleanPath);
+                else if (sourceExists)
+                    await RenameFolderPathAsync(candidate.AccountId, oldPath, cleanPath);
+                else if (!destinationExists)
+                    throw new InvalidOperationException(
+                        $"Neither the source folder '{oldPath}' nor its normalized destination '{cleanPath}' exists.");
+
+                await using var connection = await OpenAsync();
+                await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync();
+                foreach (var affected in affectedBindings)
+                {
+                    await using var binding = connection.CreateCommand();
+                    binding.Transaction = transaction;
+                    binding.CommandText = """
+                        DELETE FROM LocalFolderBinding_shadow
+                         WHERE account_id=$account AND legacy_full_name=$old AND EXISTS(
+                               SELECT 1 FROM LocalFolderBinding_shadow existing
+                                WHERE existing.account_id=$account AND existing.legacy_full_name=$new);
+                        UPDATE LocalFolderBinding_shadow SET legacy_full_name=$new
+                         WHERE account_id=$account AND legacy_full_name=$old;
+                        """;
+                    binding.Parameters.AddWithValue("$account", candidate.AccountId.ToString("D"));
+                    binding.Parameters.AddWithValue("$old", affected.Old);
+                    binding.Parameters.AddWithValue("$new", affected.New);
+                    await binding.ExecuteNonQueryAsync();
+                }
+                await transaction.CommitAsync();
+                applied.Add(new CanonicalFolderMoveResult(oldPath, cleanPath, merges));
+            }
+            catch (Exception ex)
+            {
+                blockedBindings.Add((candidate.AccountId, oldPath));
+                LogService.Log($"Physical folder whitespace normalization failed for '{oldPath}'", ex);
+            }
+        }
+
+        if (applied.Count > 0)
+            LogService.Log($"Folder whitespace normalization updated {applied.Count:N0} folder path(s).");
+        return applied;
     }
 
     public async Task DeleteCanonicalFolderTreeAsync(Guid folderId)
@@ -767,6 +981,19 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
                 html_body   TEXT    NOT NULL DEFAULT '',
                 PRIMARY KEY (unique_id, account_id, folder_name)
             );
+
+            CREATE TABLE IF NOT EXISTS ImapBodyCacheState (
+                unique_id     TEXT    NOT NULL,
+                account_id    TEXT    NOT NULL,
+                folder_name   TEXT    NOT NULL,
+                status        INTEGER NOT NULL DEFAULT 0,
+                attempt_count INTEGER NOT NULL DEFAULT 0,
+                last_error    TEXT    NOT NULL DEFAULT '',
+                updated_ticks INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (unique_id, account_id, folder_name)
+            );
+            CREATE INDEX IF NOT EXISTS idx_imap_body_state_status_updated
+                ON ImapBodyCacheState(status, updated_ticks);
             """;
         cmd.ExecuteNonQuery();
         RecordStage("base message tables and indexes");

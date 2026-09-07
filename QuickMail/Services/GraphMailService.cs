@@ -454,6 +454,9 @@ public class GraphMailService : IMailService, IConnectionProbe
 
     public async Task CreateFolderAsync(Guid accountId, string? parentFolderName, string name, CancellationToken ct = default)
     {
+        name = name.Trim();
+        if (name.Length == 0)
+            throw new ArgumentException("Folder name cannot be empty.", nameof(name));
         var account = Account(accountId);
         // null parent = account root; otherwise create under the parent's childFolders collection.
         var path = string.IsNullOrEmpty(parentFolderName)
@@ -468,6 +471,9 @@ public class GraphMailService : IMailService, IConnectionProbe
 
     public async Task RenameFolderAsync(Guid accountId, string folderName, string newName, string? newParentFolderName, CancellationToken ct = default)
     {
+        newName = newName.Trim();
+        if (newName.Length == 0)
+            throw new ArgumentException("Folder name cannot be empty.", nameof(newName));
         var account = Account(accountId);
         // Rename: set the display name. Only move when a new parent is actually requested — a
         // rename-only call (null newParentFolderName) must not POST a redundant move-to-root.

@@ -2031,7 +2031,12 @@ public partial class ComposeWindow : Window
                 else ready.TrySetException(new InvalidOperationException(
                     $"HugeRTE host navigation failed: {args.WebErrorStatus}"));
             };
-            HtmlBodyEditor.CoreWebView2.Navigate("https://quickmail.local/editor.html");
+            // WebView2 persists its HTTP cache between runs. Use the deployed editor timestamp as
+            // a stable per-build cache key, otherwise an updated drag/drop bridge can keep running
+            // the old editor.html until Chromium eventually evicts it.
+            var editorAssetVersion = File.GetLastWriteTimeUtc(Path.Combine(assetFolder, "editor.html")).Ticks;
+            HtmlBodyEditor.CoreWebView2.Navigate(
+                $"https://quickmail.local/editor.html?v={editorAssetVersion}");
             await ready.Task;
             _htmlEditorReady = true;
             if (_pendingHtml is not null)

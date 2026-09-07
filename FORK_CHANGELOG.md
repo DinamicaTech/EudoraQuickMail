@@ -10,6 +10,41 @@ before a public release.
 
 ## Unreleased
 
+- Sending from a POP3 account added during the current session now creates its physical Sent folder
+  and binds it to the shared canonical Out node before saving the local sent copy. SMTP could
+  previously succeed while the copy was lost with `This local account has no Sent folder`.
+- Dragging PDF, ZIP, Office or other non-image files onto the HTML composer now intercepts the
+  native drop during WebView2's capture phase, before HugeRTE can reject it as unsupported inline
+  content. The editor resource is cache-versioned so upgrades cannot retain the old drop bridge;
+  files above the 25 MB recommendation remain allowed with a warning.
+- Account management now offers **Duplicate account**. It opens a new-account editor seeded with
+  the selected account's provider, protocol, servers, ports, certificate policy, signature and
+  folder configuration, while clearing email/login names and all password/OAuth/calendar identity
+  data; the copy receives a fresh id and can never inherit the default-account flag.
+- **Check incoming email** is now visible and editable for every server-backed account (IMAP,
+  POP3 and Graph) in the add and account-management dialogs. The setting was already enforced by
+  mail checking for IMAP/Graph, but its checkbox had accidentally remained inside the POP3-only
+  visual panel; local archive accounts continue to hide it.
+- **Filter All Like This** now applies a matching rule independently to each physical
+  account/folder source in a unified view. A revoked OAuth token or other remote failure can no
+  longer conceal successful local moves or prevent the message list from refreshing; partial
+  completion is reported with the affected account and an actionable Google relink hint.
+- Filtering the selected message with `Shift+F` or **Filter All Like This** now opens a prefilled
+  new-rule editor immediately when no enabled rule is compatible with that message, instead of
+  silently reporting zero matches.
+- IMAP summaries without a cached body are now completed by a cancellable background indexer.
+  Its SQLite queue survives restarts, distinguishes downloaded/empty/error states, retries failures,
+  uses non-`Seen` body reads, and collapses Gmail label copies by RFC Message-ID so one download can
+  populate every physical copy without changing unread state.
+- Added **Search Everywhere** beside quick search. It runs or reruns the current query across every
+  active non-shared account without changing the selected folder, while retaining the root-search
+  exclusion of non-materialized Draft and Scheduled items.
+- Folder paths now trim leading/trailing whitespace from every segment at creation and Eudora
+  import. Startup repairs older local POP/archive paths transactionally across folders, messages,
+  full-text/attachment indexes and calendar references, merges clean-name collisions, and rewrites
+  affected rule, startup, recent-destination and saved-view references. Existing IMAP server aliases
+  are preserved. Root views also include active accounts proven by canonical bindings, preventing
+  moved IMAP messages from disappearing when an older account record lacks its shared-root id.
 - Incoming iCalendar content is now handled consistently across POP3, IMAP and Graph: both
   `text/calendar` parts and generically typed `.ics` attachments are recognized, the raw ICS is
   cached and remains visible/downloadable as an attachment, `METHOD:REQUEST` keeps its RSVP
