@@ -17,6 +17,7 @@ public class RuleService : IRuleService
     private readonly IAccountService? _accountService;
     private List<MailRule> _cache = [];
     private bool _loaded;
+    private string? _loggedLoadError;
 
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
 
@@ -35,29 +36,67 @@ public class RuleService : IRuleService
 
     // ── Load / Save ─────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// The rules in rules.json, cached after the first successful read. A missing file, or one holding
+    /// nothing, is no rules.
+    /// <para>
+    /// A file that is there but can't be read or parsed throws <see cref="RulesFileUnreadableException"/>
+    /// instead of reading as empty (#700). Every writer loads the whole list, changes it and saves it back,
+    /// so an empty read turned the next save into one that replaced every rule in the file. The failure is
+    /// not cached: a file that was only locked for a moment reads normally on the next call.
+    /// </para>
+    /// </summary>
     public List<MailRule> LoadRules()
     {
         if (_loaded) return _cache;
 
-        if (!File.Exists(_filePath))
-        {
-            _cache = [];
-            _loaded = true;
-            return _cache;
-        }
-
+        List<MailRule> rules;
+        var missing = false;
         try
         {
             var json = File.ReadAllText(_filePath);
-            _cache = JsonSerializer.Deserialize<List<MailRule>>(json) ?? [];
+            rules = string.IsNullOrWhiteSpace(json) ? [] : JsonSerializer.Deserialize<List<MailRule>>(json) ?? [];
         }
-        catch
+        catch (Exception ex) when (ex is FileNotFoundException
+                                   || (ex is DirectoryNotFoundException && DriveIsThere()))
         {
-            _cache = [];
+            // Not there yet, so no rules. File.Exists, checked here before, answered false for any error at all — a
+            // permission problem, a drive that had dropped — and that read as no rules and let the next save replace
+            // the file (#700). A missing folder counts as "not there" only on a drive that is there: a profile on a
+            // drive that has disconnected reports the same missing folder, and its rules are not gone.
+            rules = [];
+            missing = true;
         }
+        catch (Exception ex)
+        {
+            var unreadable = RulesFileUnreadableException.For(_filePath, ex);
+            // Sync reads the rules on every Inbox poll, so log a failure when it starts or changes, not each time.
+            if (_loggedLoadError != unreadable.Message)
+            {
+                _loggedLoadError = unreadable.Message;
+                LogService.Log($"Client-side rules file {_filePath} can't be read; it is left as it is, and no client-side rules run until it can be.", ex);
+            }
+            throw unreadable;
+        }
+
+        if (_loggedLoadError is not null)
+        {
+            _loggedLoadError = null;
+            LogService.Log(missing
+                ? "Client-side rules file that couldn't be read is no longer there; there are no client-side rules."
+                : "Client-side rules file can be read again.");
+        }
+        _cache = rules;
         _loaded = true;
         MigrateAllAccountRules();
         return _cache;
+    }
+
+    /// <summary>Whether the drive (or network share) the rules file lives on is reachable at all.</summary>
+    private bool DriveIsThere()
+    {
+        var root = Path.GetPathRoot(Path.GetFullPath(_filePath));
+        return !string.IsNullOrEmpty(root) && Directory.Exists(root);
     }
 
     /// <summary>
@@ -143,11 +182,24 @@ public class RuleService : IRuleService
 
     public void SaveRules(List<MailRule> rules)
     {
-        _cache = rules;
-        var dir = Path.GetDirectoryName(_filePath)!;
-        Directory.CreateDirectory(dir);
+        // Read the file first if this instance hasn't (#700), so a save made before anything was read throws for a
+        // file that can't be read instead of replacing it. It does not protect a READABLE file from a caller that
+        // saves a list it didn't load: that list replaces the file, as it always has.
+        if (!_loaded) LoadRules();
 
-        Helpers.AtomicFile.WriteAllText(_filePath, JsonSerializer.Serialize(rules, JsonOptions));
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(_filePath)!);
+            Helpers.AtomicFile.WriteAllText(_filePath, JsonSerializer.Serialize(rules, JsonOptions));
+        }
+        catch
+        {
+            // Callers change the cached list in place before saving it, so after a failed write the cache holds
+            // a change the file doesn't. Read the file again next time rather than go on reporting that change.
+            _loaded = false;
+            throw;
+        }
+        _cache = rules;
         _loaded = true;
     }
 

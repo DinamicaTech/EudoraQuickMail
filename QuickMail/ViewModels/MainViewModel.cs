@@ -1979,6 +1979,32 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// in-session handoff and the startup resume loop cannot both drive the same one (#529 step 4).</summary>
     private readonly HashSet<Guid> _graphConversionsInFlight = [];
 
+    /// <summary>
+    /// Rewrites a converted account's folder references — move-to-folder rules, saved views, the startup folder —
+    /// against its Graph folders, and saves what changed. Returns false when the rules couldn't be read (#700):
+    /// the saved views and settings are remapped and saved anyway, the rules are left alone, and the caller keeps
+    /// the conversion marker so the rules get this remap at a later launch. Reading them as none, as this once
+    /// did, saved that empty list over them whenever a view or setting needed remapping. Running the remap again
+    /// over views already done is harmless (the remapper keeps an already-remapped reference).
+    /// </summary>
+    internal bool RemapFolderReferencesAfterConversion(
+        Guid accountId, IReadOnlyList<MailFolderModel> graphFolders, out FolderReferenceRemapper.Report report)
+    {
+        List<MailRule>? rules;
+        try { rules = _ruleService.LoadRules(); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { rules = null; }
+        var views = _viewService.Load();
+        var cfg = _configService.Load();
+        report = FolderReferenceRemapper.Remap(accountId, graphFolders, rules ?? [], views, cfg);
+        if (report.AnythingChanged)
+        {
+            if (rules is not null) _ruleService.SaveRules(rules);
+            _viewService.Save(views);
+            _configService.Save(cfg);
+        }
+        return rules is not null;
+    }
+
     /// <summary>The body of <see cref="FinishGraphConversionAsync"/>, which owns the one-at-a-time guard.</summary>
     private async Task FinishGraphConversionCoreAsync(AccountModel account, Guid accountId, CancellationToken ct)
     {
@@ -2001,15 +2027,18 @@ public partial class MainViewModel : ObservableObject, IDisposable
         await _syncService.SyncFolderFullAsync(account, inbox, ct);
 
         // Remap folder-referencing settings now that the Graph folders exist.
-        var rules = _ruleService.LoadRules();
-        var views = _viewService.Load();
-        var cfg = _configService.Load();
-        var report = FolderReferenceRemapper.Remap(accountId, graphFolders, rules, views, cfg);
-        if (report.AnythingChanged)
+        if (!RemapFolderReferencesAfterConversion(accountId, graphFolders, out var report))
         {
-            _ruleService.SaveRules(rules);
-            _viewService.Save(views);
-            _configService.Save(cfg);
+            // The marker stays: the rules still need this remap, at a later launch once rules.json can be read (#700).
+            // Say what did change — saved views, the startup folder — when it changes. A later launch finds those
+            // already done and has nothing new to say, so this is heard once, not at every launch.
+            var changed = report.Summary();
+            LogService.Log($"Conversion of {account.AccountLabel} to Microsoft 365 is waiting for its client-side rules, which can't be read."
+                           + (changed.Length > 0 ? $" Already updated: {changed}." : string.Empty));
+            if (changed.Length > 0)
+                Announce($"{account.AccountLabel} converted to Microsoft 365, apart from its client-side rules, which can't be read yet. {changed}.",
+                         AnnouncementCategory.Result);
+            return;
         }
 
         // Clear the marker — resolve the CURRENT instance (a reload may have replaced it) and persist.
@@ -4249,8 +4278,17 @@ public partial class MainViewModel : ObservableObject, IDisposable
             return;
         }
 
+        List<MailRule> all;
+        try { all = _ruleService.LoadRules(); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Not "No active client-side rules": none are running, but not because there are none (#700).
+            RulesStatusText = "Client-side rules can't be read";
+            return;
+        }
+
         // A rule saved against a shared mailbox is kept but does not run (#678), so it is not "active".
-        var rules = _ruleService.LoadRules()
+        var rules = all
             .Where(r => r.AccountId is not Guid id || ResolveAccountById(id) is not { IsShared: true })
             .ToList();
         int active = rules.Count(r => r.IsEnabled);
