@@ -165,6 +165,31 @@ public class SyncServiceOfflineBodiesTests : IDisposable
     }
 
     [Fact]
+    public async Task AllMailFetchesInboxMailOfAnyAge()
+    {
+        await SeedAsync(
+            Summary("ancient", "INBOX", 3650),
+            Summary("newest", "INBOX", 1),
+            Summary("elsewhere", "Projects", 3650)); // still Inbox only
+        var (sync, mail, _) = Build(offlineBodyDays: ConfigModel.OfflineBodyDaysAll, syncDays: 0);
+
+        await sync.BackfillOfflineBodiesAsync([Account()], Folders(), CancellationToken.None);
+
+        Assert.Equal(["newest", "ancient"], mail.Prefetched);
+    }
+
+    [Fact]
+    public async Task AllMailIsStillCappedByTheSyncRange()
+    {
+        await SeedAsync(Summary("old", "INBOX", 400), Summary("recent", "INBOX", 100));
+        var (sync, mail, _) = Build(offlineBodyDays: ConfigModel.OfflineBodyDaysAll, syncDays: 365);
+
+        await sync.BackfillOfflineBodiesAsync([Account()], Folders(), CancellationToken.None);
+
+        Assert.Equal(["recent"], mail.Prefetched);
+    }
+
+    [Fact]
     public async Task APassStopsAtTheCapAndTheNextOnePicksUpTheRest()
     {
         var rows = Enumerable.Range(0, SyncService.MaxBodiesPerPass + 1)
@@ -217,6 +242,10 @@ public class SyncServiceOfflineBodiesTests : IDisposable
     [InlineData(30, 0, 30)]
     [InlineData(7, 30, 7)]
     [InlineData(90, 90, 90)]
+    [InlineData(365, 180, 180)]
+    [InlineData(365, 0, 365)]
+    [InlineData(ConfigModel.OfflineBodyDaysAll, 365, 365)]
+    [InlineData(ConfigModel.OfflineBodyDaysAll, 0, int.MaxValue)]
     public void TheWindowIsNeverWiderThanTheSyncRange(int offlineBodyDays, int syncDays, int expected)
     {
         var cfg = new ConfigModel { OfflineBodyDays = offlineBodyDays, SyncDays = syncDays };
@@ -317,6 +346,19 @@ public class SyncServiceOfflineBodiesTests : IDisposable
             await Task.Delay(25);
         await Task.Delay(100);
         Assert.Equal(["new"], mail.Prefetched);
+    }
+
+    [Fact]
+    public async Task AllMailTakesAnArrivalOfAnyAge()
+    {
+        var (sync, mail, _) = Build(offlineBodyDays: ConfigModel.OfflineBodyDaysAll, syncDays: 0);
+        mail.Arrivals.Add(Summary("ancient", "INBOX", 3650));
+        await sync.SyncOneFolderAsync(Account(), _inbox, CancellationToken.None);
+
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+        while (mail.Prefetched.Count == 0 && DateTime.UtcNow < deadline)
+            await Task.Delay(25);
+        Assert.Equal(["ancient"], mail.Prefetched);
     }
 
     [Fact]
