@@ -1,4 +1,5 @@
 # QuickMail v0.8.47 Release Notes
+
 ---
 
 ## Reporting Issues
