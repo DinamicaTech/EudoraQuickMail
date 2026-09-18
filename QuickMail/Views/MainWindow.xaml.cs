@@ -466,7 +466,7 @@ public partial class MainWindow : Window
             // follows it into the list as it always has.
             var stayInSidePane = e.PropertyName is nameof(MainViewModel.Messages) or nameof(MainViewModel.Conversations)
                                      or nameof(MainViewModel.SenderGroups) or nameof(MainViewModel.ToGroups)
-                                 && IsSameFolderAsLastRebuild(e.PropertyName!)
+                                 && IsSameFolderAsLastRebuild()
                                  && IsFocusInSidePane();
 
             if (e.PropertyName == nameof(MainViewModel.Messages) && IsActive)
@@ -949,16 +949,18 @@ public partial class MainWindow : Window
     private bool IsFocusInSidePane() =>
         FolderList.IsKeyboardFocusWithin || AccountList.IsKeyboardFocusWithin || MainStatusBar.IsKeyboardFocusWithin;
 
-    // The open folder when each message collection was last rebuilt, and when the folder tree last
+    // The open folder when a message collection was last rebuilt, and when the folder tree last
     // followed it (#719). Compared by identity: a folder refresh re-resolves SelectedFolder to a new
-    // object for the very same mailbox.
-    private readonly Dictionary<string, MailFolderModel?> _folderAtLastRebuild = new(StringComparer.Ordinal);
+    // object for the very same mailbox. One record for all four collections, not one each: a
+    // collection seen for the first time (Conversations after a switch out of Messages view) would
+    // otherwise count as a folder change once and then never again.
+    private MailFolderModel? _folderAtLastRebuild;
     private MailFolderModel? _treeSyncedFolder;
 
-    private bool IsSameFolderAsLastRebuild(string collection)
+    private bool IsSameFolderAsLastRebuild()
     {
-        _folderAtLastRebuild.TryGetValue(collection, out var before);
-        _folderAtLastRebuild[collection] = _vm.SelectedFolder;
+        var before = _folderAtLastRebuild;
+        _folderAtLastRebuild = _vm.SelectedFolder;
         return IsSameFolder(before, _vm.SelectedFolder);
     }
 
@@ -6279,6 +6281,10 @@ public partial class MainWindow : Window
         if (node.Folder is { } target && !SupportsServerFolders(target.AccountId, "delete")) return;
 
         var above = FindVisibleFolderNodeAbove(node);
+        // Where FolderList_GotKeyboardFocus lands when the node's item is removed with focus on it
+        // (#719). Refreshed here so both land on this node, not on one taken when focus arrived.
+        if (_folderTreeSpot is { } spot && ReferenceEquals(spot.Node, node))
+            _folderTreeSpot = spot with { Above = above };
         // Only move focus if the delete actually happened — a cancelled confirmation must leave the
         // user where they were.
         if (await _vm.DeleteFolderAsync(node) && above != null)
