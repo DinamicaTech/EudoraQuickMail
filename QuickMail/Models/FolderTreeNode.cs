@@ -8,8 +8,12 @@ namespace QuickMail.Models;
 /// </summary>
 public sealed class FolderTreeNode : INotifyPropertyChanged
 {
+    private MailFolderModel? _folder;
+    private string _label = string.Empty;
+    private bool _isSharedAccount;
+
     /// <summary>Null for account-group nodes and synthetic intermediate nodes that have no real IMAP folder.</summary>
-    public MailFolderModel? Folder { get; init; }
+    public MailFolderModel? Folder { get => _folder; init => _folder = value; }
 
     /// <summary>True for account-level group nodes that serve as collapsible containers for folder children.</summary>
     public bool IsHeader { get; init; }
@@ -23,7 +27,7 @@ public sealed class FolderTreeNode : INotifyPropertyChanged
 
     /// <summary>True for the top-level node of a shared mailbox (#31) — drives the "shared mailbox"
     /// qualifier in <see cref="AutomationName"/>.</summary>
-    public bool IsSharedAccount { get; init; }
+    public bool IsSharedAccount { get => _isSharedAccount; init => _isSharedAccount = value; }
 
     /// <summary>
     /// True for the Calendar node and every node beneath it. Drives which context menu the tree
@@ -32,7 +36,7 @@ public sealed class FolderTreeNode : INotifyPropertyChanged
     /// </summary>
     public bool IsCalendarNode { get; init; }
 
-    public string Label { get; init; } = string.Empty;
+    public string Label { get => _label; init => _label = value; }
 
     public ObservableCollection<FolderTreeNode> Children { get; } = [];
 
@@ -128,6 +132,38 @@ public sealed class FolderTreeNode : INotifyPropertyChanged
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ItemStatusLabel)));
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(UnreadDisplay)));
     }
+
+    /// <summary>
+    /// Takes on what a freshly built node for the same place in the tree says, keeping this node
+    /// object — and with it the TreeViewItem the tree generated for it, and keyboard focus if it is
+    /// there. A folder refresh builds a whole new tree; merging it into the live one node by node
+    /// (see <c>MainViewModel.MergeFolderNodes</c>) instead of swapping it in is what stops a
+    /// background sync moving focus in the folder tree (issue #719). Only the properties that can
+    /// differ between two nodes with the same key are taken: a refreshed <see cref="Folder"/>
+    /// object (new counts, a new display name), the label, and the shared-mailbox flag.
+    /// </summary>
+    internal void UpdateFrom(FolderTreeNode fresh)
+    {
+        var folderChanged = !ReferenceEquals(_folder, fresh._folder);
+        var labelChanged  = !string.Equals(_label, fresh._label, System.StringComparison.Ordinal);
+        var sharedChanged = _isSharedAccount != fresh._isSharedAccount;
+        if (!folderChanged && !labelChanged && !sharedChanged) return;
+
+        _folder          = fresh._folder;
+        _label           = fresh._label;
+        _isSharedAccount = fresh._isSharedAccount;
+
+        if (folderChanged) Raise(nameof(Folder));
+        if (labelChanged)  Raise(nameof(Label));
+        if (sharedChanged) Raise(nameof(IsSharedAccount));
+        // Every display derived from the three. WPF compares the bound value, so an unchanged
+        // name raises no automation event on the focused item.
+        Raise(nameof(AutomationName));
+        Raise(nameof(ItemStatusLabel));
+        Raise(nameof(UnreadDisplay));
+    }
+
+    private void Raise(string name) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
 
     public event PropertyChangedEventHandler? PropertyChanged;
 }
