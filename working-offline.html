@@ -38,8 +38,8 @@ momentary blip never interrupts you.</p>
 <li>Reading any message you have opened before, or that QuickMail
 fetched ahead of time (it keeps the newest messages of each folder you
 open, and the ones around any message you read). To keep more, see <a
-href="#reading-recent-messages-without-a-connection">Reading recent
-messages without a connection</a>.</li>
+href="#reading-messages-without-a-connection">Reading messages without a
+connection</a>.</li>
 <li>The message list of every folder you have opened, with its unread
 state and flags.</li>
 <li>Searching and filtering what is on this computer, the calendar, and
@@ -63,14 +63,16 @@ fail with a message, and the next sync after the connection returns puts
 the message back the way the server has it. Only composing waits for
 you.</li>
 </ul>
-<h3 id="reading-recent-messages-without-a-connection">Reading recent
-messages without a connection</h3>
+<h3 id="reading-messages-without-a-connection">Reading messages without
+a connection</h3>
 <p>By default QuickMail keeps the full text of a message only once you
 have opened it, or when it fetched a few ahead of time. To have more
 ready before the connection drops, choose a window under
 <strong>Settings → General → Sync → Download messages for offline
-reading</strong>: <strong>Off</strong> (the default), or the last
-<strong>7</strong>, <strong>30</strong> or <strong>90</strong> days.</p>
+reading</strong>: <strong>Off</strong> (the default); the last
+<strong>7</strong>, <strong>30</strong> or <strong>90</strong> days; the
+last <strong>6 months</strong> or <strong>year</strong>; or <strong>All
+mail</strong>.</p>
 <p>With a window set, the sync at launch and each background check
 (<strong>Check for new mail every</strong>) finish by downloading the
 text of each Inbox message in that window that QuickMail does not have
@@ -79,8 +81,14 @@ Inbox gets its text straight away. When a pass completes you hear
 “Downloaded 120 messages for offline reading.” once. A few things to
 know:</p>
 <ul>
-<li>Inbox only. Other folders keep working the way they always have: a
-message is kept once you open it.</li>
+<li>Inbox only, unless you also check <strong>Include other folders, not
+just the Inbox</strong>. Then Sent, Archive and your other folders are
+downloaded too — everything except Trash, Junk and Drafts — Inbox first.
+Search finds words in the text of those messages only once they are
+downloaded, so this is what makes searching your sent and archived mail
+work without opening each message. It can download a great deal more, so
+it is off by default. Without it, other folders keep working the way
+they always have: a message is kept once you open it.</li>
 <li>Never wider than the <strong>Sync range</strong> above it, since
 QuickMail cannot keep what it has not synced.</li>
 <li>Attachments are not included. Opening one still needs a
@@ -89,7 +97,17 @@ connection.</li>
 not apply to them.</li>
 <li>The text lives in <code>mail.db</code> in QuickMail’s data folder,
 which grows accordingly — roughly tens of megabytes for a month of a
-busy Inbox.</li>
+busy Inbox, so a year or all mail can run to hundreds of megabytes or
+more.</li>
+<li>The status bar says how it is going: “Messages: 1,240 of 2,000
+downloaded”, and “Messages: downloading 120 of 500” while a batch is
+coming down. Press <strong>Ctrl+9</strong> to reach the status bar (when
+no tabs are open; with tabs, <strong>Ctrl+9</strong> goes to the last
+tab) and <strong>Right</strong> to move along it. Nothing is said aloud
+as it changes; it is there to be read when you want it.</li>
+<li>A large window fills in gradually. Each pass downloads up to 500
+messages per Inbox, newest first, so a big Inbox set to a year or all
+mail takes many background checks to finish.</li>
 </ul>
 <h3 id="getting-back-online">Getting back online</h3>
 <p>Nothing to press. When Windows reports the network again QuickMail

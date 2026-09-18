@@ -369,25 +369,263 @@ Density</strong>, and <strong>Density: Comfortable</strong> and
 reader reports about it, is identical either way — that is set in <a
 href="#message-list-fields">Message List Fields</a>.</p>
 <h3 id="searching">Searching</h3>
-<p>Press <code>Ctrl+Shift+S</code> to open the search box. Type your
-query and press Enter. Results appear in the message list. Press Escape
-to clear the search and return to the full folder.</p>
+<p>Press <code>Ctrl+Shift+S</code>, or <code>/</code> in the message
+list, to open the search box. The list narrows as you type to the
+matching messages in the folder you are in — an ordinary folder, or a
+combined one such as <strong>All Inboxes</strong> or <strong>All
+Mail</strong> — and the number found is announced when you pause. Press
+<strong>Down</strong> or <strong>Tab</strong> to move into the results,
+and <strong>Escape</strong> to clear the search and return to the whole
+folder.</p>
+<p>Search reads the whole message, not only what the list shows: the
+sender, the recipients and Cc, the subject, the text of the message, and
+the names of its attachments. It searches the copy QuickMail keeps on
+this computer, so the text of a message is searchable once it has been
+downloaded — because you opened it, because QuickMail fetched it ahead
+of time, or because it is inside <strong>Download messages for offline
+reading</strong> (see <a
+href="#reading-messages-without-a-connection">Reading messages without a
+connection</a>). The sender, recipients, subject and preview are always
+searchable, and there a match can be part of a word.</p>
+<p><strong>Words.</strong> Every word you type has to be in the message,
+in any order. A word finds the words that begin with it, so
+<code>budg</code> finds “budget”, and capitals and accents don’t
+matter.</p>
+<ul>
+<li>Put words in quotes to find them together, in that order:
+<code>"quarterly report"</code>.</li>
+<li>Put a minus sign in front of a word or quoted phrase to leave out
+the messages that contain it: <code>budget -draft</code>.</li>
+</ul>
+<p><strong>Where a word is.</strong> Put one of these in front of a
+word, or of a quoted phrase, to look for it in one place only:</p>
+<table>
+<thead>
+<tr class="header">
+<th>Type</th>
+<th>To find it in</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>from:sam</code></td>
+<td>the sender’s name or address</td>
+</tr>
+<tr class="even">
+<td><code>to:ann</code></td>
+<td>the recipients</td>
+</tr>
+<tr class="odd">
+<td><code>cc:lee</code></td>
+<td>the Cc recipients</td>
+</tr>
+<tr class="even">
+<td><code>subject:invoice</code></td>
+<td>the subject</td>
+</tr>
+<tr class="odd">
+<td><code>body:agenda</code></td>
+<td>the text of the message</td>
+</tr>
+<tr class="even">
+<td><code>attachment:report</code></td>
+<td>the names of attached files</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Which messages.</strong> These narrow the results without
+looking for any text:</p>
+<table>
+<colgroup>
+<col style="width: 27%" />
+<col style="width: 72%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Type</th>
+<th>Finds messages</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>has:attachment</code></td>
+<td>with attachments</td>
+</tr>
+<tr class="even">
+<td><code>is:unread</code>, <code>is:read</code></td>
+<td>not yet read, or read</td>
+</tr>
+<tr class="odd">
+<td><code>is:flagged</code>, <code>is:unflagged</code></td>
+<td>flagged, or not</td>
+</tr>
+<tr class="even">
+<td><code>after:2026-01-15</code></td>
+<td>received on that day or later</td>
+</tr>
+<tr class="odd">
+<td><code>before:2026-02-01</code></td>
+<td>received before that day</td>
+</tr>
+<tr class="even">
+<td><code>folder:projects</code></td>
+<td>in a folder whose name contains “projects” — useful in All Mail</td>
+</tr>
+<tr class="odd">
+<td><code>account:work</code></td>
+<td>in an account whose name or address contains “work”</td>
+</tr>
+</tbody>
+</table>
+<p>A minus sign in front of <code>has:</code> or <code>is:</code>
+reverses it: <code>-has:attachment</code> finds messages with none.
+Write dates as year, month and day, or the way Windows shows a short
+date on your computer.</p>
+<p>Anything else with a colon in it — <code>Re:</code>, a time such as
+<code>10:30</code>, a web address — is searched for as ordinary text, so
+pasting a subject line works.</p>
+<p>Everything combines:
+<code>from:sam budget -draft is:unread after:2026-01-01</code> finds
+unread messages from Sam since the start of the year that mention the
+budget and don’t mention a draft.</p>
+<h3 id="advanced-search">Advanced Search</h3>
+<p>Press <strong>Ctrl+/</strong>, or choose <strong>View → Advanced
+Search…</strong>, to search with a form instead of typing the syntax.
+You can assign a different shortcut in <strong>File → Settings →
+Keyboard Shortcuts</strong>.</p>
+<p>The form has a field for each part of a message — <strong>Words
+anywhere</strong>, <strong>From</strong>, <strong>To</strong>,
+<strong>Cc</strong>, <strong>Subject</strong>, <strong>Body</strong> and
+<strong>Attachment name</strong> — and for the conditions: <strong>Has
+attachments</strong>, <strong>Read state</strong>,
+<strong>Flag</strong>, <strong>Received from</strong> and
+<strong>Received up to</strong> (both days included). Every word in a
+field is looked for in that part of the message, so
+<strong>From</strong> <code>Sam Smith</code> finds a sender with both
+words in the name or address. <strong>Words anywhere</strong> also takes
+everything the search box understands, such as
+<code>folder:projects</code>.</p>
+<p>Under <strong>Look in</strong>, choose where to search:</p>
+<ul>
+<li><strong>This folder</strong> searches the folder you were in,
+exactly as the search box does: the search box opens showing the search,
+so you can see how it is written and change it there.</li>
+<li><strong>Every folder of these accounts</strong> searches all of your
+mail in the accounts you leave checked — every account, unless you
+uncheck some — including Sent and Trash. The results open as a
+<strong>Search results</strong> folder.</li>
+</ul>
+<p>The accounts are a single list: <strong>Tab</strong> reaches it,
+<strong>Up</strong> and <strong>Down</strong> move between accounts, and
+<strong>Space</strong> checks or unchecks the one you are on. Below it,
+<strong>Also search the mail server</strong> asks each account’s server
+as well as this computer — for mail older than the <strong>Sync
+range</strong>, or whose text was never downloaded (see <a
+href="#searching-the-server-too">Searching the server too</a>). When a
+search of this computer alone finds nothing, QuickMail says so and
+suggests it.</p>
+<p>Press <strong>Enter</strong> to search. When something is found the
+form closes, focus moves to the first result, and the number found is
+announced. When nothing is found the form stays open with focus back in
+<strong>Words anywhere</strong>, so you can change the search and try
+again. A search of every folder of your accounts leaves you in the
+folder you were in; a search of <strong>This folder</strong> leaves its
+words in that folder’s search box. While a search is running,
+<strong>Escape</strong> waits for it to finish. <strong>Clear</strong>
+empties the fields but keeps your choice of where to look, and
+<strong>Escape</strong> closes the form. <strong>F6</strong> moves
+between the fields, <strong>Look in</strong>, the list of accounts and
+the buttons.</p>
+<h4 id="searching-the-server-too">Searching the server too</h4>
+<p>Search looks at the mail on this computer. To also find mail that
+isn’t here — older than the <strong>Sync range</strong>, or whose text
+was never downloaded — check <strong>Also search the mail
+server</strong> in Advanced Search, or with Search results already open
+choose <strong>Search the Server</strong> on the results bar, or
+<strong>Search the Server Too</strong> in the command palette. QuickMail
+asks each account’s mail server for the same search and adds what it
+finds that the results don’t already have; you hear how many more were
+found, or that there were none. An account whose server refuses the
+search is named, and the others still count; one QuickMail already knows
+is offline is left out quietly.</p>
+<p>What each server can search for differs. Gmail and Microsoft 365
+search the whole mailbox at once — for Gmail that is everything except
+Spam and Trash, and a search naming a folder goes folder by folder
+instead. Other mail servers are asked one folder at a time, which takes
+longer on a large account, and some search the text of a message more
+thoroughly than others. Messages found this way are shown but not kept:
+they stay in the results until you refresh or close them.</p>
+<h4 id="saving-a-search">Saving a search</h4>
+<p>While a <strong>Search results</strong> folder is open, <strong>View
+→ Views → Save View…</strong> — or <strong>Save Search as View…</strong>
+in the command palette — saves it as a view, with a name and, if you
+like, a keyboard shortcut. Choosing the view later runs the search
+again, so it always shows what matches now.</p>
+<p>The <strong>Search results</strong> folder works like any other
+folder: every view, sort, filter and message command applies, and the
+search box searches within the results. Above the list, a bar shows how
+many were found and for what, with <strong>Change Search</strong> — or
+<strong>Ctrl+/</strong> — to reopen the form with this search filled in,
+and <strong>Close</strong> — or <strong>Escape</strong> — to go back to
+the folder you started from. New mail that arrives while the results are
+open joins them if its sender, recipients, subject or preview match; a
+message that matches only in its text appears the next time the results
+are refreshed with <strong>F5</strong>.</p>
+<p>The first time you start a version of QuickMail with this search, it
+builds its index of the mail it already has, in the background, newest
+mail first. Until that finishes, older messages are found by their
+sender, recipients, subject and preview only. When QuickMail runs in
+online mode (<code>--online</code>) there is no copy on this computer,
+so search matches the sender, recipients, subject and preview of the
+messages in the list, and <code>cc:</code> and <code>attachment:</code>
+find nothing.</p>
 <h3 id="searching-folders">Searching Folders</h3>
 <p>Press <code>Ctrl+Shift+F</code> to search folder names. Type to
 filter the tree, press Enter to navigate to the matching folder.</p>
 <h3 id="refreshing">Refreshing</h3>
 <p>Press <strong>F5</strong> to manually refresh the current folder.</p>
 <h3 id="command-palette">Command Palette</h3>
-<p>Press <strong>Ctrl+Shift+P</strong> to open the command palette: one
-list of every command, sorted by category and then by name, with each
-command’s shortcut key where it has one. Arrow to a command, or type the
-first letters of its name to jump to it, and press Enter to run it;
-Escape closes the palette. This is the fastest way to discover and run
-any action in the app, including the many that have no shortcut key.</p>
+<p>Press <strong>Ctrl+Shift+P</strong> to open the command palette. It
+opens with focus in a filter box, and below it every command, sorted by
+category and then by name, with each command’s shortcut key where it has
+one. This is the fastest way to discover and run any action in the app,
+including the many that have no shortcut key.</p>
+<p><strong>Start typing and the list narrows to what matches.</strong>
+You do not have to type the start of a command’s name, or even whole
+words:</p>
+<ul>
+<li><strong>Any part of the name.</strong> Typing <code>arch</code>
+finds <strong>Move to Archive</strong>.</li>
+<li><strong>The initials.</strong> Typing <code>gtf</code> finds
+<strong>Go to Folder</strong>.</li>
+<li><strong>The category.</strong> Typing <code>mail</code> lists the
+Mail commands.</li>
+<li><strong>Several words, in any order.</strong> Typing
+<code>arch mail</code> finds the Mail category’s Archive command.</li>
+</ul>
+<p>The best match is always at the top of the list and is the one
+<strong>Enter</strong> runs. The command at the top is reported as it
+changes, and so is each command you reach by arrowing
+<strong>Up</strong> and <strong>Down</strong> — reported by Windows from
+the list itself, not announced by QuickMail over the top of it, so no
+announcement setting can switch it off. When a keystroke narrows the
+list without changing the command at the top, you hear the new count on
+its own — “3 commands” — because nothing else would tell you the list
+had moved.</p>
+<p>Focus stays in the filter box the whole time, so you can keep typing
+to narrow further without moving anywhere first.</p>
+<p><strong>Escape</strong> clears the filter if you have typed anything,
+and closes the palette if the box is already empty. <strong>Page
+Up</strong> and <strong>Page Down</strong> move through the list ten at
+a time. If nothing matches what you have typed, you hear “No matching
+commands”, and Enter says so too rather than doing nothing silently.</p>
 <p>The palette opens from anywhere in the main window, including while
 you are reading a message in the reading pane. Closing it puts you back
 where you were reading, and a command you choose runs before focus
 returns to the message.</p>
+<p>Other windows have their own palettes on the same key — the compose
+window, an open message, the address book, the rules window and more —
+listing the commands that belong to that window.</p>
 <h3 id="keyboard-customization">Keyboard Customization</h3>
 <p>Open <strong>File → Settings → Keyboard Shortcuts</strong> to
 reassign any shortcut to a different key. Select a command’s field and
