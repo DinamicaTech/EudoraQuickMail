@@ -309,6 +309,10 @@ public partial class LocalStoreService : ILocalStoreService
                 watermark.ExecuteNonQuery();
             }
         }
+
+        // Full-text search (#717). Last, after every table it indexes has its final shape: the 1→2 rebuild
+        // above drops and recreates the message tables, which would take the index's triggers with them.
+        InitializeSearchIndex(conn);
     }
 
     // SQLite's PRAGMA user_version stores a single integer per database. We use it as a
@@ -556,6 +560,7 @@ public partial class LocalStoreService : ILocalStoreService
             await cmd.ExecuteNonQueryAsync();
         }
         await tx.CommitAsync();
+        KickSearchIndexer();
     }
 
     public async Task<List<MailMessageSummary>> LoadAllSummariesAsync()
@@ -660,6 +665,7 @@ public partial class LocalStoreService : ILocalStoreService
         await using var tx   = await conn.BeginTransactionAsync();
         await using var cmd  = conn.CreateCommand();
         cmd.CommandText =
+            SearchIndexAccountPurgeSql +
             "DELETE FROM MessageDetail     WHERE account_id = $aid;" +
             "DELETE FROM MessageSummary    WHERE account_id = $aid;" +
             "DELETE FROM CalendarEvent     WHERE account_id = $aid;" +
@@ -695,6 +701,7 @@ public partial class LocalStoreService : ILocalStoreService
         {
             await using var cmd = conn.CreateCommand();
             cmd.CommandText =
+                SearchIndexAccountPurgeSql +
                 "DELETE FROM MessageDetail  WHERE account_id = $aid;" +
                 "DELETE FROM MessageSummary WHERE account_id = $aid;" +
                 "DELETE FROM DeltaToken     WHERE account_id = $aid;" +
@@ -1033,6 +1040,7 @@ public partial class LocalStoreService : ILocalStoreService
         await cmd2.ExecuteNonQueryAsync();
 
         await tx.CommitAsync();
+        KickSearchIndexer();
     }
 
     public async Task<MailMessageDetail?> LoadDetailAsync(Guid accountId, string folderName, string messageId)
@@ -1560,6 +1568,7 @@ public partial class LocalStoreService : ILocalStoreService
         }
 
         await tx.CommitAsync();
+        KickSearchIndexer();
         return refiled;
     }
 
