@@ -1,5 +1,7 @@
 # Saving and Exporting Messages — Plan for Review
 
+> Tracking issue: #728
+
 > Status: **Draft for Kelly's review.** Not yet a spec. Once the open questions in §8 are
 > answered, the chosen phases get a PM + dev spec with the full keyboard walkthrough,
 > infrastructure changes, and out-of-scope sections CLAUDE.md requires.
