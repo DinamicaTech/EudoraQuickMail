@@ -149,6 +149,10 @@ public sealed class FolderTreeNode : INotifyPropertyChanged
         var sharedChanged = _isSharedAccount != fresh._isSharedAccount;
         if (!folderChanged && !labelChanged && !sharedChanged) return;
 
+        // The derived displays are compared rather than raised blindly: calendar and saved-view
+        // nodes get a new folder object on every build, and would otherwise raise on each one.
+        var (name, status, badge) = (AutomationName, ItemStatusLabel, UnreadDisplay);
+
         _folder          = fresh._folder;
         _label           = fresh._label;
         _isSharedAccount = fresh._isSharedAccount;
@@ -156,11 +160,9 @@ public sealed class FolderTreeNode : INotifyPropertyChanged
         if (folderChanged) Raise(nameof(Folder));
         if (labelChanged)  Raise(nameof(Label));
         if (sharedChanged) Raise(nameof(IsSharedAccount));
-        // Every display derived from the three. WPF compares the bound value, so an unchanged
-        // name raises no automation event on the focused item.
-        Raise(nameof(AutomationName));
-        Raise(nameof(ItemStatusLabel));
-        Raise(nameof(UnreadDisplay));
+        if (name   != AutomationName)  Raise(nameof(AutomationName));
+        if (status != ItemStatusLabel) Raise(nameof(ItemStatusLabel));
+        if (badge  != UnreadDisplay)   Raise(nameof(UnreadDisplay));
     }
 
     private void Raise(string name) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));

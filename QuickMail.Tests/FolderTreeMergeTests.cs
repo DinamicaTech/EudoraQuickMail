@@ -231,6 +231,64 @@ public class FolderTreeMergeTests
         Assert.True(inbox.IsExpanded);
     }
 
+    [Fact]
+    public void AnAccountPlaceholder_IsKept_WhenItsFoldersArrive()
+    {
+        // The "mailbox connecting" refresh from the issue: an account shown as a bare header until
+        // its folders load. The header is the same node before and after, so a user sitting on it
+        // is not moved when its folders appear under it.
+        var placeholder = new FolderTreeNode { IsHeader = true, Label = "Shared", AccountId = AccountA };
+        var live = new ObservableCollection<FolderTreeNode> { placeholder };
+        var loaded = new FolderTreeNode { IsHeader = true, Label = "Shared", AccountId = AccountA, IsExpanded = true };
+        loaded.Children.Add(Node(Folder("INBOX", "Inbox")));
+
+        MainViewModel.MergeFolderNodes(live, [loaded]);
+
+        Assert.Same(placeholder, Assert.Single(live));
+        Assert.Equal("INBOX", Assert.Single(placeholder.Children).Folder!.FullName);
+    }
+
+    [Fact]
+    public void AnInsertARemovalAndAReorder_InOneMerge_EndInTheFreshOrder()
+    {
+        var a = Node(Folder("A", "A"));
+        var b = Node(Folder("B", "B"));
+        var c = Node(Folder("C", "C"));
+        var live = new ObservableCollection<FolderTreeNode> { a, b, c };
+        var d = Node(Folder("D", "D"));
+
+        MainViewModel.MergeFolderNodes(live, [Node(Folder("C", "C")), d, Node(Folder("A", "A"))]);
+
+        Assert.Equal([c, d, a], live);
+    }
+
+    [Fact]
+    public void TwoSiblingsWithOneKey_AreTrimmedToWhatTheFreshTreeHolds()
+    {
+        var first  = new FolderTreeNode { Label = "Segment" };
+        var second = new FolderTreeNode { Label = "Segment" };
+        var live = new ObservableCollection<FolderTreeNode> { first, second };
+
+        MainViewModel.MergeFolderNodes(live, [new FolderTreeNode { Label = "Segment" }]);
+
+        Assert.Same(first, Assert.Single(live));
+    }
+
+    [Fact]
+    public void ANewFolderObject_WithTheSameValues_RaisesOnlyFolder()
+    {
+        // Calendar and saved-view nodes get a new folder object on every build. Nothing shown or
+        // spoken changed, so nothing but the reference is announced.
+        var inbox = Node(Folder("INBOX", "Inbox", unread: 2));
+        var live = new ObservableCollection<FolderTreeNode> { inbox };
+        var raised = new List<string?>();
+        inbox.PropertyChanged += (_, e) => raised.Add(e.PropertyName);
+
+        MainViewModel.MergeFolderNodes(live, [Node(Folder("INBOX", "Inbox", unread: 2))]);
+
+        Assert.Equal([nameof(FolderTreeNode.Folder)], raised);
+    }
+
     // ── Against a real TreeView ──────────────────────────────────────────────
 
     [StaFact]

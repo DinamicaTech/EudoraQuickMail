@@ -459,6 +459,16 @@ public partial class MainWindow : Window
         // runs last and wins — the correct post-delete focus position is preserved.
         vm.PropertyChanged += (_, e) =>
         {
+            // #719: a rebuild that finds focus in the folder tree, the account list or the status
+            // bar, with the same folder still open, is background work — a sync, a removal the
+            // server reported, F5 — and keeps focus where the user is. A different folder means the
+            // user went somewhere (Enter or a click on a folder, a saved-view hotkey), and focus
+            // follows it into the list as it always has.
+            var stayInSidePane = e.PropertyName is nameof(MainViewModel.Messages) or nameof(MainViewModel.Conversations)
+                                     or nameof(MainViewModel.SenderGroups) or nameof(MainViewModel.ToGroups)
+                                 && IsSameFolderAsLastRebuild(e.PropertyName!)
+                                 && IsFocusInSidePane();
+
             if (e.PropertyName == nameof(MainViewModel.Messages) && IsActive)
             {
                 LogService.Debug($"[FOCUS] PropChanged:Messages viewMode={_vm.ViewMode} {FocusInfo()}");
@@ -472,13 +482,11 @@ public partial class MainWindow : Window
                     // collection changed but focus must not move.
                     LogService.Debug("[FOCUS]   → skipped (reading pane open)");
                 }
-                else if (IsFocusInSidePane())
+                else if (stayInSidePane)
                 {
-                    // The user is in the folder tree, the account list or the status bar (#719).
                     // A grouped view still lands its selection on the top row, as it would have,
                     // so the list opens there when the user comes to it — but focus stays put.
-                    // Enter on a folder moves focus to the list itself once the folder is loaded.
-                    LogService.Debug("[FOCUS]   → focus in a side pane; selection only");
+                    LogService.Debug("[FOCUS]   → background rebuild, focus in a side pane; selection only");
                     if (vm.IsConversationsView)  LandOnConversationAfterRebuild(0, takeFocus: false);
                     else if (vm.IsFromView)      LandOnSenderGroupAfterRebuild(0, takeFocus: false);
                     else if (vm.IsToView)        LandOnToGroupAfterRebuild(0, takeFocus: false);
@@ -524,9 +532,9 @@ public partial class MainWindow : Window
                     // Capture selected index now (before DataBind replaces items) so we can
                     // restore position after a background sync that rebuilds Conversations.
                     var oldIdx = ConversationTree.Items.IndexOf(ConversationTree.SelectedItem);
-                    // Focus in another pane (#719): a background rebuild — a sync, a removal the
-                    // server reported — keeps the list's position but leaves focus with the user.
-                    var takeFocus = !IsFocusInSidePane();
+                    // A background rebuild with focus in another pane (#719) keeps the list's
+                    // position but leaves focus with the user.
+                    var takeFocus = !stayInSidePane;
                     LogService.Debug($"[FOCUS] PropChanged:Conversations convCount={vm.Conversations.Count} oldIdx={oldIdx} takeFocus={takeFocus} {FocusInfo()}");
                     FocusTreeSelectedOrFirst(ConversationTree, oldIdx, takeFocus);
                 }
@@ -548,9 +556,9 @@ public partial class MainWindow : Window
                     // Capture selected index now (before DataBind replaces items) so we can
                     // restore position after a background sync that rebuilds SenderGroups.
                     var oldIdx = SenderGroupTree.Items.IndexOf(SenderGroupTree.SelectedItem);
-                    // Focus in another pane (#719): a background rebuild — a sync, a removal the
-                    // server reported — keeps the list's position but leaves focus with the user.
-                    var takeFocus = !IsFocusInSidePane();
+                    // A background rebuild with focus in another pane (#719) keeps the list's
+                    // position but leaves focus with the user.
+                    var takeFocus = !stayInSidePane;
                     LogService.Debug($"[FOCUS] PropChanged:SenderGroups grpCount={vm.SenderGroups.Count} oldIdx={oldIdx} takeFocus={takeFocus} {FocusInfo()}");
                     FocusTreeSelectedOrFirst(SenderGroupTree, oldIdx, takeFocus);
                 }
@@ -572,9 +580,9 @@ public partial class MainWindow : Window
                     // Capture selected index now (before DataBind replaces items) so we can
                     // restore position after a background sync that rebuilds ToGroups.
                     var oldIdx = ToGroupTree.Items.IndexOf(ToGroupTree.SelectedItem);
-                    // Focus in another pane (#719): a background rebuild — a sync, a removal the
-                    // server reported — keeps the list's position but leaves focus with the user.
-                    var takeFocus = !IsFocusInSidePane();
+                    // A background rebuild with focus in another pane (#719) keeps the list's
+                    // position but leaves focus with the user.
+                    var takeFocus = !stayInSidePane;
                     LogService.Debug($"[FOCUS] PropChanged:ToGroups grpCount={vm.ToGroups.Count} oldIdx={oldIdx} takeFocus={takeFocus} {FocusInfo()}");
                     FocusTreeSelectedOrFirst(ToGroupTree, oldIdx, takeFocus);
                 }
@@ -592,15 +600,20 @@ public partial class MainWindow : Window
                      e.PropertyName == nameof(MainViewModel.FolderTree))
             {
                 var changed = e.PropertyName;
+                // A refresh re-resolves SelectedFolder to a new object for the same folder; only a
+                // change of folder is somewhere the tree should follow.
+                var sameFolder = e.PropertyName == nameof(MainViewModel.SelectedFolder)
+                                 && IsSameFolder(_treeSyncedFolder, vm.SelectedFolder);
+                _treeSyncedFolder = vm.SelectedFolder;
                 Dispatcher.InvokeAsync(() =>
                 {
-                    // Not while the user is in the tree (#719). Selecting a TreeViewItem in a tree
-                    // that has keyboard focus also focuses it, so following the open folder here
-                    // pulled focus off the folder being arrowed onto and onto the open one ("All
-                    // Mail") whenever a sync re-resolved SelectedFolder. Enter on a folder has
-                    // already selected it, so nothing is lost; the tree follows the open folder
-                    // again the next time focus comes into it (FolderList_GotKeyboardFocus).
-                    if (FolderList.IsKeyboardFocusWithin && FolderList.SelectedItem is FolderTreeNode)
+                    // Not for a refresh while the user is in the tree (#719). Selecting a
+                    // TreeViewItem in a tree that has keyboard focus also focuses it, so following
+                    // the open folder here pulled focus off the folder being arrowed onto and onto
+                    // the open one ("All Mail") whenever a sync re-resolved SelectedFolder. The tree
+                    // follows the open folder again the next time focus comes into it
+                    // (FolderList_GotKeyboardFocus).
+                    if (sameFolder && FolderList.IsKeyboardFocusWithin && FolderList.SelectedItem is FolderTreeNode)
                     {
                         LogService.Debug($"[FOCUS] folder tree sync skipped ({changed}) — focus is in the tree");
                         return;
@@ -935,6 +948,22 @@ public partial class MainWindow : Window
     // out of one of these: the user did nothing to the list.
     private bool IsFocusInSidePane() =>
         FolderList.IsKeyboardFocusWithin || AccountList.IsKeyboardFocusWithin || MainStatusBar.IsKeyboardFocusWithin;
+
+    // The open folder when each message collection was last rebuilt, and when the folder tree last
+    // followed it (#719). Compared by identity: a folder refresh re-resolves SelectedFolder to a new
+    // object for the very same mailbox.
+    private readonly Dictionary<string, MailFolderModel?> _folderAtLastRebuild = new(StringComparer.Ordinal);
+    private MailFolderModel? _treeSyncedFolder;
+
+    private bool IsSameFolderAsLastRebuild(string collection)
+    {
+        _folderAtLastRebuild.TryGetValue(collection, out var before);
+        _folderAtLastRebuild[collection] = _vm.SelectedFolder;
+        return IsSameFolder(before, _vm.SelectedFolder);
+    }
+
+    private static bool IsSameFolder(MailFolderModel? a, MailFolderModel? b) =>
+        a != null && b != null && TreeViewFocusHelper.FoldersMatch(a, b);
 
     // On startup: initialise WebView2, connect to first account, open INBOX, focus message list
     private async void OnLoaded(object sender, RoutedEventArgs e)
@@ -2206,8 +2235,9 @@ public partial class MainWindow : Window
         // gone (#719). WPF puts it on the tree, the removed item's parent or the first item; land
         // beside where the user was instead of there or on the open folder, which can be anywhere.
         if (e.OldFocus is TreeViewItem removed &&
+            lastSpot is { } spot && ReferenceEquals(removed, spot.Container) &&
             System.Windows.Media.VisualTreeHelper.GetParent(removed) == null &&
-            LandNearRemovedFolderNode(lastSpot))
+            LandNearRemovedFolderNode(spot))
             return;
 
         if (e.OldFocus is DependencyObject oldFocus && IsDescendantOf(FolderList, oldFocus))
@@ -6470,46 +6500,44 @@ public partial class MainWindow : Window
     // ── Folder tree focus across a refresh (#719) ────────────────────────────
     // A folder refresh merges into the live tree (MainViewModel.MergeFolderNodes), so the item with
     // focus normally survives it untouched. The one case left is that item itself going away — the
-    // folder was deleted or renamed elsewhere, or its account removed. WPF then drops focus onto the
-    // tree, and FolderList_GotKeyboardFocus would put it on the open folder. Instead it lands next to
-    // where the user was: on the folder above at the same level, or the parent for a first child —
-    // the same "folder above" a folder delete lands on.
+    // folder was deleted or renamed elsewhere, or its account removed. WPF then moves focus to the
+    // removed item's parent or the tree's first item, and FolderList_GotKeyboardFocus would go on
+    // to the open folder. Instead it lands on the visible folder above where the user was — the
+    // same node DeleteFolderWithFocusAsync lands on, so a delete from the tree ends up in one place.
 
-    // Where focus last sat in the tree: the node, its parent (null at the top level), and its index
-    // among its siblings.
-    private (FolderTreeNode Node, FolderTreeNode? Parent, int Index)? _folderTreeSpot;
+    // Where focus last sat in the tree: the item's container (to recognise it once it is detached),
+    // its node, the visible node above it and its parent. Above and parent are captured while the
+    // node is still in the tree; once it has been removed there is no position left to ask about.
+    private (TreeViewItem Container, FolderTreeNode Node, FolderTreeNode? Above, FolderTreeNode? Parent)? _folderTreeSpot;
 
     private void RememberFolderTreeSpot(IInputElement? newFocus)
     {
         if (newFocus is not TreeViewItem { DataContext: FolderTreeNode node } tvi) return;
-        if (ItemsControl.ItemsControlFromItemContainer(tvi) is not { } owner) return;
 
-        var parent = (owner as TreeViewItem)?.DataContext as FolderTreeNode;
-        IList<FolderTreeNode> siblings = parent?.Children ?? (IList<FolderTreeNode>)_vm.FolderTree;
-        _folderTreeSpot = (node, parent, siblings.IndexOf(node));
+        var parent = (ItemsControl.ItemsControlFromItemContainer(tvi) as TreeViewItem)?.DataContext as FolderTreeNode;
+        _folderTreeSpot = (tvi, node, FindVisibleFolderNodeAbove(node), parent);
     }
 
-    private bool LandNearRemovedFolderNode((FolderTreeNode Node, FolderTreeNode? Parent, int Index)? lastSpot)
+    private bool LandNearRemovedFolderNode((TreeViewItem Container, FolderTreeNode Node, FolderTreeNode? Above, FolderTreeNode? Parent) spot)
     {
-        if (lastSpot is not { } spot) return false;
-
         // Still in the tree: focus left it for some other reason, and the ordinary rules apply.
-        if (TryFindFolderPath(_vm.FolderTree, spot.Node, new List<FolderTreeNode>())) return false;
+        if (IsInFolderTree(spot.Node)) return false;
 
-        // The whole branch went (an account removed): nothing near is left to land on.
-        if (spot.Parent != null && !TryFindFolderPath(_vm.FolderTree, spot.Parent, new List<FolderTreeNode>()))
-            return false;
-
-        IList<FolderTreeNode> siblings = spot.Parent?.Children ?? (IList<FolderTreeNode>)_vm.FolderTree;
-        FolderTreeNode? target =
-            spot.Index > 0 && siblings.Count > 0 ? siblings[Math.Min(spot.Index - 1, siblings.Count - 1)]
-            : spot.Parent ?? siblings.FirstOrDefault();
-        if (target == null) return false;
+        // The folder above, else the parent (the node above can have gone too — a whole branch
+        // renamed), shown through any branch collapsed since. Neither left (an account removed):
+        // the ordinary rules apply.
+        var near = spot.Above is { } above && IsInFolderTree(above) ? above
+                 : spot.Parent is { } parent && IsInFolderTree(parent) ? parent
+                 : null;
+        if (near == null || DeepestVisibleAncestor(near) is not { } target) return false;
 
         LogService.Debug($"[FOCUS] folder tree: focused '{spot.Node.Label}' was removed — landing on '{target.Label}'");
         FocusTreeItem(FolderList, target);
         return true;
     }
+
+    private bool IsInFolderTree(FolderTreeNode node) =>
+        TryFindFolderPath(_vm.FolderTree, node, new List<FolderTreeNode>());
 
     // ── Message context menu handlers ────────────────────────────────────────
 

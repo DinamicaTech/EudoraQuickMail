@@ -5130,7 +5130,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
         // refresh during a background sync — an account connecting, a calendar pull — dropped focus
         // out of the item the user was arrowing through and the tree landed it somewhere else. Only
         // the first build, into an empty tree, assigns: it has nothing to keep, and its change
-        // notification is what lets the window select the open folder at startup.
+        // notification is what lets the window select the open folder at startup. After that
+        // FolderTree never raises again, so anything that has to follow a refresh listens for
+        // SelectedFolder, which RebuildFolderListFromCache re-resolves on every one.
         if (FolderTree == null || FolderTree.Count == 0)
             FolderTree = new ObservableCollection<FolderTreeNode>(roots);
         else
@@ -5149,12 +5151,21 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// </summary>
     internal static void MergeFolderNodes(ObservableCollection<FolderTreeNode> live, IReadOnlyList<FolderTreeNode> fresh)
     {
+        // Keys computed once per sibling list: this runs on the UI thread on every folder refresh,
+        // and an account can hold hundreds of sibling folders.
+        var freshKeys = fresh.Select(MergeKey).ToList();
+        var liveKeys  = live.Select(MergeKey).ToList();
+
         // Removals first, so a folder that went away is a Remove and not a Move of every sibling
         // after it: a moved item's container is regenerated, which is the very focus loss this
         // merge exists to avoid.
+        var wanted = new HashSet<string>(freshKeys, StringComparer.Ordinal);
         for (var j = live.Count - 1; j >= 0; j--)
-            if (!fresh.Any(f => IsSameFolderNode(live[j], f)))
+            if (!wanted.Contains(liveKeys[j]))
+            {
                 live.RemoveAt(j);
+                liveKeys.RemoveAt(j);
+            }
 
         for (var i = 0; i < fresh.Count; i++)
         {
@@ -5162,17 +5173,21 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
             // Searched from i on: everything before i is already settled, and a sibling list
             // can in principle hold two nodes with one key (two same-named path segments).
-            var at = -1;
-            for (var j = i; j < live.Count; j++)
-                if (IsSameFolderNode(live[j], want)) { at = j; break; }
+            var at = liveKeys.IndexOf(freshKeys[i], i);
 
             if (at < 0)
             {
                 live.Insert(i, want);
+                liveKeys.Insert(i, freshKeys[i]);
                 continue;
             }
 
-            if (at != i) live.Move(at, i);
+            if (at != i)
+            {
+                live.Move(at, i);
+                liveKeys.RemoveAt(at);
+                liveKeys.Insert(i, freshKeys[i]);
+            }
             var kept = live[i];
             kept.UpdateFrom(want);
             MergeFolderNodes(kept.Children, want.Children);
@@ -5185,11 +5200,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     // Same place in the tree, and the same kind of node: the XAML styles headers and calendar nodes
     // differently, and those flags cannot change on a kept node, so a change there means a new node.
-    private static bool IsSameFolderNode(FolderTreeNode a, FolderTreeNode b) =>
-        a.IsHeader == b.IsHeader &&
-        a.IsCalendarNode == b.IsCalendarNode &&
-        a.AccountId == b.AccountId &&
-        string.Equals(NodeKey(a), NodeKey(b), StringComparison.Ordinal);
+    private static string MergeKey(FolderTreeNode n) =>
+        $"{(n.IsHeader ? 'h' : '-')}{(n.IsCalendarNode ? 'c' : '-')}|{n.AccountId}|{NodeKey(n)}";
 
     internal static string NodeKey(FolderTreeNode n) =>
         n.Folder != null ? $"F:{n.Folder.AccountId}:{n.Folder.FullName}"
