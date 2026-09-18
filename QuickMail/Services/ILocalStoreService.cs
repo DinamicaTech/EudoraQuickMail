@@ -345,4 +345,11 @@ public interface ILocalStoreService
         IReadOnlyCollection<(Guid AccountId, string FolderName)>? folders,
         bool indexPendingFirst = true,
         System.Threading.CancellationToken ct = default);
+
+    /// <summary>
+    /// Every cached message in the given accounts matching the query, newest first — a Search Results
+    /// folder. <c>account:</c> conditions are left to the caller, which narrows the account list instead.
+    /// </summary>
+    Task<List<MailMessageSummary>> SearchSummariesAsync(
+        MessageSearchQuery query, IReadOnlyCollection<Guid> accountIds, System.Threading.CancellationToken ct = default);
 }
