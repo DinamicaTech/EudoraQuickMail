@@ -704,9 +704,19 @@ Under **Look in**, choose where to search:
 - **This folder** searches the folder you were in, exactly as the search box does: the search box opens showing the search, so you can see how it is written and change it there.
 - **Every folder of these accounts** searches all of your mail in the accounts you leave checked — every account, unless you uncheck some — including Sent and Trash. The results open as a **Search results** folder.
 
-The accounts are a single list: **Tab** reaches it, **Up** and **Down** move between accounts, and **Space** checks or unchecks the one you are on.
+The accounts are a single list: **Tab** reaches it, **Up** and **Down** move between accounts, and **Space** checks or unchecks the one you are on. Below it, **Also search the mail server** asks each account's server as well as this computer — for mail older than the **Sync range**, or whose text was never downloaded (see [Searching the server too](#searching-the-server-too)). When a search of this computer alone finds nothing, QuickMail says so and suggests it.
 
-Press **Enter** to search. When something is found the form closes, focus moves to the first result, and the number found is announced. When nothing is found the form stays open with focus back in **Words anywhere**, and the folder you were in stays as it was, so you can change the search and try again. While a search is running, **Escape** waits for it to finish. **Clear** empties the fields but keeps your choice of where to look, and **Escape** closes the form. **F6** moves between the fields, **Look in**, the list of accounts and the buttons.
+Press **Enter** to search. When something is found the form closes, focus moves to the first result, and the number found is announced. When nothing is found the form stays open with focus back in **Words anywhere**, so you can change the search and try again. A search of every folder of your accounts leaves you in the folder you were in; a search of **This folder** leaves its words in that folder's search box. While a search is running, **Escape** waits for it to finish. **Clear** empties the fields but keeps your choice of where to look, and **Escape** closes the form. **F6** moves between the fields, **Look in**, the list of accounts and the buttons.
+
+#### Searching the server too
+
+Search looks at the mail on this computer. To also find mail that isn't here — older than the **Sync range**, or whose text was never downloaded — check **Also search the mail server** in Advanced Search, or with Search results already open choose **Search the Server** on the results bar, or **Search the Server Too** in the command palette. QuickMail asks each account's mail server for the same search and adds what it finds that the results don't already have; you hear how many more were found, or that there were none. An account whose server refuses the search is named, and the others still count; one QuickMail already knows is offline is left out quietly.
+
+What each server can search for differs. Gmail and Microsoft 365 search the whole mailbox at once — for Gmail that is everything except Spam and Trash, and a search naming a folder goes folder by folder instead. Other mail servers are asked one folder at a time, which takes longer on a large account, and some search the text of a message more thoroughly than others. Messages found this way are shown but not kept: they stay in the results until you refresh or close them.
+
+#### Saving a search
+
+While a **Search results** folder is open, **View → Views → Save View…** — or **Save Search as View…** in the command palette — saves it as a view, with a name and, if you like, a keyboard shortcut. Choosing the view later runs the search again, so it always shows what matches now.
 
 The **Search results** folder works like any other folder: every view, sort, filter and message command applies, and the search box searches within the results. Above the list, a bar shows how many were found and for what, with **Change Search** — or **Ctrl+/** — to reopen the form with this search filled in, and **Close** — or **Escape** — to go back to the folder you started from. New mail that arrives while the results are open joins them if its sender, recipients, subject or preview match; a message that matches only in its text appears the next time the results are refreshed with **F5**.
 
@@ -1627,11 +1637,12 @@ By default QuickMail keeps the full text of a message only once you have opened 
 
 With a window set, the sync at launch and each background check (**Check for new mail every**) finish by downloading the text of each Inbox message in that window that QuickMail does not have yet, newest first, a few hundred at a time; new mail arriving in the Inbox gets its text straight away. When a pass completes you hear "Downloaded 120 messages for offline reading." once. A few things to know:
 
-- Inbox only. Other folders keep working the way they always have: a message is kept once you open it.
+- Inbox only, unless you also check **Include other folders, not just the Inbox**. Then Sent, Archive and your other folders are downloaded too — everything except Trash, Junk and Drafts — Inbox first. Search finds words in the text of those messages only once they are downloaded, so this is what makes searching your sent and archived mail work without opening each message. It can download a great deal more, so it is off by default. Without it, other folders keep working the way they always have: a message is kept once you open it.
 - Never wider than the **Sync range** above it, since QuickMail cannot keep what it has not synced.
 - Attachments are not included. Opening one still needs a connection.
 - POP3 accounts already keep every message whole, so the setting does not apply to them.
 - The text lives in `mail.db` in QuickMail's data folder, which grows accordingly — roughly tens of megabytes for a month of a busy Inbox, so a year or all mail can run to hundreds of megabytes or more.
+- The status bar says how it is going: "Messages: 1,240 of 2,000 downloaded", and "Messages: downloading 120 of 500" while a batch is coming down. Press **Ctrl+9** to reach the status bar (when no tabs are open; with tabs, **Ctrl+9** goes to the last tab) and **Right** to move along it. Nothing is said aloud as it changes; it is there to be read when you want it.
 - A large window fills in gradually. Each pass downloads up to 500 messages per Inbox, newest first, so a big Inbox set to a year or all mail takes many background checks to finish.
 
 ### Getting back online

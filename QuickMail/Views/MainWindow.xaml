@@ -1287,6 +1287,12 @@
                                     Content="Change Search"
                                     Click="ChangeSearch_Click"
                                     ToolTip="Open Advanced Search with this search (Ctrl+/)"
+                                    Margin="6,0,0,0"
+                                    IsTabStop="True"/>
+                            <Button DockPanel.Dock="Right"
+                                    Content="Search the Server"
+                                    Click="SearchServer_Click"
+                                    ToolTip="Ask the mail servers too, for mail not on this computer"
                                     IsTabStop="True"/>
                             <TextBlock VerticalAlignment="Center"
                                        Margin="0,0,6,0"
@@ -2153,7 +2159,7 @@
                         ToolTip="Press Enter to open the release page in your browser"/>
             </StatusBarItem>
 
-            <!-- Region 4: Rules status (clickable — opens Rules Manager) -->
+            <!-- Region 3 (focus order): Rules status (clickable — opens Rules Manager) -->
             <StatusBarItem x:Name="RulesStatusItem"
                            HorizontalAlignment="Right"
                            KeyboardNavigation.IsTabStop="True">
@@ -2165,7 +2171,18 @@
                         ToolTip="Open Rules Manager (Ctrl+Shift+L)"/>
             </StatusBarItem>
 
-            <!-- Region 4: Sync progress (informational, visible only when busy) -->
+            <!-- Region 4 (focus order): Offline reading (#717) — how many messages have their full text, and whether more
+                 are coming down. Hidden when the setting is off, so it never says nothing at length. -->
+            <StatusBarItem x:Name="OfflineStatusItem"
+                           HorizontalAlignment="Right"
+                           KeyboardNavigation.IsTabStop="True"
+                           Visibility="{Binding OfflineBodyStatusText, Converter={StaticResource StringToVisibilityConverter}}">
+                <TextBlock x:Name="OfflineStatusTextBox"
+                           Style="{StaticResource StatusTextBlockStyle}"
+                           Text="{Binding OfflineBodyStatusText, Mode=OneWay}"/>
+            </StatusBarItem>
+
+            <!-- Region 5: Sync progress (informational, visible only when busy) -->
             <StatusBarItem x:Name="StatusProgressItem"
                            HorizontalAlignment="Right"
                            KeyboardNavigation.IsTabStop="True"

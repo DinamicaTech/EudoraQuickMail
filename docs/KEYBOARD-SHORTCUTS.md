@@ -9,7 +9,7 @@
 | Ctrl+2 / Ctrl+Y | `view.focusFolders` | Focus Folder Tree (or tab 2 when tabs are open) |
 | Ctrl+3 | *(hardcoded)* | Focus message list (or tab 3 when tabs are open) |
 | Ctrl+4–8 | *(hardcoded)* | Jump to tab 4–8 (when tabs are open) |
-| Ctrl+9 | *(hardcoded/registry)* | Jump to last tab (tabs open) or `view.focusStatusBar` (no tabs) |
+| Ctrl+9 | *(hardcoded/registry)* | Jump to last tab (tabs open) or `view.focusStatusBar` (no tabs). Left/Right move between the status bar regions: status, connection, rules, offline reading (when downloading is switched on, #717), sync progress |
 | Ctrl+Alt+1 | `view.focusAccounts` | Focus Account List (always) |
 | Ctrl+Alt+2 | *(hardcoded)* | Focus Folder Tree (always) |
 | Ctrl+Alt+3 | `view.focusMessages` | Focus Message List (always) |
@@ -34,6 +34,8 @@
 | Ctrl+Shift+V | `view.openViewMenu` | Open View Menu |
 | Ctrl+Shift+F | `view.searchFolders` | Search Folders… |
 | Ctrl+Shift+S | `view.search` | Search Messages… |
+| *(unassigned)* | `mail.searchServer` | Search the Server Too — in Search Results, asks each account's server for the same search and adds what it finds (#717) |
+| *(unassigned)* | `mail.saveSearch` | Save Search as View… — in Search Results, opens the view manager to save the search (#717) |
 | Ctrl+/ | `mail.advancedSearch` | Advanced Search… (#717). `/` alone still opens the search box from the lists; those handlers take it only with no modifier. Not relayed from inside the reading pane, like Ctrl+Shift+S |
 | Ctrl+Shift+G | `contacts.grabAddresses` | Grab Addresses from Message |
 | Ctrl+Shift+B | `contacts.openAddressBook` | Address Book |
@@ -154,7 +156,7 @@ over the reading pane.
 
 Access keys: Words anywhere (W), From (F), To (T), Cc (C), Subject (S), Body (B), Attachment name
 (N), Has attachments (A), Read state (R), Flag (L), Received from (V), Received up to (U), Accounts
-to search (H). The two **Look in** choices have none: the first names the current folder through a
+to search (H), Also search the mail server (M). The two **Look in** choices have none: the first names the current folder through a
 binding, where an underscore is read and shown as an underscore rather than marking a key. Arrow
 keys choose between them.
 

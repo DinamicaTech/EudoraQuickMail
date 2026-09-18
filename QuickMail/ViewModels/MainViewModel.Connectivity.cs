@@ -1,9 +1,11 @@
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
+using CommunityToolkit.Mvvm.ComponentModel;
 using QuickMail.Helpers;
 using QuickMail.Models;
 using QuickMail.Services;
@@ -143,6 +145,91 @@ public partial class MainViewModel
     // ── Offline bodies (#637) ───────────────────────────────────────────────────
 
     private int _offlineBodyDays;
+    private bool _offlineBodyAllFolders;
+    private CancellationTokenSource? _offlineBodyStatusCts;
+
+    /// <summary>
+    /// The status bar's word on offline reading (#717): how many of the messages in the window have their full
+    /// text, and whether more are coming down right now. Empty when the setting is off — the status bar then
+    /// shows nothing rather than a region that says nothing.
+    /// </summary>
+    [ObservableProperty]
+    private string _offlineBodyStatusText = string.Empty;
+
+    /// <summary>
+    /// Says what the status bar says. A pure function so the wording is testable without a store:
+    /// <paramref name="downloading"/> uses the running pass's own numbers, and otherwise the totals are
+    /// everything the window covers.
+    /// </summary>
+    internal static string DescribeOfflineBodies(int downloaded, int total, bool downloading)
+    {
+        if (downloading)
+            return $"Messages: downloading {downloaded:N0} of {total:N0}";
+        if (total == 0) return "Messages: none to download yet";
+        if (downloaded >= total)
+            return total == 1 ? "Messages: 1 of 1 downloaded" : $"Messages: all {total:N0} downloaded";
+        return $"Messages: {downloaded:N0} of {total:N0} downloaded";
+    }
+
+    private void OnOfflineBodyProgress(int done, int total)
+        => OfflineBodyStatusText = DescribeOfflineBodies(done, total, downloading: true);
+
+    /// <summary>
+    /// Recounts what is downloaded and puts it in the status bar. Call on the UI thread only — it replaces
+    /// <see cref="_offlineBodyStatusCts"/> — and the count itself runs off it. Called when the pass ends, when
+    /// the setting changes, and after each background pass. A count superseded by a newer one is dropped.
+    /// </summary>
+    private async Task RefreshOfflineBodyStatusAsync()
+    {
+        DrainCts(ref _offlineBodyStatusCts);
+        if (OnlineMode || _offlineBodyDays <= 0)
+        {
+            _ui.Post(() => OfflineBodyStatusText = string.Empty);
+            return;
+        }
+
+        var cts = new CancellationTokenSource();
+        _offlineBodyStatusCts = cts;
+        var ct = cts.Token;
+        var since = ConfigModel.OfflineBodyWindowStart(_offlineBodyDays, DateTimeOffset.UtcNow);
+        // The account list and the folder cache belong to the UI thread; every caller is on it now, and Invoke
+        // there simply runs the delegate.
+        List<(Guid AccountId, string FolderName)> folders = [];
+        _ui.Invoke(() => folders = OfflineBodyFolders());
+        if (folders.Count == 0)
+        {
+            _ui.Post(() => OfflineBodyStatusText = DescribeOfflineBodies(0, 0, downloading: false));
+            return;
+        }
+
+        try
+        {
+            // The store's async calls run synchronously, so this would otherwise count on the UI thread.
+            var (total, downloaded) = await Task.Run(() => _localStore.CountOfflineBodiesAsync(folders, since, ct), ct);
+            if (ct.IsCancellationRequested) return;
+            _ui.Post(() => OfflineBodyStatusText = DescribeOfflineBodies(downloaded, total, downloading: false));
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            LogService.Log("Offline bodies status", ex);
+            _ui.Post(() => OfflineBodyStatusText = string.Empty);
+        }
+    }
+
+    /// <summary>The folders the offline-bodies pass covers, for counting what it has done.</summary>
+    private List<(Guid AccountId, string FolderName)> OfflineBodyFolders()
+    {
+        var folders = new List<(Guid, string)>();
+        foreach (var account in Accounts)
+        {
+            if (account.IsShared || account.BackendKind == BackendKind.Pop3Smtp) continue;
+            if (!_cachedFolders.TryGetValue(account.Id, out var cached)) continue;
+            folders.AddRange(SyncService.FoldersForBodies(cached, _offlineBodyAllFolders)
+                .Select(f => (account.Id, f.FullName)));
+        }
+        return folders;
+    }
 
     /// <summary>
     /// One announcement when a pass finishes, never one per batch — the pass runs behind the
@@ -152,6 +239,7 @@ public partial class MainViewModel
     /// </summary>
     private void OnOfflineBodyPassCompleted(int downloaded, int planned)
     {
+        RefreshOfflineBodyStatusAsync().LogFaults("offline bodies status");
         if (downloaded <= 0) return;
         var noun = downloaded == 1 ? "message" : "messages";
         Announce(downloaded >= planned
@@ -167,8 +255,13 @@ public partial class MainViewModel
     private void ApplyOfflineBodySetting(ConfigModel cfg)
     {
         var was = _offlineBodyDays;
+        var wasAllFolders = _offlineBodyAllFolders;
         _offlineBodyDays = cfg.EffectiveOfflineBodyDays;
-        if (OnlineMode || _offlineBodyDays <= was) return;
+        _offlineBodyAllFolders = cfg.OfflineBodyAllFolders;
+        RefreshOfflineBodyStatusAsync().LogFaults("offline bodies status");
+        var widened = _offlineBodyDays > was
+            || (_offlineBodyDays > 0 && _offlineBodyAllFolders && !wasAllFolders);
+        if (OnlineMode || !widened) return;
         var connected = Accounts.Where(a => _connectedAccountIds.Contains(a.Id)).ToList();
         if (connected.Count == 0) return;
         BackfillOfflineBodiesQuietlyAsync(connected, _bgSyncCts?.Token ?? CancellationToken.None)
@@ -189,7 +282,14 @@ public partial class MainViewModel
             foreach (var a in accounts)
                 if (_cachedFolders.TryGetValue(a.Id, out var f)) folders[a.Id] = f;
         });
-        try { await _syncService.BackfillOfflineBodiesAsync(accounts, folders, ct).ConfigureAwait(false); }
+        try
+        {
+            await _syncService.BackfillOfflineBodiesAsync(accounts, folders, ct).ConfigureAwait(false);
+            // The status bar's count, whether or not the pass had anything to do (it reports only what it
+            // downloaded, and the first pass after launch usually has nothing left). Posted: the recount owns a
+            // cancellation source that only the UI thread may replace, and this continuation is not on it.
+            _ui.Post(() => RefreshOfflineBodyStatusAsync().LogFaults("offline bodies status"));
+        }
         catch (OperationCanceledException) { }
         catch (Exception ex) { LogService.Log("Offline bodies pass", ex); }
     }

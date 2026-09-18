@@ -29,6 +29,9 @@ public partial class AdvancedSearchWindow : Window
     /// <summary>True once a search found something and the window closed for it.</summary>
     public bool ClosedWithResults { get; private set; }
 
+    /// <summary>What the search that closed the window came to, for the owner's announcement.</summary>
+    public MainViewModel.AdvancedSearchOutcome? LastOutcome { get; private set; }
+
     public AdvancedSearchWindow(AdvancedSearchViewModel vm)
     {
         _vm = vm;
@@ -82,6 +85,9 @@ public partial class AdvancedSearchWindow : Window
         try
         {
             var outcome = await SearchRunner(request);
+            LastOutcome = outcome;
+            // Abandoned because the user moved to another folder meanwhile: nothing to report about it.
+            if (outcome.Cancelled) return;
             if (outcome.Found > 0 && !outcome.Failed)
             {
                 ClosedWithResults = true;
@@ -89,7 +95,7 @@ public partial class AdvancedSearchWindow : Window
                 Close();
                 return;
             }
-            AccessibilityHelper.Announce(this, outcome.Failed ? "Could not search." : "No messages found.",
+            AccessibilityHelper.Announce(this, NothingFoundText(request, outcome),
                 interrupt: true, category: AnnouncementCategory.Result);
             WordsBox.Focus();
         }
@@ -103,6 +109,22 @@ public partial class AdvancedSearchWindow : Window
             _searching = false;
             SearchButton.IsEnabled = true;
         }
+    }
+
+    /// <summary>What to say when a search found nothing — including why the server did not help, if asked.</summary>
+    internal static string NothingFoundText(AdvancedSearchRequest request, MainViewModel.AdvancedSearchOutcome outcome)
+    {
+        if (outcome.Failed) return "Could not search.";
+        if (request.InCurrentFolder) return "No messages found.";
+        if (!request.SearchServer)
+            return "No messages found on this computer. Check Also search the mail server to look there too.";
+        var server = outcome.Server;
+        if (server == null) return "No messages found.";
+        if (server.Asked == 0)
+            return "No messages found. No account's mail server could be searched.";
+        if (server.FailedAccounts.Count == server.Asked)
+            return "No messages found on this computer, and could not search the server.";
+        return "No messages found.";
     }
 
     private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
@@ -146,7 +168,7 @@ public partial class AdvancedSearchWindow : Window
             (() => LookInGroup.IsKeyboardFocusWithin, FocusLookIn),
         };
         if (_vm.SearchInAccounts && _vm.Accounts.Count > 0)
-            stops.Add((() => AccountsList.IsKeyboardFocusWithin, FocusFirstAccount));
+            stops.Add((() => AccountsList.IsKeyboardFocusWithin || AlsoSearchServerBox.IsKeyboardFocused, FocusFirstAccount));
         stops.Add((() => SearchButton.IsKeyboardFocused || ClearButton.IsKeyboardFocused || CloseButton.IsKeyboardFocused,
                    () => SearchButton.Focus()));
 

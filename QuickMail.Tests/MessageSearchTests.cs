@@ -442,6 +442,47 @@ public class SearchIndexStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task AKeyTableFromTheFirstBuildGetsItsGenerationColumn()
+    {
+        await _store.UpsertSummariesAsync([Summary("1")]);
+        await Body("1", plain: "early budget");
+
+        // The first build of the index created SearchKey without generation.
+        await using (var conn = new SqliteConnection($"Data Source={Path.Combine(_dir, "mail.db")}"))
+        {
+            await conn.OpenAsync(TestContext.Current.CancellationToken);
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = """
+                DROP TRIGGER trg_search_summary_insert; DROP TRIGGER trg_search_summary_update;
+                DROP TRIGGER trg_search_summary_delete; DROP TRIGGER trg_search_detail_insert;
+                DROP TRIGGER trg_search_detail_update; DROP TRIGGER trg_search_detail_delete;
+                ALTER TABLE SearchKey DROP COLUMN generation; UPDATE SearchKey SET pending = 1;
+                CREATE TRIGGER trg_search_detail_insert AFTER INSERT ON MessageDetail BEGIN
+                    UPDATE SearchKey SET pending = 1
+                        WHERE account_id = new.account_id AND folder_name = new.folder_name AND unique_id = new.unique_id;
+                END;
+                """;
+            await cmd.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
+        }
+
+        var reopened = new LocalStoreService(new ProfileContext(_dir));
+        reopened.Initialize();
+
+        // The old trigger, which never bumps generation, has been replaced.
+        await using (var conn = new SqliteConnection($"Data Source={Path.Combine(_dir, "mail.db")}"))
+        {
+            await conn.OpenAsync(TestContext.Current.CancellationToken);
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = 'trg_search_detail_insert';";
+            var sql = (string?)await cmd.ExecuteScalarAsync(TestContext.Current.CancellationToken);
+            Assert.Contains("generation", sql);
+        }
+        var match = SearchMatchExpression.AllOf(MessageSearchQuery.Parse("early").Terms)!;
+        var hits = await reopened.FindMessagesAsync(match, null, ct: TestContext.Current.CancellationToken);
+        Assert.Equal("1", Assert.Single(hits).MessageId);
+    }
+
+    [Fact]
     public async Task IndexingIsNewestFirst_AndStopsAtTheLimit()
     {
         var old = Summary("old");

@@ -203,7 +203,7 @@ public partial class MainViewModel
     /// <summary>The search on screen, as a request Advanced Search can reopen with; null outside Search Results.</summary>
     public AdvancedSearchRequest? CurrentSearchResultsRequest =>
         SelectedFolder != null && TryGetSearchResultsFromSentinel(SelectedFolder.FullName, out var q, out var ids)
-            ? new AdvancedSearchRequest(q, InCurrentFolder: false, ids)
+            ? new AdvancedSearchRequest(q, InCurrentFolder: false, ids, SearchServer: _searchResultsAskedServer)
             : null;
 
     // Where closing the results returns to; null when the search began before any folder was open.
@@ -212,7 +212,12 @@ public partial class MainViewModel
     /// <summary>What running an Advanced Search request came to.</summary>
     /// <param name="Found">How many messages the list now shows.</param>
     /// <param name="Failed">The search could not run (the store failed); the list shows nothing new.</param>
-    public sealed record AdvancedSearchOutcome(int Found, bool Failed);
+    /// <param name="Cancelled">The user moved to another folder before it finished; it was abandoned.</param>
+    /// <param name="Server">What asking the mail servers came to, when the request asked them; null otherwise.</param>
+    public sealed record AdvancedSearchOutcome(int Found, bool Failed, bool Cancelled = false, ServerSearchOutcome? Server = null);
+
+    // Whether the Search Results on screen also asked the servers, so Change Search reopens with the box checked.
+    private bool _searchResultsAskedServer;
 
     // Set by FetchSearchResultsAsync when it could not search, for RunAdvancedSearchAsync to report.
     private bool _searchResultsFailed;
@@ -234,15 +239,58 @@ public partial class MainViewModel
         else if (!IsSearchResultsView) _searchResultsReturnFolder = SelectedFolder;
 
         _searchResultsFailed = false;
-        await SelectFolderAsync(CreateSearchResultsFolder(request.Query, request.AccountIds));
-        var found = Messages.Count;
+        _searchResultsAskedServer = request.SearchServer;
+        var results = CreateSearchResultsFolder(request.Query, request.AccountIds);
+        await SelectFolderAsync(results);
+        // The form is modeless and an online search can take a while: if the user has gone to another folder
+        // since, that folder's count is not this search's, and pulling them back would be worse.
+        if (!string.Equals(SelectedFolder?.FullName, results.FullName, StringComparison.Ordinal))
+        {
+            _searchResultsReturnFolder = previousReturn;
+            return new AdvancedSearchOutcome(0, Failed: false, Cancelled: true);
+        }
+
         var failed = _searchResultsFailed;
+        ServerSearchOutcome? server = null;
+        if (!failed && request.SearchServer)
+        {
+            // Replaces the local count in the status bar before its announcement is due: otherwise "No messages
+            // found." is spoken while the servers are still being asked, and then contradicted.
+            StatusText = "Searching the server…";
+            try
+            {
+                server = await SearchServerTooAsync();
+            }
+            catch (Exception ex)
+            {
+                LogService.Log("Advanced search: asking the servers failed", ex);
+                server = new ServerSearchOutcome(0, ["the server"], 1);
+            }
+            // Abandoned only if the user has left the results; otherwise (a refresh, or a search already running
+            // from the results bar) what this computer found is real and is reported, and the server's part is
+            // simply unknown.
+            if (server.Cancelled)
+            {
+                if (!string.Equals(SelectedFolder?.FullName, results.FullName, StringComparison.Ordinal))
+                {
+                    _searchResultsReturnFolder = previousReturn;
+                    return new AdvancedSearchOutcome(0, Failed: false, Cancelled: true);
+                }
+                server = null;
+            }
+            // Whatever the server path left in the status bar ("Searching the server…" when it returned early or
+            // threw), the count is what belongs there now.
+            var shown = Messages.Count;
+            StatusText = shown == 0 ? "No messages found." : $"{shown} {(shown == 1 ? "message" : "messages")} found.";
+        }
+
+        var found = Messages.Count;
         if (found == 0 || failed)
         {
             _searchResultsReturnFolder = previousReturn;
             await SelectFolderAsync(previous ?? AllMailFolder);
         }
-        return new AdvancedSearchOutcome(found, failed);
+        return new AdvancedSearchOutcome(found, failed, Server: server);
     }
 
     /// <summary>Puts <paramref name="query"/> in the search box and waits for the list to reflect it.</summary>
@@ -356,6 +404,162 @@ public partial class MainViewModel
             if (loadVersion == _folderLoadVersion)
                 IsBusy = false;
         }
+    }
+
+    // ── Search the server too (#717, phase 3) ────────────────────────────────────
+
+    /// <summary>At most this many server results per account: enough to find the message, few enough to list.</summary>
+    internal const int ServerSearchMaxResults = 200;
+
+    /// <summary>What asking the servers added to a Search Results folder.</summary>
+    /// <param name="Added">Messages that were not already in the results.</param>
+    /// <param name="FailedAccounts">Accounts whose server could not be asked.</param>
+    /// <param name="Asked">Accounts whose server was asked (connected, with a server that searches).</param>
+    /// <param name="Cancelled">The search was abandoned — the folder changed, or another search started.</param>
+    public sealed record ServerSearchOutcome(int Added, IReadOnlyList<string> FailedAccounts, int Asked, bool Cancelled = false);
+
+    /// <summary>True while Search Results is on screen, where asking the servers adds to it.</summary>
+    public bool CanSearchServer => IsSearchResultsView;
+
+    /// <summary>
+    /// Asks each chosen account's server for the search on screen and adds what it finds that the results do
+    /// not already have — mail older than the sync range, or whose text was never downloaded. Server results are
+    /// shown, not cached: caching old mail would make it wait for client rules as though it had just arrived
+    /// (#712), and the sync would drop it again. So they last until the results are refreshed or closed.
+    /// </summary>
+    public async Task<ServerSearchOutcome> SearchServerTooAsync()
+    {
+        // One at a time, held until the results are in the list: a second run that started before the first
+        // had inserted its rows would not know about them and add the same messages again.
+        if (Interlocked.CompareExchange(ref _serverSearchRunning, 1, 0) != 0)
+            return new ServerSearchOutcome(0, [], 0, Cancelled: true);
+        try { return await SearchServerTooCoreAsync(); }
+        finally { Volatile.Write(ref _serverSearchRunning, 0); }
+    }
+
+    private async Task<ServerSearchOutcome> SearchServerTooCoreAsync()
+    {
+        var failed = new List<string>();
+        if (SelectedFolder == null || !TryGetSearchResultsFromSentinel(SelectedFolder.FullName, out var text, out var chosen))
+            return new ServerSearchOutcome(0, failed, 0);
+
+        var expectedFolder = SelectedFolder;
+        var loadVersion = _folderLoadVersion;
+        var ct = _folderCts?.Token ?? CancellationToken.None;
+        var (query, accountIds) = ResolveSearchAccounts(text, chosen);
+
+        var targets = Accounts
+            .Where(a => accountIds.Contains(a.Id) && a.BackendKind != BackendKind.Pop3Smtp)
+            // An account known to be unreachable is not asked; any other is, and says so if it fails.
+            .Where(a => _connectivity?.IsAccountOnline(a.Id) ?? true)
+            .ToList();
+        if (targets.Count == 0) return new ServerSearchOutcome(0, failed, 0);
+
+        IsBusy = true;
+        // No status text of its own here: from the results bar the View says "Searching the server…", and from
+        // Advanced Search RunAdvancedSearchAsync sets it; either way it is said once.
+        var found = new List<MailMessageSummary>();
+        try
+        {
+            foreach (var account in targets)
+            {
+                ct.ThrowIfCancellationRequested();
+                var folders = _cachedFolders.TryGetValue(account.Id, out var cached)
+                    ? cached.Where(f => !f.IsHeader && !string.IsNullOrEmpty(f.FullName))
+                            .Where(f => query.Folders.Count == 0
+                                || query.Folders.Any(n => f.DisplayName.Contains(n, StringComparison.OrdinalIgnoreCase)))
+                            .Select(f => f.FullName)
+                            .ToList()
+                    : [];
+                try
+                {
+                    var hits = await _imap.SearchServerAsync(account.Id, query, folders, ServerSearchMaxResults, ct);
+                    // IMAP summaries never carry attachments, so has:attachment can only be judged where the
+                    // server reports it (Microsoft 365); elsewhere the server's own answer stands.
+                    var check = account.BackendKind == BackendKind.MicrosoftGraph
+                        ? query
+                        : WithoutAttachmentCondition(query);
+                    var matcher = new MessageSearchMatcher(check, SearchFolderNameFor, _ => string.Empty);
+                    foreach (var m in hits)
+                    {
+                        if (m.IsServerFlagged && m.FlagId == null)
+                            m.FlagId = FlagDefinition.BuiltInFlagId.ToString();
+                        if (matcher.MatchesConditions(m)) found.Add(m);
+                    }
+                }
+                catch (OperationCanceledException) { throw; }
+                catch (Exception ex)
+                {
+                    LogService.Log($"Search the server: {account.AccountLabel}", ex);
+                    failed.Add(account.AccountLabel);
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            return new ServerSearchOutcome(0, failed, targets.Count, Cancelled: true);
+        }
+        finally
+        {
+            if (loadVersion == _folderLoadVersion) IsBusy = false;
+        }
+
+        if (!IsCurrentFolderLoad(loadVersion, expectedFolder))
+            return new ServerSearchOutcome(0, failed, targets.Count, Cancelled: true);
+
+        var have = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var m in _rawMessages)
+        {
+            have.Add(MessageDeduplicator.PerFolderKeyFor(m));
+            if (!string.IsNullOrWhiteSpace(m.InternetMessageId)) have.Add(MessageDeduplicator.CollapseKeyFor(m));
+        }
+        var added = found
+            .Where(m => !have.Contains(MessageDeduplicator.PerFolderKeyFor(m))
+                     && (string.IsNullOrWhiteSpace(m.InternetMessageId) || !have.Contains(MessageDeduplicator.CollapseKeyFor(m))))
+            .ToList();
+        // One copy of each message the servers returned in several folders.
+        added = MessageDeduplicator.CollapseForAggregate(added, ResolveFolderKind);
+
+        if (added.Count > 0)
+        {
+            await ResolveFlagNamesAsync(added);
+            // Added to the list in place, the way live arrivals are, rather than through SetMessages: replacing
+            // the collection moves focus into the list, which would take the user away from wherever they were.
+            ApplyFolderDisplayNames(added);
+            StampWatchedFlags(added);
+            foreach (var m in added)
+                m.Preview = _showPreview ? TruncatePreview(m.Preview, _previewLines) : string.Empty;
+            _rawMessages.AddRange(added);
+
+            var previouslySelected = SelectedMessage;
+            using (Messages.BeginBatchScope())
+            {
+                foreach (var m in added)
+                {
+                    if (!MatchesFilter(m) || !MatchesDayLimit(m)) continue;
+                    if (!string.IsNullOrWhiteSpace(SearchText) && !MatchesSearch(m)) continue;
+                    InsertMessageSorted(m);
+                }
+            }
+            if (previouslySelected != null && SelectedMessage == null && Messages.Contains(previouslySelected))
+                SelectedMessage = previouslySelected;
+            RebuildActiveGroupView();
+        }
+        var n = Messages.Count;
+        StatusText = $"{n} {(n == 1 ? "message" : "messages")} found.";
+        // Change Search should reopen with the server box checked, however the server came to be asked.
+        _searchResultsAskedServer = true;
+        return new ServerSearchOutcome(added.Count, failed, targets.Count);
+    }
+
+    // One server search at a time: a second one would ask every server again and add the same messages.
+    private int _serverSearchRunning;
+
+    private static MessageSearchQuery WithoutAttachmentCondition(MessageSearchQuery query)
+    {
+        var copy = MessageSearchQuery.Parse(query.ToQueryString());
+        copy.HasAttachment = null;
+        return copy;
     }
 
     private (string Text, List<Guid> Accounts, MessageSearchMatcher Matcher)? _arrivalMatcher;

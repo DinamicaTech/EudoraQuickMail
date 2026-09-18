@@ -166,6 +166,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
         UnsubscribeConnectivity();
         DrainCts(ref _offlineRetryCts);
         _syncService.OfflineBodyPassCompleted -= OnOfflineBodyPassCompleted;
+        _syncService.OfflineBodyProgressChanged -= OnOfflineBodyProgress;
+        DrainCts(ref _offlineBodyStatusCts);
         if (_rowLayoutService != null && _onRowLayoutsChanged != null)
         {
             _rowLayoutService.LayoutsChanged -= _onRowLayoutsChanged;
@@ -266,6 +268,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private void SetCachedFolders(Guid accountId, List<MailFolderModel> folders)
     {
         _cachedFolders[accountId] = folders;
+        _searchFolderNames = null;   // folder: looks names up here (#717); a new list may rename or add some
         _connectedAccountIds.Add(accountId);
 
         // Never let an empty result overwrite a good cache. SaveFoldersAsync is replace-all, so
@@ -1833,7 +1836,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _showPreview = _previewLines > 0;
         _syncDays = cfg.SyncDays;
         _offlineBodyDays = cfg.EffectiveOfflineBodyDays;
+        _offlineBodyAllFolders = cfg.OfflineBodyAllFolders;
         _syncService.OfflineBodyPassCompleted += OnOfflineBodyPassCompleted;
+        _syncService.OfflineBodyProgressChanged += OnOfflineBodyProgress;
         _viewMode = ConfigModel.ParseViewMode(cfg.ViewMode);
         _listDensity = cfg.AppearanceListDensity == "compact" ? "compact" : "comfortable";
         MessageOpenMode = cfg.Windowing.MessageOpenMode;
@@ -4355,6 +4360,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
             foreach (var m in _rawMessages) m.Preview = string.Empty;
         else
             foreach (var m in _rawMessages) m.Preview = TruncatePreview(m.Preview, _previewLines);
+        // The index's last answer was about the messages that were here before; drop it so it is not applied
+        // to these, and ask again once the list shows them (#717).
+        if (!string.IsNullOrWhiteSpace(SearchText)) _searchMatcher = null;
         ApplyFiltersAndSearch();
         RefreshSearchIndexForNewMessages();
     }
