@@ -1,66 +1,19 @@
 # QuickMail v0.8.46 Release Notes
 
-<!-- What is new in 0.8.46 goes here, above the footers: Changed/Fixed/Added sections, each ending with its issue link and a --- divider. -->
+This release is mostly about search. Search now reads the whole message, there is an Advanced Search form, and one search can cover every folder of every account and ask the mail server too. The command palette filters as you type, client-side rules can copy and do more than one thing, and background syncs no longer move focus.
 
 ## Added
 
-### The command palette filters as you type
-
-The command palette (**Ctrl+Shift+P**) opens with a filter box, and typing narrows the list to what matches instead of only jumping to a name that starts with what you typed.
-
-You do not have to know how a command's name begins. Typing `arch` finds **Move to Archive**; `gtf` finds **Go to Folder** from its initials; `mail` lists the Mail commands by category; and `arch mail` finds the Mail category's Archive command with the words in either order. The best match is always at the top and is what **Enter** runs.
-
-Focus stays in the filter box the whole time, so you can keep typing to narrow further without moving anywhere first. The command at the top is reported as it changes, and so is each command you reach with **Up** and **Down** — by Windows itself, from the list, rather than by QuickMail announcing over the top of it, so no announcement setting can silence it. When a keystroke narrows the list without changing the command at the top, you hear the new count on its own — "3 commands" — since nothing else would tell you the list had moved under you.
-
-**Escape** clears the filter if you have typed something and closes the palette if the box is already empty. **Page Up** and **Page Down** move ten at a time. When nothing matches you hear "No matching commands", and Enter says so rather than doing nothing silently.
-
-This applies to every palette in the app, not just the main window's — the compose window, an open message, the address book, the rules window and the rest all get it.
-
-A search box shipped here once before and was taken out again, because it moved focus onto the list on every keystroke and announced a new top match on every character. This one does neither: focus never leaves the box, and nothing is announced that Windows already reports.
-
----
-
-### Client-side rules can copy, and can do more than one thing
-
-A client-side rule used to do exactly one thing — move, delete, mark as read, or mark as unread — and **Save** refused one that used **Copy to folder**. Now a client-side rule can copy, and can combine its actions: mark a mailing list read and file it, say, or keep a copy in one folder and move the message to another. It always does them in the same order: marking read or unread first, then copying, then moving or deleting, since after that the message is no longer in the Inbox.
-
-Some combinations are refused, with Save saying why: marking a message both read and unread; in a client-side rule, both moving and deleting it; and **Mark as unread** together with moving or deleting, because marking unread changes only this computer's copy of the message, which the move then throws away.
-
-A rule that copies now needs at least one condition, as moving and deleting already did. Without one it would copy every message that arrives, and copy your whole Inbox again on every **Run on Existing Mail**. This covers server-side copy rules as well, so an existing one with no conditions has to be given one before it can be saved again.
-
-A client-side rule also cannot copy into the Inbox. It runs on the Inbox, so each copy would land where the rule is looking and be copied again on the next check.
-
-If a copy cannot be made — the folder is gone, say — the rule stops there, leaving the message in the Inbox rather than filing it with no copy kept anywhere. Whatever the rule did before the copy, such as marking the message read, has already happened, and the reason the copy failed is in the log.
-
-An earlier version of QuickMail reading a rule with more than one action does the one action it understands best: the move, or the marking. A rule that only copies — or that copies and then deletes — does nothing there, rather than deleting the message without keeping the copy. If that earlier version then saves your rules, the extra actions are dropped from them.
-
-[#682](https://github.com/kellylford/QuickMail/issues/682)
-
----
-
-### Download a year, or all of your Inbox, for offline reading
-
-**Settings → General → Sync → Download messages for offline reading** used to stop at the last 90 days. It now also offers the last **6 months**, the last **year**, and **All mail**, matching the longer choices of the **Sync range** above it.
-
-As before, it only downloads the text of Inbox messages, and never reaches further back than the Sync range, so **All mail** under a one-year Sync range keeps a year. A large Inbox fills in gradually: each pass downloads up to 500 messages per Inbox, newest first, so a year or all mail can take many background checks to finish, and the data file grows to match — hundreds of megabytes or more for a busy Inbox.
-
-In `config.ini`, **All mail** is saved as `OfflineBodyDays = -1`, since `0` already means off.
-
-[#715](https://github.com/kellylford/QuickMail/issues/715)
-
----
-
 ### Search reads the whole message
 
-The search box (**Ctrl+Shift+S**, or `/` in the message list) used to look only at what the message list shows: the sender, the recipients, the subject and the first line or so of the preview. It now searches the whole message — its text, its Cc recipients and the names of its attachments — for every message in the folder you are in, including combined folders such as **All Inboxes** and **All Mail**. It still narrows the list as you type.
+The search box (**Ctrl+Shift+S**, or `/` in the message list) used to look only at what the message list shows. It now searches the whole message: its text, its Cc recipients and the names of its attachments. It works in any folder, including **All Inboxes** and **All Mail**, and still narrows the list as you type.
 
-A search can also say where to look and which messages to keep:
-
-- Words must all be there, in any order, and a word finds the words that begin with it. Quotes keep a phrase together, and a minus sign leaves out messages containing a word: `"quarterly report" -draft`.
-- `from:`, `to:`, `cc:`, `subject:`, `body:` and `attachment:` look for a word in one place.
+- Every word must be there, in any order, and a word also finds longer words that begin with it.
+- Quotes keep a phrase together, and a minus sign leaves out messages with a word: `"quarterly report" -draft`.
+- `from:`, `to:`, `cc:`, `subject:`, `body:` and `attachment:` look in one place.
 - `has:attachment`, `is:unread`, `is:read`, `is:flagged`, `is:unflagged`, `after:`, `before:`, `folder:` and `account:` narrow the results.
 
-Search looks at the copy of your mail kept on this computer, so a message's text is found once it has been downloaded — opened, fetched ahead of time, or inside **Download messages for offline reading**. The first time you start this version, QuickMail indexes the mail it already has in the background, newest first; until it finishes, older messages are found by their sender, recipients, subject and preview, as before.
+Search uses the mail kept on this computer, so a message's text is found once it has been downloaded. The first time you start this version, QuickMail indexes the mail it already has in the background, newest first. Until that finishes, older messages are found by sender, recipients, subject and preview, as before.
 
 The user guide's Searching section lists everything search understands.
 
@@ -68,95 +21,137 @@ The user guide's Searching section lists everything search understands.
 
 ---
 
-### Advanced Search, and searching every account at once
+### Advanced Search, across every account
 
-**Ctrl+/** (or **View → Advanced Search…**) opens a form for searching without learning the syntax: a field each for the words anywhere, the sender, To, Cc, subject, body and attachment name, plus whether the message has attachments, is read, is flagged, and when it arrived. The shortcut can be changed in **Settings → Keyboard Shortcuts**.
+**Ctrl+/** (or **View → Advanced Search…**) opens a form, so you don't need the search syntax. It has a field for words anywhere, sender, To, Cc, subject, body and attachment name. You can also choose whether the message has attachments, is read or flagged, and when it arrived.
 
-The form can search the folder you are in — it fills in the search box, so you can see how the search is written — or every folder of the accounts you choose. The accounts are one list: **Tab** reaches it, **Up** and **Down** move between accounts, and **Space** checks or unchecks one. Searching accounts opens a **Search results** folder that works like any other: views, sorting, filters and message commands all apply. A bar above the list says how many were found and for what, with **Change Search** (or **Ctrl+/** again) to adjust it and **Close** (or **Escape**) to go back where you started.
+The form can search the folder you are in, or every folder of the accounts you choose. Searching the current folder fills in the search box, so you can see how the search is written. Searching accounts opens a **Search results** folder, which works like any other folder. A bar above the list says what was found, with **Change Search** (or **Ctrl+/**) and **Close** (or **Escape**).
 
-When a search finds nothing, the form stays open with focus back in the first field, so trying again takes one keystroke.
+- **Also search the mail server** asks each account's server for the same search, and adds what it finds. This reaches mail older than the sync range, or whose text was never downloaded. **Search the Server** on the results bar does the same after a search. Messages found this way are shown but not kept.
+- **Save View…** on the results keeps the search as a view, with its own name and optional shortcut. Choosing the view runs the search again.
+
+If nothing is found, the form stays open with focus in the first field.
 
 [#717](https://github.com/kellylford/QuickMail/issues/717)
 
 ---
 
-### Search the server, save a search, and download more folders for offline reading
+### More mail downloaded for offline reading
 
-Four additions that take search past the mail already on this computer:
+**Settings → General → Sync → Download messages for offline reading** used to stop at 90 days. It now also offers **6 months**, **1 year** and **All mail**. It never reaches past the **Sync range**.
 
-- **Also search the mail server** in Advanced Search, or **Search the Server** on the Search results bar, asks each account's mail server for the same search, and adds what it finds that the results don't already have — mail older than the sync range, or whose text was never downloaded. Gmail and Microsoft 365 search the whole mailbox at once; other servers are asked folder by folder. You hear how many more were found, and which accounts couldn't be asked. Messages found this way are shown but not kept.
-- **Saving a search.** With Search results open, **Save View…** (or **Save Search as View…** in the command palette) keeps the search as a view with its own name and optional shortcut. Choosing it runs the search again.
-- **Include other folders, not just the Inbox**, under **Download messages for offline reading**, also downloads the text of Sent, Archive and your other folders — everything except Trash, Junk and Drafts. That is what lets search find words in your sent and archived mail without opening each message first. It is off by default, since it can download a great deal more.
-- **The status bar says how much is downloaded**: "Messages: 1,240 of 2,000 downloaded", or "Messages: downloading 120 of 500" while a batch is on its way. It appears only when downloading for offline reading is switched on, and sits between the rules status and the sync progress — **Ctrl+9**, then **Right**. It changes quietly; nothing is announced as it counts up.
+A new option, **Include other folders, not just the Inbox**, also downloads Sent, Archive and your other folders, except Trash, Junk and Drafts. This is what lets search find words in sent and archived mail. It is off by default, because it can download a lot more.
 
-[#717](https://github.com/kellylford/QuickMail/issues/717)
+A large download fills in gradually over many background checks, and the data file grows to match. The status bar shows progress, for example "Messages: 1,240 of 2,000 downloaded". It is between the rules status and the sync progress (**Ctrl+9**, then **Right**), and is not announced.
+
+[#715](https://github.com/kellylford/QuickMail/issues/715), [#717](https://github.com/kellylford/QuickMail/issues/717)
+
+---
+
+### The command palette filters as you type
+
+The command palette (**Ctrl+Shift+P**) now has a filter box. Typing narrows the list to matching commands, and the best match is at the top, ready for **Enter**.
+
+A match can come from anywhere in the name. `arch` finds **Move to Archive**, `gtf` finds **Go to Folder** by its initials, `mail` lists the Mail commands, and `arch mail` works with the words in either order.
+
+Focus stays in the filter box. **Up** and **Down** move through the list, and **Page Up** and **Page Down** move ten at a time. If the top match stays the same as you type, the new count is announced instead, such as "3 commands". **Escape** clears the filter, or closes the palette if the filter is empty.
+
+This works in every command palette in the app, not only the main window's.
+
+[PR #705](https://github.com/kellylford/QuickMail/pull/705)
+
+---
+
+### Client-side rules can copy, and can do more than one thing
+
+A client-side rule used to do one thing: move, delete, mark as read or mark as unread. It can now also copy to a folder, and combine actions — for example, mark a mailing list read and file it. Actions always run in this order: mark read or unread, then copy, then move or delete.
+
+**Save** refuses a combination that can't work, and says why:
+
+- Marking a message both read and unread.
+- Both moving and deleting.
+- **Mark as unread** with a move or delete, since the move discards the local change.
+- A client-side rule copying into the Inbox, which would copy the same message again and again.
+
+A copy rule now needs at least one condition, as move and delete rules already do. This includes server-side copy rules, so an existing one with no conditions needs one before it can be saved again.
+
+If a copy fails, the rule stops, and the message stays in the Inbox. The reason is in the log.
+
+If you go back to an earlier version, a rule with several actions does at most one of them, and saving rules there drops the rest.
+
+[#682](https://github.com/kellylford/QuickMail/issues/682)
 
 ---
 
 ## Fixed
 
+### Background syncs no longer move focus
+
+Two things could move focus with no key pressed:
+
+- In the folder tree, focus could jump to **All Mail** when a sync started or an account connected.
+- When messages were removed on the server, focus could jump from the folder tree into the message list.
+
+Focus now stays where you put it. Opening a folder still moves focus to the message list, as before.
+
+[#719](https://github.com/kellylford/QuickMail/issues/719)
+
+---
+
 ### Client-side rules no longer miss mail that arrives while the Inbox is open
 
-A client-side rule could silently skip a message. If the message reached QuickMail first by another route — most often opening or returning to the Inbox just as it arrived, but also All Inboxes, All Mail or a saved view — the next background check found it already stored, took it for mail it had already handled, and no rule ever ran on it. Nothing was logged, and the message was never looked at again: **Run on Existing Mail** was the only way to apply your rules to it.
+A rule could skip a new message if QuickMail picked it up another way first — usually by opening the Inbox, All Inboxes, All Mail or a saved view just as it arrived. The message was never checked by rules, and nothing was logged.
 
-QuickMail now keeps track of which messages your rules have run on separately from which messages it has stored, so a rule runs on each message that arrives in your Inbox, however QuickMail first picked it up. If the Inbox is open when a matching message lands, the message can appear in the list for a moment before the rule files it.
+Rules now run on every message that arrives in your Inbox, however QuickMail first saw it. If the Inbox is open, a matching message may show briefly before the rule files it.
 
-Rules still leave older mail alone. That includes mail QuickMail shows you for the first time because you widened the **Sync range**, and, on a Microsoft 365 account, a message moved into the Inbox from another program: it keeps the time it first arrived, so rules leave it alone unless that was within about an hour of your newest mail. Mail already in your mailbox when you update counts as already handled.
+Rules still leave older mail alone, including mail that appears because you widened the **Sync range**. Mail already in your mailbox when you update counts as already handled.
 
-Microsoft 365 and POP3 messages QuickMail lists from its cache now show whether they have attachments, and are included when you filter for messages with attachments, without having to be opened first.
+Also, Microsoft 365 and POP3 messages now show whether they have attachments without being opened first, so filtering for attachments includes them.
 
 [#712](https://github.com/kellylford/QuickMail/issues/712)
 
 ---
 
-### The rule editor's folder buttons say which folder is chosen
-
-A rule that moves or copies to a folder shows that folder on the button beside the action — but the button was still reported as "Choose move-to folder" whichever folder was chosen, so a rule that already had one sounded as though it had none. That happened both right after choosing a folder and when reopening a saved rule; activating the button did land on the right folder.
-
-The button is now reported as "Move to folder: Digests" (and "Copy to folder: Kept"), and says "Choose move-to folder" only while no folder is chosen.
-
-[#713](https://github.com/kellylford/QuickMail/issues/713)
-
----
-
 ### A rules file QuickMail can't read is no longer replaced
 
-QuickMail keeps your client-side rules in a file called `rules.json`. When that file couldn't be read — damaged, or held open by another program at the wrong moment — QuickMail treated it as holding no rules, and the next client-side rule you saved went into a new file with only that rule in it. Every other client-side rule was gone.
+If `rules.json`, the file that holds client-side rules, couldn't be read, QuickMail treated it as empty. The next rule you saved replaced the file, and every other client-side rule was lost.
 
-Now QuickMail never writes over a rules file it couldn't read, and says what happened:
+QuickMail now never overwrites a rules file it couldn't read:
 
-- The Rules Manager's status line says "Couldn't load client-side rules" and why, instead of reading as though the account had none. A damaged file is named along with the folder it is in, so you can repair or remove it.
-- Saving a client-side rule is refused with the same reason, and the editor stays open with what you typed.
-- The status bar says "Client-side rules can't be read", instead of "No active client-side rules". It checks again when you change folder or close the Rules Manager.
-- Mail keeps arriving and showing as normal. No client-side rule runs on it until the file can be read, so once it can, use **Run on Existing Mail** on each account for anything that arrived meanwhile.
+- The Rules Manager says "Couldn't load client-side rules", and why. A damaged file is named, with its folder.
+- Saving a client-side rule is refused with the same reason, and the editor keeps what you typed.
+- The status bar says "Client-side rules can't be read".
+- Mail still arrives, but no client-side rule runs until the file can be read. After that, use **Run on Existing Mail** for anything that arrived in the meantime.
 
-A file that was only held open for a moment is read again the next time QuickMail needs it, so it recovers by itself.
-
-A client-side rule change that can't be saved for any other reason — a full disk, say — now says so, where it used to fail without a word. That covers turning a rule on or off and deleting one, as well as saving from the editor.
+A file that was only locked for a moment recovers by itself. And any other failure to save a rule change, such as a full disk, is now reported instead of silent.
 
 [#700](https://github.com/kellylford/QuickMail/issues/700)
 
 ---
 
-### Messages in the rule editor are said once
+### The rule editor's folder buttons say which folder is chosen
 
-When the rule editor refused to save — a rule with no name, say, or one using something a client-side rule can't do — its message was announced twice: once by the editor and again by the Rules Manager behind it. Now it is said once: by the editor while it is open, or by the Rules Manager if you have already closed the editor when saving to your work or school Microsoft 365 account fails.
+The move and copy folder buttons were always read as "Choose move-to folder", even when a folder was chosen. They now say "Move to folder: Digests" or "Copy to folder: Kept", and only ask you to choose when no folder is set.
 
-A rule change refused because QuickMail doesn't have a permission it needs was also said twice, as a hint and as a result, even from the Rules Manager alone. It is now said once, as a result, and still shown on the Rules Manager's status line.
+[#713](https://github.com/kellylford/QuickMail/issues/713)
+
+---
+
+### Rule editor messages are said once
+
+When the rule editor refused to save, its message was spoken twice: once by the editor and once by the Rules Manager. A missing-permission message was also spoken twice. Each is now spoken once.
 
 [#701](https://github.com/kellylford/QuickMail/issues/701)
 
 ---
 
-### Each item in the View, Sort and Help menus has its own access key
+### Every item in the View, Sort and Help menus has its own access key
 
-Three more pairs of menu items shared an access key, so pressing it moved between the two instead of choosing either — the same fault fixed in the message menus in 0.8.45.
+Three pairs of menu items shared an access key, so pressing it moved between them instead of choosing one.
 
-- **View** menu: **Sync Range** and **Search Folders** were both on S. **Sync Range** now uses Y; **Search Folders** keeps S.
-- **View → Sort**: **Newest First** and **Fewest Messages** were both on F. **Fewest Messages** now uses W; **Newest First** keeps F.
-- **Help** menu: **Get the ARM Version** and **About QuickMail** were both on A. **Get the ARM Version** now uses V; **About QuickMail** keeps A.
-
-Nothing about what the menus say has changed — only which letter each item answers to.
+- **View**: **Sync Range** is now Y. **Search Folders** keeps S.
+- **View → Sort**: **Fewest Messages** is now W. **Newest First** keeps F.
+- **Help**: **Get the ARM Version** is now V. **About QuickMail** keeps A.
 
 [#695](https://github.com/kellylford/QuickMail/issues/695)
 
