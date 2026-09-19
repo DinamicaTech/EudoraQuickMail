@@ -5,6 +5,9 @@ on:
   release:
     types: [published]
 
+permissions:
+  contents: write   # publish the generated guide to the gh-pages branch
+
 jobs:
   publish-guide:
     runs-on: ubuntu-latest
