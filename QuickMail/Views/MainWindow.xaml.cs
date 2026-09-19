@@ -132,6 +132,9 @@ public partial class MainWindow : Window
     private bool _messageBodyHasFocus;
     private CoreWebView2Environment? _webViewEnvironment;
 
+    /// <summary>Pairs the reading pane's navigations with the links the user activated (#728 review).</summary>
+    private readonly LinkActivationGate _linkGate = new();
+
     private readonly TypeAheadPrefixTracker _typeAhead = new();
     private int _messageBodyRenderVersion;
 
@@ -1399,6 +1402,30 @@ public partial class MainWindow : Window
         _registry.Register(new CommandDefinition(
             id: "mail.copyToFolder", category: "Mail", title: "Copy to Folder…",
             execute: async () => await CopyMessageToFolderAsync(),
+            isAvailable: _vm.CanActOnSelection));
+
+        // Save, Save As and Print (#728). Registered here rather than in the VM because what they act
+        // on — a multi-selection, a group header's messages — is the window's to resolve, as for
+        // Move/Copy above. Save writes the default format into the save folder without asking; Save
+        // As is the dialog. Both act on the whole selection; Print on one message.
+        _registry.Register(new CommandDefinition(
+            id: "mail.save", category: "Mail", title: "Save",
+            description: "Save the selected messages in your default format and folder, without asking",
+            execute: async () => await SaveSelectedMessagesAsync(chooseLocation: false),
+            defaultKey: Key.S, defaultModifiers: ModifierKeys.Control,
+            isAvailable: _vm.CanActOnSelection));
+
+        _registry.Register(new CommandDefinition(
+            id: "mail.saveAs", category: "Mail", title: "Save As…",
+            description: "Choose where to save the selected messages, and in which format",
+            execute: async () => await SaveSelectedMessagesAsync(chooseLocation: true),
+            defaultKey: Key.F12, defaultModifiers: ModifierKeys.None,
+            isAvailable: _vm.CanActOnSelection));
+
+        _registry.Register(new CommandDefinition(
+            id: "mail.print", category: "Mail", title: "Print…",
+            execute: async () => await PrintSelectedMessageAsync(),
+            defaultKey: Key.P, defaultModifiers: ModifierKeys.Control,
             isAvailable: _vm.CanActOnSelection));
 
         // ── Calendar list commands (T/Enter while the calendar list has focus) ──
@@ -3559,9 +3586,16 @@ public partial class MainWindow : Window
                 // The command palette, as the message window already relays it (#676): focus is inside this
                 // document for as long as the user is reading, so the window's own key handling never sees it.
                 +"else if(e.ctrlKey&&e.shiftKey&&(e.key==='p'||e.key==='P')){window.chrome.webview.postMessage('ctrl-shift-p');e.preventDefault();}"
+                // Save, Save As and Print (#728). Plain Ctrl only: Ctrl+Shift+S is search, and Ctrl+Shift+P the
+                // palette above. preventDefault also keeps the browser's own Save page / Print from running.
+                +"else if(e.ctrlKey&&!e.shiftKey&&!e.altKey&&(e.key==='s'||e.key==='S')){window.chrome.webview.postMessage('ctrl-s');e.preventDefault();}"
+                +"else if(e.ctrlKey&&!e.shiftKey&&!e.altKey&&(e.key==='p'||e.key==='P')){window.chrome.webview.postMessage('ctrl-p');e.preventDefault();}"
+                +"else if(e.key==='F12'&&!e.ctrlKey&&!e.shiftKey&&!e.altKey){window.chrome.webview.postMessage('f12');e.preventDefault();}"
                 +"});"
                 // The live region the link menu writes outcomes into (issues #671, #329).
-                + LinkContextMenuSupport.StatusRegionScript);
+                + LinkContextMenuSupport.StatusRegionScript
+                // Which link the user activated, so a navigation can be matched to it (#728 review).
+                + LinkActivationGate.ReportActivationsScript);
 
             MessageBody.CoreWebView2.WebMessageReceived += (_, args) =>
             {
@@ -3593,6 +3627,16 @@ public partial class MainWindow : Window
                         DispatcherPriority.Input);
                 else if (msg == "ctrl-shift-p")
                     Dispatcher.InvokeAsync(OpenCommandPalette, DispatcherPriority.Input);
+                else if (msg?.StartsWith(LinkActivationGate.ActivationMessagePrefix, StringComparison.Ordinal) == true)
+                    _linkGate.NoteActivated(msg[LinkActivationGate.ActivationMessagePrefix.Length..]);
+                // Save / Print (#728) go through the registry, so a user's rebinding of the command is
+                // what the relayed key runs — the relay carries the default key, the registry decides.
+                else if (msg == "ctrl-s")
+                    Dispatcher.InvokeAsync(() => _registry.FindByGesture(Key.S, ModifierKeys.Control)?.Execute(), DispatcherPriority.Input);
+                else if (msg == "ctrl-p")
+                    Dispatcher.InvokeAsync(() => _registry.FindByGesture(Key.P, ModifierKeys.Control)?.Execute(), DispatcherPriority.Input);
+                else if (msg == "f12")
+                    Dispatcher.InvokeAsync(() => _registry.FindByGesture(Key.F12, ModifierKeys.None)?.Execute(), DispatcherPriority.Input);
             };
 
             MessageBody.CoreWebView2.NavigationStarting += (_, args) =>
@@ -3603,17 +3647,42 @@ public partial class MainWindow : Window
                     uri.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
                     return;
                 args.Cancel = true;
-                if (uri.StartsWith("quickmail:", StringComparison.OrdinalIgnoreCase))
+                // Only a navigation the USER started leaves the message: a link they activated. One the
+                // document starts by itself — a <meta> refresh — is cancelled and goes nowhere. Handing
+                // those on meant a crafted message opened a web page, or answered an invitation, merely
+                // by being read (#728 security review). IsUserInitiated alone is not proof: it is also
+                // true for a refresh that fires within seconds of any keypress in the page, so the
+                // navigation must also match a link the host script saw the user activate.
+                if (!args.IsUserInitiated)
                 {
-                    HandleQuickMailUri(uri);
+                    LogService.Debug("Reading pane: cancelled a navigation the document started on its own.");
                     return;
                 }
-                OpenExternal(uri);
+                _linkGate.Request(uri, () =>
+                {
+                    if (uri.StartsWith("quickmail:", StringComparison.OrdinalIgnoreCase))
+                        HandleQuickMailUri(uri);
+                    else
+                        OpenExternal(uri);
+                });
             };
             MessageBody.CoreWebView2.NewWindowRequested += (_, args) =>
             {
                 args.Handled = true;
-                OpenExternal(args.Uri);
+                // As NavigationStarting: nothing opens that the user did not ask for.
+                if (!args.IsUserInitiated) return;
+                var target = args.Uri;
+                _linkGate.Request(target, () => OpenExternal(target));
+            };
+            // A link carrying a download attribute raises DownloadStarting and nothing else — no
+            // NavigationStarting, so none of the checks above — and WebView2's default is to save the
+            // sender's file, under the sender's name, into Downloads. A message never downloads
+            // anything; attachments are saved through QuickMail's own Save. #728 review, third pass.
+            MessageBody.CoreWebView2.DownloadStarting += (_, args) =>
+            {
+                args.Cancel = true;
+                args.Handled = true;
+                LogService.Debug("Message body: refused a download started from the message.");
             };
             MessageBody.CoreWebView2.ProcessFailed += (_, args) =>
                 LogService.Log($"[ERROR] WebView2 ProcessFailed kind={args.ProcessFailedKind} exit={args.ExitCode} reason={args.Reason}");
@@ -3856,12 +3925,18 @@ public partial class MainWindow : Window
 
     private void HandleQuickMailUri(string uri)
     {
-        if (uri.StartsWith("quickmail:ics-accept", StringComparison.OrdinalIgnoreCase))
-            _vm.AcceptInviteCommand.Execute(null);
-        else if (uri.StartsWith("quickmail:ics-tentative", StringComparison.OrdinalIgnoreCase))
-            _vm.TentativeInviteCommand.Execute(null);
-        else if (uri.StartsWith("quickmail:ics-decline", StringComparison.OrdinalIgnoreCase))
-            _vm.DeclineInviteCommand.Execute(null);
+        // Only QuickMail's own links, which carry this run's token; one the sender wrote does nothing.
+        if (!QuickMailLinks.TryParse(uri, out var action))
+        {
+            LogService.Log("Reading pane: ignored a quickmail: link that QuickMail did not create.");
+            return;
+        }
+        switch (action)
+        {
+            case "ics-accept":    _vm.AcceptInviteCommand.Execute(null);    break;
+            case "ics-tentative": _vm.TentativeInviteCommand.Execute(null); break;
+            case "ics-decline":   _vm.DeclineInviteCommand.Execute(null);   break;
+        }
     }
 
     /// <summary>
@@ -5922,6 +5997,24 @@ public partial class MainWindow : Window
             await _vm.SaveAllAttachmentsCommand.ExecuteAsync(null);
         };
 
+        // Save / Save As / Print (#728): this window's message, this window's dialogs, and the outcome
+        // spoken in this window - a notification raised on the main window is not heard while the
+        // user is in this one. Deferred a dispatcher turn for the reason SaveSelectedMessagesAsync is.
+        void SaveReport(string text) =>
+            AccessibilityHelper.Announce(win, text, interrupt: true, category: AnnouncementCategory.Result);
+        Task SaveFromWindow(bool chooseLocation) =>
+            Dispatcher.InvokeAsync(async () =>
+            {
+                if ((winVm.SelectedMessage ?? winVm.MessageDetail) is not { } message) return;
+                await _vm.SaveMessagesAsync([message], chooseLocation, win.SaveUi, SaveReport);
+            }, DispatcherPriority.Input).Task.Unwrap();
+        winVm.SaveAction   = () => SaveFromWindow(chooseLocation: false);
+        winVm.SaveAsAction = () => SaveFromWindow(chooseLocation: true);
+        winVm.PrintAction  = () =>
+            Dispatcher.InvokeAsync(
+                () => _vm.PrintMessageAsync(winVm.SelectedMessage ?? winVm.MessageDetail, win.SaveUi, SaveReport),
+                DispatcherPriority.Input).Task.Unwrap();
+
         win.MoveToMainWindowRequested += (_, vm) =>
         {
             if (vm.OriginalSummary != null)
@@ -6909,6 +7002,16 @@ public partial class MainWindow : Window
             return picker.ShowDialog() == true ? picker.SelectedFolder : null;
         };
 
+        // The save folder for Save (#728). The Windows folder dialog, over the Settings dialog, which
+        // hosts no WebView2.
+        vm.PickSaveFolderRequested = start =>
+        {
+            var folderDialog = new Microsoft.Win32.OpenFolderDialog { Title = "Choose Save Folder" };
+            if (!string.IsNullOrWhiteSpace(start) && Directory.Exists(start))
+                folderDialog.InitialDirectory = start;
+            return folderDialog.ShowDialog(dialog) == true ? folderDialog.FolderName : null;
+        };
+
         if (dialog.ShowDialog() == true)
         {
             // The dialog's message loop is dead here, so ApplySettings may safely
@@ -7067,6 +7170,65 @@ public partial class MainWindow : Window
 
         await _vm.CopySelectedMessagesToFolderAsync(messages, picker.SelectedFolder);
     }
+
+    // ── Save / Save As / Print (#728) ────────────────────────────────────────
+
+    private MessageSaveUi? _messageSaveUi;
+    private MessageSaveUi SaveUi => _messageSaveUi ??= new MessageSaveUi(this, () => _webViewEnvironment, MoveFocusOutOfMessageBody);
+
+    /// <summary>
+    /// Before a modal dialog: if focus is in the message body, park it on the Date header field (a
+    /// read-only WPF field just above the body) and return how to put it back. See MessageSaveUi.
+    /// </summary>
+    private Action? MoveFocusOutOfMessageBody()
+    {
+        if (!(_vm.IsMessageOpen && IsMessageBodyFocused)) return null;
+        DateField.Focus();
+        return FocusMessageBodyHost;
+    }
+
+    /// <summary>
+    /// What Save acts on: a selected group header's messages — the whole conversation, as Move does
+    /// (#566) — else every selected message.
+    /// </summary>
+    private IReadOnlyList<MailMessageSummary> SaveTargets() =>
+        SelectedGroupTarget()?.Messages ?? GetSelectedMessages();
+
+    // Every entry point defers to a fresh dispatcher turn before any dialog opens. A shortcut pressed
+    // while the reading pane has focus arrives inside WebView2's AcceleratorKeyPressed COM callback,
+    // and opening a modal dialog there — a nested message loop inside an inbound cross-process call —
+    // is the re-entrancy that hung compose (#181; see OpenComposeWindow).
+    private Task SaveSelectedMessagesAsync(bool chooseLocation) =>
+        Dispatcher.InvokeAsync(() => SaveSelectedMessagesCoreAsync(chooseLocation), DispatcherPriority.Input).Task.Unwrap();
+
+    private Task PrintSelectedMessageAsync() =>
+        Dispatcher.InvokeAsync(PrintSelectedMessageCoreAsync, DispatcherPriority.Input).Task.Unwrap();
+
+    private async Task SaveSelectedMessagesCoreAsync(bool chooseLocation)
+    {
+        var messages = SaveTargets();
+        if (messages.Count == 0) return;
+        await _vm.SaveMessagesAsync(messages, chooseLocation, SaveUi);
+    }
+
+    private async Task PrintSelectedMessageCoreAsync()
+    {
+        // Print is one message: the newest in a selected group (the one message a single-message
+        // action answers — see TargetMessage), else the selection, if it is one message.
+        if (SelectedGroupTarget() is null && GetSelectedMessages().Count > 1)
+        {
+            _vm.StatusText = "Print works on one message at a time. Select a single message.";
+            AccessibilityHelper.Announce(this, _vm.StatusText, category: AnnouncementCategory.Result);
+            return;
+        }
+        await _vm.PrintMessageAsync(TargetMessage() ?? GetSelectedMessages().FirstOrDefault(), SaveUi);
+    }
+
+    private async void MenuSave_Click(object sender, RoutedEventArgs e) => await SaveSelectedMessagesAsync(chooseLocation: false);
+    private async void MenuSaveAs_Click(object sender, RoutedEventArgs e) => await SaveSelectedMessagesAsync(chooseLocation: true);
+    private async void MenuPrint_Click(object sender, RoutedEventArgs e) => await PrintSelectedMessageAsync();
+
+    private void FileMenu_SubmenuOpened(object sender, RoutedEventArgs e) => _vm.RefreshMessageTarget();
 
     private async void MessageContextMenu_MoveToFolder_Click(object sender, RoutedEventArgs e)
         => await MoveMessageToFolderAsync();

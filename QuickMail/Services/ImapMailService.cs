@@ -1191,6 +1191,47 @@ public class ImapMailService : IMailService, IChangeNotifier, IConnectionProbe
         finally { await folder.CloseAsync(false, ct); }
     }
 
+    /// <summary>
+    /// The whole message as the server stores it (#728). The folder is opened read-only (EXAMINE) and
+    /// MailKit fetches with BODY.PEEK[], so saving a message never marks it read. Fetched through the
+    /// streaming callback: MailKit still buffers the literal once before handing it over, but that one
+    /// copy goes straight to <paramref name="destination"/> — where GetStreamAsync plus a MemoryStream
+    /// and ToArray held three.
+    /// </summary>
+    public async Task CopyOriginalMessageToAsync(
+        Guid accountId, string folderName, string messageId, Stream destination, CancellationToken ct = default)
+    {
+        using var lease = await RentClientAsync(accountId, ImapLeasePriority.Foreground, ct);
+        var client = lease.Client;
+        var folder = await client.GetFolderAsync(folderName, ct);
+        await folder.OpenAsync(FolderAccess.ReadOnly, ct);
+        try
+        {
+            var found = false;
+            if (folder is ImapFolder imap)
+            {
+                await imap.GetStreamsAsync(new[] { ToUid(messageId) }, async (_, _, _, source, token) =>
+                {
+                    found = true;
+                    await source.CopyToAsync(destination, token);
+                }, ct);
+            }
+            else
+            {
+                using var source = await folder.GetStreamAsync(ToUid(messageId), ct);
+                await source.CopyToAsync(destination, ct);
+                found = true;
+            }
+            if (!found) throw new MessageNotFoundException($"Message UID {messageId} not found.");
+        }
+        catch (MessageNotFoundException)
+        {
+            throw new MessageOriginalUnavailableException(
+                "The message is no longer on the server. It may have been moved or deleted from another device.");
+        }
+        finally { await folder.CloseAsync(false, ct); }
+    }
+
     // ── Helpers ──────────────────────────────────────────────────────────────────
 
     /// <summary>

@@ -44,6 +44,9 @@ public partial class MessageWindow : Window
     // Local command registry for the command palette (issue 53).
     private readonly CommandRegistry _localRegistry = new();
 
+    /// <summary>Pairs this window's navigations with the links the user activated (#728 review).</summary>
+    private readonly LinkActivationGate _linkGate = new();
+
     // F6 focus cycle: 0=Toolbar, 1=Headers, 2=Body
     private int _f6FocusStop;
 
@@ -140,6 +143,25 @@ public partial class MessageWindow : Window
         _localRegistry.Register(new CommandDefinition(
             id: "window.moveToMainWindow", category: "View", title: "Move to Main Window",
             execute: () => _vm.MoveToMainWindowCommand.Execute(null)));
+
+        // Save, Save As and Print (#728) - the same gestures as the main window's. The work is routed
+        // back to MainViewModel (SaveAction and friends), with this window's own dialogs (SaveUi).
+        _localRegistry.Register(new CommandDefinition(
+            id: "message.save", category: "Mail", title: "Save",
+            description: "Save this message in your default format and folder, without asking",
+            execute: () => _vm.SaveMessageCommand.Execute(null),
+            defaultKey: Key.S, defaultModifiers: ModifierKeys.Control));
+
+        _localRegistry.Register(new CommandDefinition(
+            id: "message.saveAs", category: "Mail", title: "Save As…",
+            description: "Choose where to save this message, and in which format",
+            execute: () => _vm.SaveMessageAsCommand.Execute(null),
+            defaultKey: Key.F12, defaultModifiers: ModifierKeys.None));
+
+        _localRegistry.Register(new CommandDefinition(
+            id: "message.print", category: "Mail", title: "Print…",
+            execute: () => _vm.PrintMessageCommand.Execute(null),
+            defaultKey: Key.P, defaultModifiers: ModifierKeys.Control));
 
         // Ctrl+Shift+W here too, so watching a thread works at the moment you are actually reading
         // it. This window owns a separate registry, which is why the main window's registration
@@ -243,7 +265,13 @@ public partial class MessageWindow : Window
                 "else if(e.ctrlKey&&e.shiftKey&&(e.key==='w'||e.key==='W')){window.chrome.webview.postMessage('ctrl-shift-w');e.preventDefault();}" +
                 "else if(e.ctrlKey&&!e.shiftKey&&(e.key==='w'||e.key==='W')){window.chrome.webview.postMessage('ctrl-w');e.preventDefault();}" +
                 "else if(e.ctrlKey&&e.shiftKey&&(e.key==='p'||e.key==='P')){window.chrome.webview.postMessage('ctrl-shift-p');e.preventDefault();}" +
-                "});");
+                // Save, Save As and Print (#728); see the reading pane's copy of this script.
+                "else if(e.ctrlKey&&!e.shiftKey&&!e.altKey&&(e.key==='s'||e.key==='S')){window.chrome.webview.postMessage('ctrl-s');e.preventDefault();}" +
+                "else if(e.ctrlKey&&!e.shiftKey&&!e.altKey&&(e.key==='p'||e.key==='P')){window.chrome.webview.postMessage('ctrl-p');e.preventDefault();}" +
+                "else if(e.key==='F12'&&!e.ctrlKey&&!e.shiftKey&&!e.altKey){window.chrome.webview.postMessage('f12');e.preventDefault();}" +
+                "});" +
+                // Which link the user activated, so a navigation can be matched to it (#728 review).
+                LinkActivationGate.ReportActivationsScript);
 
             MessageBody.CoreWebView2.WebMessageReceived += (_, args) =>
             {
@@ -257,6 +285,12 @@ public partial class MessageWindow : Window
                     case "ctrl-w":     Dispatcher.InvokeAsync(Close,                DispatcherPriority.Input); break;
                     case "ctrl-shift-w": Dispatcher.InvokeAsync(RequestWatchToggle, DispatcherPriority.Input); break;
                     case "ctrl-shift-p": Dispatcher.InvokeAsync(OpenCommandPalette, DispatcherPriority.Input); break;
+                    case "ctrl-s": Dispatcher.InvokeAsync(() => _localRegistry.FindByGesture(Key.S, ModifierKeys.Control)?.Execute(), DispatcherPriority.Input); break;
+                    case "ctrl-p": Dispatcher.InvokeAsync(() => _localRegistry.FindByGesture(Key.P, ModifierKeys.Control)?.Execute(), DispatcherPriority.Input); break;
+                    case "f12":    Dispatcher.InvokeAsync(() => _localRegistry.FindByGesture(Key.F12, ModifierKeys.None)?.Execute(), DispatcherPriority.Input); break;
+                    case { } activated when activated.StartsWith(LinkActivationGate.ActivationMessagePrefix, StringComparison.Ordinal):
+                        _linkGate.NoteActivated(activated[LinkActivationGate.ActivationMessagePrefix.Length..]);
+                        break;
                     case "shift-tab":  Dispatcher.InvokeAsync(FocusLastHeaderField,  DispatcherPriority.Input); break;
                     case "focus-attachments": Dispatcher.InvokeAsync(FocusAttachmentList, DispatcherPriority.Input); break;
                     case "f6":         Dispatcher.InvokeAsync(() => CycleFocus(true),  DispatcherPriority.Input); break;
@@ -272,14 +306,23 @@ public partial class MessageWindow : Window
                     uri.StartsWith("data:",  StringComparison.OrdinalIgnoreCase))
                     return;
                 args.Cancel = true;
-                // The event card's RSVP buttons are quickmail: links. Cancelling the navigation is
-                // what keeps this document — and its aria-live status region — alive across the reply.
-                if (uri.StartsWith("quickmail:", StringComparison.OrdinalIgnoreCase))
+                // Only a navigation the user started leaves the message; one the document starts by
+                // itself (a <meta> refresh) goes nowhere. See the reading pane's handler. #728 review.
+                if (!args.IsUserInitiated)
                 {
-                    HandleQuickMailUri(uri);
+                    LogService.Debug("MessageWindow: cancelled a navigation the document started on its own.");
                     return;
                 }
-                OpenExternal(uri);
+                // The event card's RSVP buttons are quickmail: links. Cancelling the navigation is
+                // what keeps this document — and its aria-live status region — alive across the reply.
+                // Matched to the link the user activated, as in the reading pane.
+                _linkGate.Request(uri, () =>
+                {
+                    if (uri.StartsWith("quickmail:", StringComparison.OrdinalIgnoreCase))
+                        HandleQuickMailUri(uri);
+                    else
+                        OpenExternal(uri);
+                });
             };
 
             // A link with target="_blank" — or one activated with Ctrl/Shift/middle-click —
@@ -290,7 +333,19 @@ public partial class MessageWindow : Window
             MessageBody.CoreWebView2.NewWindowRequested += (_, args) =>
             {
                 args.Handled = true;
-                OpenExternal(args.Uri);
+                if (!args.IsUserInitiated) return;   // as NavigationStarting above
+                var target = args.Uri;
+                _linkGate.Request(target, () => OpenExternal(target));
+            };
+            // A link carrying a download attribute raises DownloadStarting and nothing else — no
+            // NavigationStarting, so none of the checks above — and WebView2's default is to save the
+            // sender's file, under the sender's name, into Downloads. A message never downloads
+            // anything; attachments are saved through QuickMail's own Save. #728 review, third pass.
+            MessageBody.CoreWebView2.DownloadStarting += (_, args) =>
+            {
+                args.Cancel = true;
+                args.Handled = true;
+                LogService.Debug("Message body: refused a download started from the message.");
             };
 
             if (_vm.MessageDetail != null)
@@ -410,12 +465,18 @@ public partial class MessageWindow : Window
     /// <summary>Handles quickmail: pseudo-URIs from this window's event card buttons.</summary>
     private void HandleQuickMailUri(string uri)
     {
-        if (uri.StartsWith("quickmail:ics-accept", StringComparison.OrdinalIgnoreCase))
-            RespondToInvite(InviteResponse.Accept);
-        else if (uri.StartsWith("quickmail:ics-tentative", StringComparison.OrdinalIgnoreCase))
-            RespondToInvite(InviteResponse.Tentative);
-        else if (uri.StartsWith("quickmail:ics-decline", StringComparison.OrdinalIgnoreCase))
-            RespondToInvite(InviteResponse.Decline);
+        // Only QuickMail's own links, which carry this run's token; one the sender wrote does nothing.
+        if (!QuickMailLinks.TryParse(uri, out var action))
+        {
+            LogService.Log("MessageWindow: ignored a quickmail: link that QuickMail did not create.");
+            return;
+        }
+        switch (action)
+        {
+            case "ics-accept":    RespondToInvite(InviteResponse.Accept);    break;
+            case "ics-tentative": RespondToInvite(InviteResponse.Tentative); break;
+            case "ics-decline":   RespondToInvite(InviteResponse.Decline);   break;
+        }
     }
 
     private void RespondToInvite(InviteResponse response)
@@ -578,6 +639,25 @@ public partial class MessageWindow : Window
             _f6FocusStop = 2; // body is now focused
             AccessibilityHelper.Announce(this, focusLabel, interrupt: true, category: AnnouncementCategory.Result);
         }, DispatcherPriority.Input);
+    }
+
+    private MessageSaveUi? _messageSaveUi;
+
+    /// <summary>This window's Save As / Print dialogs and PDF renderer (#728), owned by this window.</summary>
+    internal MessageSaveUi SaveUi => _messageSaveUi ??= new MessageSaveUi(this, () => _sharedEnv, MoveFocusOutOfMessageBody);
+
+    /// <summary>
+    /// Before a modal dialog, parks focus on the Date header field if it is in the message body (or
+    /// WPF reports nothing focused, which is what focus inside the WebView2 looks like, #672), and
+    /// returns how to put it back. See <see cref="MessageSaveUi"/> for why.
+    /// </summary>
+    private Action? MoveFocusOutOfMessageBody()
+    {
+        var focused = Keyboard.FocusedElement;
+        var inBody = MessageBody.IsKeyboardFocusWithin || focused is null || ReferenceEquals(focused, this);
+        if (!inBody) return null;
+        DateField.Focus();
+        return FocusMessageBodyHost;
     }
 
     private void FocusMessageBodyHost()
