@@ -30,7 +30,7 @@ using Xunit;
 namespace QuickMail.Tests;
 
 [Collection("WpfTests")]
-public class GrabAddressesDialogTests
+public class GrabAddressesDialogTests : WpfTestBase
 {
     private static readonly System.Collections.Generic.List<(string Name, string Address)> TwoAddresses =
         [("Alice Smith", "alice@example.com"), ("Bob Jones", "bob@example.com")];
@@ -45,7 +45,7 @@ public class GrabAddressesDialogTests
 
     // ── Focus ─────────────────────────────────────────────────────────────────
 
-    [StaFact]
+    [WpfFact]
     public void OpenDialog_FocusesFirstAddressCheckbox()
     {
         // Regression for the async ordering bug: FocusFirstAddress() must run
@@ -68,7 +68,7 @@ public class GrabAddressesDialogTests
 
     // ── Tab navigation ────────────────────────────────────────────────────────
 
-    [StaFact]
+    [WpfFact]
     public void Tab_FromAddressList_MovesToAddToGroupCheckbox()
     {
         // Regression for TabNavigation="Contained": Tab was permanently trapped
@@ -98,7 +98,7 @@ public class GrabAddressesDialogTests
 
     // ── Static group section ────────────────────────────────────────────────────
 
-    [StaFact]
+    [WpfFact]
     public void GroupControls_AreEnabledAndVisible_OnOpen()
     {
         // Static design: every group control is always present, enabled, and
@@ -132,7 +132,7 @@ public class GrabAddressesDialogTests
         finally { dialog.Close(); }
     }
 
-    [StaFact]
+    [WpfFact]
     public void GroupCombo_OffersCreateNewGroup()
     {
         EnsureApplication();
@@ -153,7 +153,7 @@ public class GrabAddressesDialogTests
 
     // ── Modeless close ──────────────────────────────────────────────────────────
 
-    [StaFact]
+    [WpfFact]
     public void Escape_ClosesDialog()
     {
         // Modeless windows do not auto-close on Escape (that is ShowDialog-only);
@@ -179,8 +179,8 @@ public class GrabAddressesDialogTests
 
     // ── Save logic ──────────────────────────────────────────────────────────────
 
-    [StaFact]
-    public void Save_WithCreateNewGroup_CreatesGroupAndAddsCheckedContacts()
+    [WpfFact]
+    public async Task Save_WithCreateNewGroup_CreatesGroupAndAddsCheckedContacts()
     {
         EnsureApplication();
         var dir = TempDir();
@@ -211,8 +211,8 @@ public class GrabAddressesDialogTests
             PumpUntil(() => closed);
             Assert.True(closed, "Save should close the dialog when it completes.");
 
-            var grp = svc.LoadAllGroupsAsync().GetAwaiter().GetResult()
-                         .FirstOrDefault(g => g.Name == "Grabbed Group");
+            var grp = (await svc.LoadAllGroupsAsync())
+                .FirstOrDefault(g => g.Name == "Grabbed Group");
             Assert.NotNull(grp);
             Assert.Equal(2, grp!.ResolvedMemberCount);
         }
@@ -223,8 +223,8 @@ public class GrabAddressesDialogTests
         }
     }
 
-    [StaFact]
-    public void Save_WithoutAddToGroup_SavesContactsAndIgnoresGroupSelection()
+    [WpfFact]
+    public async Task Save_WithoutAddToGroup_SavesContactsAndIgnoresGroupSelection()
     {
         EnsureApplication();
         var dir = TempDir();
@@ -247,9 +247,9 @@ public class GrabAddressesDialogTests
             PumpUntil(() => closed);
             Assert.True(closed);
 
-            var contacts = svc.SearchContactsAsync("").GetAwaiter().GetResult();
+            var contacts = await svc.SearchContactsAsync("");
             Assert.Equal(2, contacts.Count);
-            Assert.Empty(svc.LoadAllGroupsAsync().GetAwaiter().GetResult());
+            Assert.Empty(await svc.LoadAllGroupsAsync());
         }
         finally
         {
@@ -258,8 +258,8 @@ public class GrabAddressesDialogTests
         }
     }
 
-    [StaFact]
-    public void Save_CreateNewGroupWithEmptyName_DoesNotCloseOrCreateGroup()
+    [WpfFact]
+    public async Task Save_CreateNewGroupWithEmptyName_DoesNotCloseOrCreateGroup()
     {
         EnsureApplication();
         var dir = TempDir();
@@ -287,7 +287,7 @@ public class GrabAddressesDialogTests
             for (int i = 0; i < 10; i++) DoEvents();
 
             Assert.False(closed, "Empty new-group name should keep the dialog open.");
-            Assert.Empty(svc.LoadAllGroupsAsync().GetAwaiter().GetResult());
+            Assert.Empty(await svc.LoadAllGroupsAsync());
         }
         finally
         {
@@ -296,8 +296,8 @@ public class GrabAddressesDialogTests
         }
     }
 
-    [StaFact]
-    public void Save_CreateNewGroupWithDuplicateName_DoesNotCloseOrCreateSecondGroup()
+    [WpfFact]
+    public async Task Save_CreateNewGroupWithDuplicateName_DoesNotCloseOrCreateSecondGroup()
     {
         // Group names must be unique (case-insensitive). Creating "test group"
         // when "Test Group" exists must be refused and the dialog kept open,
@@ -305,7 +305,7 @@ public class GrabAddressesDialogTests
         EnsureApplication();
         var dir = TempDir();
         var svc = new ContactService(new ProfileContext(dir));
-        svc.CreateGroupAsync("Test Group").GetAwaiter().GetResult();
+        await svc.CreateGroupAsync("Test Group");
         var dialog = new GrabAddressesDialog(TwoAddresses, svc);
         var closed = false;
         dialog.Closed += (_, _) => closed = true;
@@ -332,7 +332,7 @@ public class GrabAddressesDialogTests
             for (int i = 0; i < 10; i++) DoEvents();
 
             Assert.False(closed, "A duplicate group name should keep the dialog open.");
-            var groups = svc.LoadAllGroupsAsync().GetAwaiter().GetResult();
+            var groups = await svc.LoadAllGroupsAsync();
             Assert.Single(groups);
             Assert.Equal("Test Group", groups[0].Name);
         }
@@ -369,7 +369,7 @@ public class GrabAddressesDialogTests
         lock (typeof(Application))
         {
             if (Application.Current == null)
-                new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
+                WpfTestApplication.EnsureStarted();
             const string stylesUri = "pack://application:,,,/QuickMail;component/Styles/AccessibleStyles.xaml";
             var uri = new Uri(stylesUri, UriKind.Absolute);
             if (Application.Current!.Resources.MergedDictionaries.All(d => d.Source != uri))

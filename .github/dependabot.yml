@@ -6,10 +6,6 @@ updates:
       interval: weekly
       day: monday
     open-pull-requests-limit: 10
-    reviewers:
-      - kellylford
-    assignees:
-      - kellylford
     groups:
       microsoft-identity:
         patterns:
@@ -24,7 +20,3 @@ updates:
       interval: weekly
       day: monday
     open-pull-requests-limit: 5
-    reviewers:
-      - kellylford
-    assignees:
-      - kellylford

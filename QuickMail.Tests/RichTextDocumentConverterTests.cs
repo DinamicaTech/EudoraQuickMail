@@ -11,9 +11,9 @@ namespace QuickMail.Tests;
 /// behind the HTML compose mode. FlowDocument requires an STA thread.
 /// </summary>
 [Collection("WpfTests")]
-public class RichTextDocumentConverterTests
+public class RichTextDocumentConverterTests : WpfTestBase
 {
-    [StaFact]
+    [WpfFact]
     public void FromHtml_BoldParagraph_RoundTripsToHtml()
     {
         var doc = RichTextDocumentConverter.FromHtml("<p>plain <strong>bold</strong> tail</p>");
@@ -21,7 +21,7 @@ public class RichTextDocumentConverterTests
         Assert.Equal("<p>plain <strong>bold</strong> tail</p>", html);
     }
 
-    [StaFact]
+    [WpfFact]
     public void FromHtml_ItalicUnderlineStrike_RoundTrip()
     {
         var doc = RichTextDocumentConverter.FromHtml("<p><em>i</em> <u>u</u> <del>d</del></p>");
@@ -31,7 +31,7 @@ public class RichTextDocumentConverterTests
         Assert.Contains("<del>d</del>", html);
     }
 
-    [StaFact]
+    [WpfFact]
     public void FromHtml_Heading_RoundTripsViaTag()
     {
         var doc = RichTextDocumentConverter.FromHtml("<h2>Section title</h2><p>body</p>");
@@ -45,7 +45,7 @@ public class RichTextDocumentConverterTests
         Assert.DoesNotContain("<strong>", html);
     }
 
-    [StaFact]
+    [WpfFact]
     public void FromHtml_Lists_RoundTrip()
     {
         var doc = RichTextDocumentConverter.FromHtml("<ul><li>one</li><li>two</li></ul><ol><li>first</li></ol>");
@@ -56,7 +56,7 @@ public class RichTextDocumentConverterTests
         Assert.Contains("<li>first</li>", html);
     }
 
-    [StaFact]
+    [WpfFact]
     public void FromHtml_Hyperlink_RoundTrip()
     {
         var doc = RichTextDocumentConverter.FromHtml("<p><a href=\"https://example.com/\">site</a></p>");
@@ -64,7 +64,7 @@ public class RichTextDocumentConverterTests
         Assert.Contains("<a href=\"https://example.com/\">site</a>", html);
     }
 
-    [StaFact]
+    [WpfFact]
     public void FromHtml_JavascriptHref_NotNavigable()
     {
         var doc = RichTextDocumentConverter.FromHtml("<p><a href=\"javascript:alert(1)\">x</a></p>");
@@ -72,7 +72,7 @@ public class RichTextDocumentConverterTests
         Assert.Null(link.NavigateUri);
     }
 
-    [StaFact]
+    [WpfFact]
     public void FromHtml_EscapedEntities_DecodeAndReencode()
     {
         var doc = RichTextDocumentConverter.FromHtml("<p>a &amp; b &lt;tag&gt;</p>");
@@ -83,7 +83,7 @@ public class RichTextDocumentConverterTests
         Assert.Contains("&lt;tag&gt;", html);
     }
 
-    [StaFact]
+    [WpfFact]
     public void ToMarkdown_BoldItalicHeadingListLink()
     {
         var doc = RichTextDocumentConverter.FromHtml(
@@ -98,7 +98,7 @@ public class RichTextDocumentConverterTests
         Assert.Contains("[link](https://example.com/)", md);
     }
 
-    [StaFact]
+    [WpfFact]
     public void ToMarkdown_NumberedList()
     {
         var doc = RichTextDocumentConverter.FromHtml("<ol><li>first</li><li>second</li></ol>");
@@ -107,7 +107,7 @@ public class RichTextDocumentConverterTests
         Assert.Contains("2. second", md);
     }
 
-    [StaFact]
+    [WpfFact]
     public void ToPlainText_StripsAllFormatting()
     {
         var doc = RichTextDocumentConverter.FromHtml("<h1>Title</h1><p><strong>bold</strong> text</p>");
@@ -117,7 +117,7 @@ public class RichTextDocumentConverterTests
         Assert.DoesNotContain("<", text);
     }
 
-    [StaFact]
+    [WpfFact]
     public void FromHtml_Empty_ProducesEditableDocument()
     {
         var doc = RichTextDocumentConverter.FromHtml("");
@@ -125,7 +125,7 @@ public class RichTextDocumentConverterTests
         Assert.Equal(string.Empty, RichTextDocumentConverter.ToPlainText(doc));
     }
 
-    [StaFact]
+    [WpfFact]
     public void Snapshot_ProducesAllThreeRepresentations()
     {
         var doc = RichTextDocumentConverter.FromHtml("<p><strong>hi</strong> there</p>");
@@ -136,7 +136,7 @@ public class RichTextDocumentConverterTests
         Assert.False(snapshot.IsEmpty);
     }
 
-    [StaFact]
+    [WpfFact]
     public void MarkdigOutput_LoadsCleanly()
     {
         // The exact pipeline used in Markdown→HTML mode switches.

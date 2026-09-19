@@ -6,6 +6,7 @@ bin/
 obj/
 publish/
 publish-arm64/
+/publish-*/
 *.exe
 installer/Output/
 
@@ -52,6 +53,8 @@ installer/velopack/license.txt
 # Test result artifacts
 *.trx
 QuickMail.Tests/TestResults/
+/TestResults/
+*.dmp
 
 # Local integration-test servers (GreenMail jar cache, logs, pids)
 .testservers/
@@ -72,3 +75,13 @@ QuickMail.Tests/TestResults/
 *.db.*.tmp
 /.tmp-eudora-v2.db*
 /in-recovery-test.db*
+
+# Local package caches
+/.pnpm-store/
+
+# The product website is maintained as its own Git repository
+/website/
+/website-site.tar.gz
+
+# Local artwork source; the repository presentation uses quickmail-og.png
+/logo.jpg

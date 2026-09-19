@@ -24,9 +24,9 @@ using Xunit;
 namespace QuickMail.Tests;
 
 [Collection("WpfTests")]
-public class TokenizedAddressBoxPasteTests
+public class TokenizedAddressBoxPasteTests : WpfTestBase
 {
-    [StaFact]
+    [WpfFact]
     public void Paste_CommaNameWithoutAddress_DoesNotRecurse()
     {
         EnsureApplication();
@@ -43,7 +43,7 @@ public class TokenizedAddressBoxPasteTests
         Assert.Equal("Ford, Kelly", box.InputBox.Text);
     }
 
-    [StaFact]
+    [WpfFact]
     public void Paste_SingleCommaSeparator_DoesNotRecurse()
     {
         EnsureApplication();
@@ -56,7 +56,7 @@ public class TokenizedAddressBoxPasteTests
         Assert.Equal("a,b", box.InputBox.Text);
     }
 
-    [StaFact]
+    [WpfFact]
     public void Paste_CommaSeparatedValidAddresses_StillCommitsChips()
     {
         // Guards against the fix over-reaching: legitimate comma-delimited
@@ -79,7 +79,7 @@ public class TokenizedAddressBoxPasteTests
         lock (typeof(Application))
         {
             if (Application.Current == null)
-                new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
+                WpfTestApplication.EnsureStarted();
         }
     }
 

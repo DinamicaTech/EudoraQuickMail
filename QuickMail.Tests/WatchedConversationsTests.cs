@@ -135,7 +135,7 @@ public class WatchedConversationsTests
     {
         var vm = await MakeConnectedVmAsync();
 
-        var group = vm.FolderTree.FirstOrDefault(n => n.IsHeader && n.Label == "All Mail");
+        var group = vm.FolderTree.FirstOrDefault(n => n.IsHeader && n.Label == "Combined views");
         Assert.NotNull(group);
         Assert.Equal("Watched Conversations", group!.Children.Last().Label);
     }

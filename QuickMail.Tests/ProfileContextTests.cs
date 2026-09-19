@@ -129,7 +129,10 @@ public class ProfileContextTests
     [Fact]
     public void TryCreate_ReturnsError_WhenPathContainsInvalidChars()
     {
-        var profile = ProfileContext.TryCreate("Z:\\path|with<invalid>chars", out var error);
+        // NUL is invalid on every Windows filesystem and fails before any I/O. The old test used
+        // an absent Z: drive; modern .NET accepts the punctuation in that path and Windows can
+        // spend minutes probing the missing drive, turning a validation test into a suite hang.
+        var profile = ProfileContext.TryCreate(Path.Combine(Path.GetTempPath(), "invalid\0path"), out var error);
         Assert.Null(profile);
         Assert.NotNull(error);
     }

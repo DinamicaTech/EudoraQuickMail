@@ -25,7 +25,7 @@ namespace QuickMail.Tests;
 /// bound Visibility values are correct — the kind of test that would have caught the bug
 /// before it shipped.
 /// </summary>
-public class ViewManagerViewModelTests
+public class ViewManagerViewModelTests : WpfTestBase
 {
     // ── Factory ──────────────────────────────────────────────────────────────────────
 
@@ -238,17 +238,17 @@ public class ViewManagerViewModelTests
 /// caught the ConverterParameter=Inverse bug before it shipped.
 /// </summary>
 [Collection("WpfTests")]
-public class ViewManagerWindowTests
+public class ViewManagerWindowTests : WpfTestBase
 {
     private static void EnsureApplication()
     {
         // Lock on the Application type object — the same lock used by XamlParseTests —
-        // so that parallel [StaFact] threads from different classes don't race to create
+        // so that parallel [WpfFact] threads from different classes don't race to create
         // a second Application (WPF only allows one per AppDomain).
         lock (typeof(Application))
         {
             if (Application.Current == null)
-                new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
+                WpfTestApplication.EnsureStarted();
         }
 
         const string stylesUri = "pack://application:,,,/QuickMail;component/Styles/AccessibleStyles.xaml";
@@ -300,7 +300,7 @@ public class ViewManagerWindowTests
 
     // ── XAML parse ────────────────────────────────────────────────────────────────────
 
-    [StaFact]
+    [WpfFact]
     public void ViewManagerWindow_XamlParsesWithoutException()
     {
         EnsureApplication();
@@ -316,7 +316,7 @@ public class ViewManagerWindowTests
     //   • "Create New View from Current State" button  → Visible
     //   • Save / Save As New / Delete panel            → Collapsed
 
-    [StaFact]
+    [WpfFact]
     public void CreateNewViewButton_VisibleWhenNoViewSelected()
     {
         EnsureApplication();
@@ -331,7 +331,7 @@ public class ViewManagerWindowTests
         window.Close();
     }
 
-    [StaFact]
+    [WpfFact]
     public void ReadOnlyActionsPanel_CollapsedWhenNoViewSelected()
     {
         EnsureApplication();
@@ -352,7 +352,7 @@ public class ViewManagerWindowTests
     //   • "Create New View from Current State" button  → Collapsed
     //   • Read-only actions panel (Edit/Delete/Save As New)  → Visible
 
-    [StaFact]
+    [WpfFact]
     public void CreateNewViewButton_CollapsedWhenViewSelected()
     {
         EnsureApplication();
@@ -368,7 +368,7 @@ public class ViewManagerWindowTests
         window.Close();
     }
 
-    [StaFact]
+    [WpfFact]
     public void ReadOnlyActionsPanel_VisibleWhenViewSelected()
     {
         EnsureApplication();
@@ -386,7 +386,7 @@ public class ViewManagerWindowTests
 
     // ── Visibility: selection changes at runtime ──────────────────────────────────────
 
-    [StaFact]
+    [WpfFact]
     public void Visibility_UpdatesWhenSelectionChanges()
     {
         EnsureApplication();

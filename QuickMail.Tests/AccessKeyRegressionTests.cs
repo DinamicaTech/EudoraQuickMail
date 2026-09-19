@@ -42,20 +42,20 @@ using Xunit;
 namespace QuickMail.Tests;
 
 [Collection("WpfTests")]
-public class AccessKeyRegressionTests
+public class AccessKeyRegressionTests : WpfTestBase
 {
     private static string TempDir() =>
         Path.Combine(Path.GetTempPath(), $"QM-AccessKeyTests-{Guid.NewGuid():N}");
 
-    [StaFact]
-    public void ContactTab_InsertButtons_HaveAccessKeyMnemonics_AndCorrectCommands()
+    [WpfFact]
+    public async Task ContactTab_InsertButtons_HaveAccessKeyMnemonics_AndCorrectCommands()
     {
         // Contacts tab is selected by default. The "_To / _Cc / _Bcc" buttons
         // in the "Add selected contact to:" row must have the underscore
         // mnemonic Content and the right Command binding to the VM.
         EnsureApplication();
 
-        var (vm, window, dir) = BuildWindowWithOneContact(out var cleanup);
+        var (vm, window, dir, cleanup) = await BuildWindowWithOneContactAsync();
         try
         {
             var toButton  = FindButtonByContent(window!, "_To", occurrence: 1);
@@ -77,8 +77,8 @@ public class AccessKeyRegressionTests
         }
     }
 
-    [StaFact]
-    public void GroupTab_InsertAllButtons_HaveAccessKeyMnemonics_AndCorrectCommands()
+    [WpfFact]
+    public async Task GroupTab_InsertAllButtons_HaveAccessKeyMnemonics_AndCorrectCommands()
     {
         // Switch to the Groups tab — the "Insert all into:" row has its
         // own _To / _Cc / _Bcc buttons. WPF TabControl only realises the
@@ -86,7 +86,7 @@ public class AccessKeyRegressionTests
         // we find the Group buttons as the first (and only) occurrence.
         EnsureApplication();
 
-        var (vm, window, dir) = BuildWindowWithOneContactAndOneGroup(out var cleanup);
+        var (vm, window, dir, cleanup) = await BuildWindowWithOneContactAndOneGroupAsync();
         try
         {
             var mainTabs = FindFirstVisualChild<TabControl>(window!);
@@ -114,8 +114,8 @@ public class AccessKeyRegressionTests
         }
     }
 
-    [StaFact]
-    public void ContactsTab_HasNoAccessKeyConflicts_OnInsertLetters()
+    [WpfFact]
+    public async Task ContactsTab_HasNoAccessKeyConflicts_OnInsertLetters()
     {
         // The pre-groups address book had no TabControl, so the underscore
         // mnemonics on _To / _Cc / _Bcc were the only registrations for
@@ -131,7 +131,7 @@ public class AccessKeyRegressionTests
         // _To / _Cc / _Bcc buttons are in scope.
         EnsureApplication();
 
-        var (vm, window, dir) = BuildWindowWithOneContactAndOneGroup(out var cleanup);
+        var (vm, window, dir, cleanup) = await BuildWindowWithOneContactAndOneGroupAsync();
         try
         {
             // Select the contact so the _To / _Cc / _Bcc buttons are
@@ -200,8 +200,8 @@ public class AccessKeyRegressionTests
         }
     }
 
-    [StaFact]
-    public void PreviewKeyDown_AltT_DoesNotSwallowAccessKey()
+    [WpfFact]
+    public async Task PreviewKeyDown_AltT_DoesNotSwallowAccessKey()
     {
         // The post-groups Window.PreviewKeyDown dispatches any registered
         // command whose key+modifiers match. If it sets e.Handled = true
@@ -212,7 +212,7 @@ public class AccessKeyRegressionTests
         // key manager downstream can find the To button.
         EnsureApplication();
 
-        var (vm, window, dir) = BuildWindowWithOneContact(out var cleanup);
+        var (vm, window, dir, cleanup) = await BuildWindowWithOneContactAsync();
         try
         {
             vm.SelectedContact = vm.FilteredContacts[0];
@@ -252,8 +252,8 @@ public class AccessKeyRegressionTests
         }
     }
 
-    [StaFact]
-    public void AccessKeyManager_Dispatch_ActivatesInsertButtons()
+    [WpfFact]
+    public async Task AccessKeyManager_Dispatch_ActivatesInsertButtons()
     {
         // Drive the WPF access-key pipeline directly. We find the button
         // whose AccessKey matches and invoke Button.OnAccessKey via
@@ -263,7 +263,7 @@ public class AccessKeyRegressionTests
         // rows.
         EnsureApplication();
 
-        var (vm, window, dir) = BuildWindowWithOneContactAndOneGroup(out var cleanup);
+        var (vm, window, dir, cleanup) = await BuildWindowWithOneContactAndOneGroupAsync();
         try
         {
             int toCalls = 0, ccCalls = 0, bccCalls = 0;
@@ -272,7 +272,7 @@ public class AccessKeyRegressionTests
                 ccAction:  _ => Interlocked.Increment(ref ccCalls),
                 bccAction: _ => Interlocked.Increment(ref bccCalls));
 
-            vm.LoadAsync().GetAwaiter().GetResult();
+            await vm.LoadAsync();
             vm.SelectedContact = vm.FilteredContacts[0];
             window!.Show();
             window.UpdateLayout();
@@ -294,48 +294,46 @@ public class AccessKeyRegressionTests
 
     // ── helpers ──────────────────────────────────────────────────────────────
 
-    private static (AddressBookViewModel vm, AddressBookWindow? window, string dir) BuildWindowWithOneContact(out Action<string> cleanup)
+    private static async Task<(AddressBookViewModel vm, AddressBookWindow? window, string dir, Action<string> cleanup)> BuildWindowWithOneContactAsync()
     {
         var dir = TempDir();
         var profile = new ProfileContext(dir);
         var svc = new ContactService(profile);
-        svc.UpsertContactAsync(new ContactModel
+        await svc.UpsertContactAsync(new ContactModel
         {
             DisplayName   = "Test Person",
             EmailAddress  = "[email protected]",
-        }).GetAwaiter().GetResult();
+        });
         var vm = new AddressBookViewModel(svc);
         var window = new AddressBookWindow(vm);
-        vm.LoadAsync().GetAwaiter().GetResult();
+        await vm.LoadAsync();
         window.Show();
         window.UpdateLayout();
-        cleanup = DeleteDir;
-        return (vm, window, dir);
+        return (vm, window, dir, DeleteDir);
     }
 
-    private static (AddressBookViewModel vm, AddressBookWindow? window, string dir) BuildWindowWithOneContactAndOneGroup(out Action<string> cleanup)
+    private static async Task<(AddressBookViewModel vm, AddressBookWindow? window, string dir, Action<string> cleanup)> BuildWindowWithOneContactAndOneGroupAsync()
     {
         var dir = TempDir();
         var profile = new ProfileContext(dir);
         var svc = new ContactService(profile);
-        svc.UpsertContactAsync(new ContactModel
+        await svc.UpsertContactAsync(new ContactModel
         {
             DisplayName   = "Test Person",
             EmailAddress  = "[email protected]",
-        }).GetAwaiter().GetResult();
-        svc.CreateGroupAsync("Friends").GetAwaiter().GetResult();
-        svc.AddMemberAsync(1, 1).GetAwaiter().GetResult();
+        });
+        await svc.CreateGroupAsync("Friends");
+        await svc.AddMemberAsync(1, 1);
         var vm = new AddressBookViewModel(svc);
         // Wire insert actions so the InsertRow is visible (Collapsed by
         // default; only shown when HasInsertActions is true).
         vm.SetInsertActions(_ => { }, _ => { }, _ => { });
         var window = new AddressBookWindow(vm);
-        vm.LoadAsync().GetAwaiter().GetResult();
+        await vm.LoadAsync();
         vm.SelectedGroup = vm.Groups.Count > 0 ? vm.Groups[0] : null;
         window.Show();
         window.UpdateLayout();
-        cleanup = DeleteDir;
-        return (vm, window, dir);
+        return (vm, window, dir, DeleteDir);
     }
 
     private static void DeleteDir(string dir)
@@ -350,7 +348,7 @@ public class AccessKeyRegressionTests
         lock (typeof(Application))
         {
             if (Application.Current == null)
-                new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
+                WpfTestApplication.EnsureStarted();
             const string stylesUri = "pack://application:,,,/QuickMail;component/Styles/AccessibleStyles.xaml";
             var uri = new Uri(stylesUri, UriKind.Absolute);
             if (Application.Current!.Resources.MergedDictionaries.All(d => d.Source != uri))

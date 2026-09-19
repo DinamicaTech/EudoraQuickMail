@@ -30,7 +30,7 @@ relay exists to avoid.
 ### What the app does *not* do
 
 - It never holds a GitHub credential. The relay key it ships authorises one thing: "file an
-  issue on kellylford/QuickMail".
+  issue on DinamicaTech/QuickMail".
 - It never sends labels. The relay applies `bug` and `user-reported` itself, so an extracted
   relay key cannot apply arbitrary ones.
 - It never reads `quickmail.log` or any message content. Product decision, see
@@ -47,7 +47,7 @@ relay exists to avoid.
 | App installation | `151714686`, scoped to this repo, Issues read/write only | <https://github.com/settings/installations> |
 | Cloudflare account | `7c86d5a72a98b9de96e24f55aaecf9af`, under kelly@kellford.com | <https://dash.cloudflare.com> |
 
-**Repository secrets** (<https://github.com/kellylford/QuickMail/settings/secrets/actions>):
+**Repository secrets** (<https://github.com/DinamicaTech/QuickMail/settings/secrets/actions>):
 
 | Secret | Used by | For |
 |---|---|---|

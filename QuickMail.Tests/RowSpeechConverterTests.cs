@@ -116,7 +116,7 @@ public class RowSpeechConverterTests
         // The SenderGroup converter must not read the Message layout: same values, different catalog.
         var converter = new RowSpeechConverter(RowKind.SenderGroup);
         var name = (string)converter.Convert(
-            ["Chris Lee", 2, null, true, "Preview", "9:00 AM", "Newest", RowSpeechSettings.Default],
+            new object[] { "Chris Lee", 2, null!, true, "Preview", "9:00 AM", "Newest", RowSpeechSettings.Default },
             typeof(string), parameter: null!, CultureInfo.InvariantCulture);
 
         Assert.Equal("Chris Lee. 2 messages. Has unread. Preview. 9:00 AM.", name);

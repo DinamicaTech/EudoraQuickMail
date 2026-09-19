@@ -21,6 +21,7 @@ public sealed class TranslationSettings
 public sealed class TranslationSettingsStore
 {
     private static readonly byte[] Entropy = Encoding.UTF8.GetBytes("QuickMail.Translation.v1");
+    private static readonly JsonSerializerOptions IndentedJson = new() { WriteIndented = true };
     private readonly string _path;
 
     public TranslationSettingsStore(ProfileContext profile) =>
@@ -41,7 +42,7 @@ public sealed class TranslationSettingsStore
     {
         Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
         Helpers.AtomicFile.WriteAllText(_path,
-            JsonSerializer.Serialize(settings, new JsonSerializerOptions { WriteIndented = true }), Encoding.UTF8);
+            JsonSerializer.Serialize(settings, IndentedJson), Encoding.UTF8);
     }
 
     public string? GetDeepLKey(TranslationSettings settings)

@@ -25,7 +25,7 @@ namespace QuickMail.Tests;
 /// MIDDLE of the form: password box, then New/Delete/Set Default, then Advanced settings.
 /// </summary>
 [Collection("WpfTests")]
-public class AccountManagerTabOrderTests
+public class AccountManagerTabOrderTests : WpfTestBase
 {
     private static AccountManagerViewModel NewVm()
     {
@@ -58,7 +58,7 @@ public class AccountManagerTabOrderTests
 
     private static void Drain() => TabOrderWalker.Drain();
 
-    [StaFact]
+    [WpfFact]
     public void TheAccountListAndItsButtonsComeBeforeTheEditForm()
     {
         var vm = NewVm();
@@ -100,7 +100,7 @@ public class AccountManagerTabOrderTests
         finally { window.Close(); }
     }
 
-    [StaFact]
+    [WpfFact]
     public void TheEditFormIsInVisualOrderAndAdvancedComesLast()
     {
         var vm = NewVm();

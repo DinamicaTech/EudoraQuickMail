@@ -7,9 +7,9 @@ using Xunit;
 namespace QuickMail.Tests;
 
 [Collection("WpfTests")]
-public class FormattingListWindowTests
+public class FormattingListWindowTests : WpfTestBase
 {
-    [StaFact]
+    [WpfFact]
     public void ListShowsOneRowPerFact_AndFirstItemIsSelected()
     {
         var window = new FormattingListWindow(
@@ -35,7 +35,7 @@ public class FormattingListWindowTests
         }
     }
 
-    [StaFact]
+    [WpfFact]
     public void CloseButton_IsCancelAndDefault_SoEscapeAndEnterClose()
     {
         var window = new FormattingListWindow(new List<string> { "Normal text" })

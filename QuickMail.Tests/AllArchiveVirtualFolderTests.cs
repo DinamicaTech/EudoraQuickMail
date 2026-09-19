@@ -120,7 +120,7 @@ public class AllArchiveVirtualFolderTests
             new() { [AccountA] = [Folder(AccountA, "Archive", SpecialFolderKind.Archive)] },
             []);
 
-        var group = vm.FolderTree.FirstOrDefault(n => n.IsHeader && n.Label == "All Mail");
+        var group = vm.FolderTree.FirstOrDefault(n => n.IsHeader && n.Label == "Combined views");
         Assert.NotNull(group);
         var labels = group!.Children.Select(c => c.Label).ToList();
 

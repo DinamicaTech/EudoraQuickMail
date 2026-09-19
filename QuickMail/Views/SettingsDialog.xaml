@@ -287,6 +287,28 @@
                                     </ComboBox>
                                 </StackPanel>
 
+                                <StackPanel Margin="0,0,0,8">
+                                    <Label x:Name="SendDelayLabel"
+                                           Content="Delay sending _messages:"
+                                           Target="{Binding ElementName=SendDelayCombo}"
+                                           FontWeight="SemiBold"/>
+                                    <ComboBox x:Name="SendDelayCombo"
+                                              SelectedValue="{Binding DelaySendingMessagesSeconds, Mode=TwoWay}"
+                                              SelectedValuePath="Tag"
+                                              AutomationProperties.LabeledBy="{Binding ElementName=SendDelayLabel}">
+                                        <ComboBoxItem Tag="0" Content="No delay — send directly"/>
+                                        <ComboBoxItem Tag="5" Content="5 seconds"/>
+                                        <ComboBoxItem Tag="10" Content="10 seconds"/>
+                                        <ComboBoxItem Tag="30" Content="30 seconds"/>
+                                        <ComboBoxItem Tag="60" Content="1 minute"/>
+                                        <ComboBoxItem Tag="120" Content="2 minutes"/>
+                                    </ComboBox>
+                                    <TextBlock Text="With a delay, the message remains in the local outgoing queue and can be undone from the main toolbar until sending starts."
+                                               Foreground="{DynamicResource Theme.TextSecondary}"
+                                               FontSize="{DynamicResource Theme.FontSizeSmall}"
+                                               Margin="0,3,0,0" TextWrapping="Wrap"/>
+                                </StackPanel>
+
                                 <StackPanel>
                                     <Label x:Name="DefaultComposeModeLabel"
                                            Content="Default compose _mode:"

@@ -357,7 +357,11 @@
 
     window.quickmailInsertText = text => {
       if (!quickMailEditor) return;
-      quickMailEditor.insertContent(quickMailEditor.dom.encode(text));
+      // insertContent expects HTML. Encoding plain text protects it, but raw CR/LF characters
+      // are collapsed by HTML layout; translate them so saved plain-text templates retain their
+      // paragraphs when inserted into the HTML composer.
+      const html = quickMailEditor.dom.encode(text).replace(/\r\n|\r|\n/g, '<br>');
+      quickMailEditor.insertContent(html);
       quickMailEditor.focus();
       emitContent();
     };

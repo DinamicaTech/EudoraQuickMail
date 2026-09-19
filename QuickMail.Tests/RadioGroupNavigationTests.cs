@@ -16,7 +16,7 @@ using Xunit;
 namespace QuickMail.Tests;
 
 [Collection("WpfTests")]
-public class RadioGroupNavigationTests
+public class RadioGroupNavigationTests : WpfTestBase
 {
     private static (StackPanel panel, RadioButton[] buttons) BuildGroup(bool followFocus = true)
     {
@@ -57,7 +57,7 @@ public class RadioGroupNavigationTests
         protected override CompositionTarget GetCompositionTargetCore() => null!;
     }
 
-    [StaFact]
+    [WpfFact]
     public void DownArrow_ChecksNextOption()
     {
         var (panel, buttons) = BuildGroup();
@@ -68,7 +68,7 @@ public class RadioGroupNavigationTests
         Assert.False(buttons[0].IsChecked);
     }
 
-    [StaFact]
+    [WpfFact]
     public void RightArrow_ChecksNextOption()
     {
         var (panel, buttons) = BuildGroup();
@@ -78,7 +78,7 @@ public class RadioGroupNavigationTests
         Assert.True(buttons[1].IsChecked);
     }
 
-    [StaFact]
+    [WpfFact]
     public void UpArrow_FromFirstOption_WrapsToLast()
     {
         // The groups use DirectionalNavigation="Cycle"; selection must wrap the same way.
@@ -89,7 +89,7 @@ public class RadioGroupNavigationTests
         Assert.True(buttons[2].IsChecked);
     }
 
-    [StaFact]
+    [WpfFact]
     public void DownArrow_FromLastOption_WrapsToFirst()
     {
         var (panel, buttons) = BuildGroup();
@@ -100,7 +100,7 @@ public class RadioGroupNavigationTests
         Assert.True(buttons[0].IsChecked);
     }
 
-    [StaFact]
+    [WpfFact]
     public void DisabledOption_IsSkipped()
     {
         var (panel, buttons) = BuildGroup();
@@ -112,7 +112,7 @@ public class RadioGroupNavigationTests
         Assert.False(buttons[1].IsChecked);
     }
 
-    [StaFact]
+    [WpfFact]
     public void OtherGroupInSamePanel_IsNotTouched()
     {
         var (panel, buttons) = BuildGroup();
@@ -125,7 +125,7 @@ public class RadioGroupNavigationTests
         Assert.False(other.IsChecked);
     }
 
-    [StaFact]
+    [WpfFact]
     public void NonArrowKey_IsIgnored()
     {
         // Tab leaves the group; it must never change the selection on the way out.
@@ -137,7 +137,7 @@ public class RadioGroupNavigationTests
         Assert.False(buttons[1].IsChecked);
     }
 
-    [StaFact]
+    [WpfFact]
     public void WithoutTheBehaviour_ArrowsDoNotSelect()
     {
         // Guards the opt-in: groups that must not select on focus (e.g. the FlagManager colour
@@ -150,7 +150,7 @@ public class RadioGroupNavigationTests
         Assert.False(buttons[1].IsChecked);
     }
 
-    [StaFact]
+    [WpfFact]
     public void TheOptionIsCheckedBeforeItIsFocused()
     {
         // Order matters: the focus that follows must land on a button that is already selected,

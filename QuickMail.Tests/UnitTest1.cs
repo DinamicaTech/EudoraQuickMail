@@ -185,15 +185,15 @@ public class ViewModelConstructionTests
 /// <summary>
 /// XAML parse tests — verify every Window's XAML can be loaded without a
 /// XamlParseException (bad StaticResource key, missing namespace, etc.).
-/// Requires STA thread (via [StaFact]) but no visible window is shown.
+/// Requires STA thread (via [WpfFact]) but no visible window is shown.
 /// A minimal Application is created once per process if needed.
 /// </summary>
 [Collection("WpfTests")]
-public class XamlParseTests
+public class XamlParseTests : WpfTestBase
 {
     /// Ensure Application.Current exists and has the app's resource dictionaries loaded —
     /// required for StaticResource / DynamicResource resolution during XAML parsing.
-    /// Uses a process-wide lock so that parallel [StaFact] threads from different test
+    /// Uses a process-wide lock so that parallel [WpfFact] threads from different test
     /// classes don't race to create a second Application (WPF forbids more than one).
     private static void EnsureApplication()
     {
@@ -201,7 +201,7 @@ public class XamlParseTests
         lock (typeof(Application))
         {
             if (Application.Current == null)
-                new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
+                WpfTestApplication.EnsureStarted();
         }
 
         // Merge the same resource dictionaries the running app has present when its
@@ -235,7 +235,7 @@ public class XamlParseTests
         var _ = XamlReader.Load(stream);
     }
 
-    [StaFact]
+    [WpfFact]
     public void MainWindow_XamlParsesWithoutException()
     {
         EnsureApplication();
@@ -248,7 +248,7 @@ public class XamlParseTests
         window.Close();
     }
 
-    [StaFact]
+    [WpfFact]
     public void WatchedConversationsWindow_XamlParsesWithoutException()
     {
         EnsureApplication();
@@ -258,7 +258,7 @@ public class XamlParseTests
         window.Close();
     }
 
-    [StaFact]
+    [WpfFact]
     public void AddSharedMailboxWindow_XamlParsesWithoutException()
     {
         EnsureApplication();
@@ -270,7 +270,7 @@ public class XamlParseTests
         window.Close();
     }
 
-    [StaFact]
+    [WpfFact]
     public void ComposeWindow_XamlParsesWithoutException()
     {
         EnsureApplication();
@@ -281,7 +281,7 @@ public class XamlParseTests
         window.Close();
     }
 
-    [StaFact]
+    [WpfFact]
     public void RowFieldsWindow_XamlParsesWithoutException()
     {
         EnsureApplication();
@@ -297,7 +297,7 @@ public class XamlParseTests
         window.Close();
     }
 
-    [StaFact]
+    [WpfFact]
     public void ReportBugWindow_XamlParsesWithoutException()
     {
         EnsureApplication();
@@ -306,7 +306,7 @@ public class XamlParseTests
         window.Close();
     }
 
-    [StaFact]
+    [WpfFact]
     public void SpellCheckDialog_XamlParsesWithoutException()
     {
         EnsureApplication();
@@ -316,7 +316,7 @@ public class XamlParseTests
         dialog.Close();
     }
 
-    [StaFact]
+    [WpfFact]
     public void InsertLinkDialog_XamlParsesWithoutException()
     {
         EnsureApplication();
@@ -325,7 +325,7 @@ public class XamlParseTests
         dialog.Close();
     }
 
-    [StaFact]
+    [WpfFact]
     public void AccountManagerDialog_XamlParsesWithoutException()
     {
         EnsureApplication();
@@ -337,7 +337,7 @@ public class XamlParseTests
         window.Close();
     }
 
-    [StaFact]
+    [WpfFact]
     public void AddAccountDialog_XamlParsesWithoutException()
     {
         EnsureApplication();
@@ -351,7 +351,7 @@ public class XamlParseTests
         window.Close();
     }
 
-    [StaFact]
+    [WpfFact]
     public void SettingsDialog_XamlParsesWithoutException()
     {
         EnsureApplication();
@@ -361,7 +361,7 @@ public class XamlParseTests
         dialog.Close();
     }
 
-    [StaFact]
+    [WpfFact]
     public void AddressBookWindow_XamlParsesWithoutException()
     {
         EnsureApplication();
@@ -372,7 +372,7 @@ public class XamlParseTests
         window.Close();
     }
 
-    [StaFact]
+    [WpfFact]
     public void EventEditorWindow_XamlParsesWithoutException()
     {
         EnsureApplication();
@@ -382,7 +382,7 @@ public class XamlParseTests
         window.Close();
     }
 
-    [StaFact]
+    [WpfFact]
     public void EventEditorWindow_DateAndTimeFieldsResolveByName()
     {
         // The code-behind reaches these by name for the F6 ring and for focusing the field a
@@ -406,7 +406,7 @@ public class XamlParseTests
         window.Close();
     }
 
-    [StaFact]
+    [WpfFact]
     public void EventEditorWindow_DateAndTimeFieldsShowTheViewModelValue()
     {
         // Both faces of the same instant: the date field renders its date, the time field its
@@ -425,7 +425,7 @@ public class XamlParseTests
         window.Close();
     }
 
-    [StaFact]
+    [WpfFact]
     public void GoToDateWindow_XamlParsesWithoutException()
     {
         EnsureApplication();
@@ -435,7 +435,7 @@ public class XamlParseTests
         window.Close();
     }
 
-    [StaFact]
+    [WpfFact]
     public void ServerRuleEditorWindow_XamlParsesWithoutException()
     {
         EnsureApplication();
@@ -447,7 +447,7 @@ public class XamlParseTests
         window.Close();
     }
 
-    [StaFact]
+    [WpfFact]
     public void GroupManagerWindow_XamlParsesWithoutException()
     {
         EnsureApplication();
@@ -458,7 +458,7 @@ public class XamlParseTests
         window.Close();
     }
 
-    [StaFact]
+    [WpfFact]
     public void FolderPickerWindow_XamlParsesWithoutException()
     {
         EnsureApplication();
@@ -469,7 +469,7 @@ public class XamlParseTests
         window.Close();
     }
 
-    [StaFact]
+    [WpfFact]
     public void NewFolderDialog_XamlParsesWithoutException()
     {
         EnsureApplication();
@@ -478,7 +478,7 @@ public class XamlParseTests
         window.Close();
     }
 
-    [StaFact]
+    [WpfFact]
     public void RulesManagerWindow_XamlParsesWithoutException()
     {
         EnsureApplication();
@@ -488,7 +488,7 @@ public class XamlParseTests
         window.Close();
     }
 
-    [StaFact]
+    [WpfFact]
     public void ViewManagerDialog_XamlParsesWithoutException()
     {
         EnsureApplication();
@@ -508,7 +508,7 @@ public class XamlParseTests
         window.Close();
     }
 
-    [StaFact]
+    [WpfFact]
     public void TutorialOverlay_XamlParsesWithoutException()
     {
         EnsureApplication();
@@ -516,7 +516,7 @@ public class XamlParseTests
         Assert.NotNull(overlay);
     }
 
-    [StaFact]
+    [WpfFact]
     public void TemplatePickerWindow_XamlParsesWithoutException()
     {
         EnsureApplication();
@@ -527,7 +527,7 @@ public class XamlParseTests
         window.Close();
     }
 
-    [StaFact]
+    [WpfFact]
     public void PropertiesWindow_XamlParsesWithoutException()
     {
         EnsureApplication();
@@ -540,7 +540,7 @@ public class XamlParseTests
         window.Close();
     }
 
-    [StaFact]
+    [WpfFact]
     public void ForwardAttachmentDialogWindow_XamlParsesWithoutException()
     {
         EnsureApplication();
@@ -550,7 +550,7 @@ public class XamlParseTests
         window.Close();
     }
 
-    [StaFact]
+    [WpfFact]
     public void ThemedControls_XamlParsesWithoutException()
     {
         EnsureApplication();
@@ -559,7 +559,7 @@ public class XamlParseTests
         Assert.True(dict.Count > 0);
     }
 
-    [StaFact]
+    [WpfFact]
     public void ThemeManagerWindow_XamlParsesWithoutException()
     {
         EnsureApplication();

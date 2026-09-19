@@ -20,8 +20,14 @@ public class GraphSendMailService : ISendMailService, IDisposable
     /// <param name="http">Optional injected HttpClient for tests; null uses a real one.</param>
     public GraphSendMailService(IOAuthService oauth, HttpClient? http = null) => _client = new GraphClient(oauth, http);
 
-    public Task SendAsync(ComposeModel compose, AccountModel account, string? password, CancellationToken ct = default)
-        => SendMimeAsync(account, MimeMessageBuilder.Build(compose, account, MimeMessageBuilder.AppUserAgent), ct);
+    public async Task SendAsync(ComposeModel compose, AccountModel account, string? password, CancellationToken ct = default)
+    {
+        var details = $"account={account.Username}; attachments={compose.Attachments.Count}";
+        MimeMessage message;
+        using (PerformanceLogService.Measure("Send Graph: build MIME", details))
+            message = MimeMessageBuilder.Build(compose, account, MimeMessageBuilder.AppUserAgent);
+        await SendMimeAsync(account, message, ct);
+    }
 
     public Task SendIcsReplyAsync(string icsReplyContent, AccountModel account, string? password,
         string organizerEmail, CancellationToken ct = default)
@@ -38,9 +44,14 @@ public class GraphSendMailService : ISendMailService, IDisposable
     private async Task SendMimeAsync(AccountModel account, MimeMessage message, CancellationToken ct)
     {
         // Graph /sendMail takes the MIME message base64-encoded as a text/plain body.
-        var body = await MimeMessageBuilder.ToBase64BytesAsync(message, ct);
+        byte[] body;
+        using (PerformanceLogService.Measure("Send Graph: serialize and base64 MIME",
+                   $"account={account.Username}"))
+            body = await MimeMessageBuilder.ToBase64BytesAsync(message, ct);
         LogService.Log($"GraphSendMailService: sending {body.Length} base64 bytes via /me/sendMail");
-        await _client.PostRawAsync(account, "/me/sendMail", body, "text/plain", ct);
+        using (PerformanceLogService.Measure("Send Graph: HTTP POST /me/sendMail",
+                   $"account={account.Username}; encodedBytes={body.Length}"))
+            await _client.PostRawAsync(account, "/me/sendMail", body, "text/plain", ct);
         LogService.Log("GraphSendMailService: send complete");
     }
 

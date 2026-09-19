@@ -4,8 +4,11 @@
         Title="Eudora QuickMail" Width="520" Height="278"
         WindowStyle="None" ResizeMode="NoResize" ShowInTaskbar="False"
         WindowStartupLocation="CenterScreen" Topmost="True"
-        Background="#F4F8FC" Foreground="#17212B">
-    <Border BorderBrush="#5B9BD5" BorderThickness="1" CornerRadius="6" Padding="28">
+        Background="{DynamicResource Theme.WindowBackground}"
+        Foreground="{DynamicResource Theme.TextPrimary}"
+        FontFamily="{DynamicResource Theme.FontFamily}"
+        FontSize="{DynamicResource Theme.FontSizeBase}">
+    <Border BorderBrush="{DynamicResource Theme.Border}" BorderThickness="1" CornerRadius="6" Padding="28">
         <Grid>
             <Grid.RowDefinitions>
                 <RowDefinition Height="*"/>
@@ -17,12 +20,12 @@
                        RenderOptions.BitmapScalingMode="HighQuality"
                        Source="pack://application:,,,/QuickMail;component/Assets/App/QuickMail.ico"
                        AutomationProperties.Name="Eudora QuickMail logo"/>
-                <TextBlock Text="Eudora QuickMail" FontFamily="Segoe UI" FontSize="26"
+                <TextBlock Text="Eudora QuickMail" FontSize="{DynamicResource Theme.FontSizeHeader}"
                            FontWeight="SemiBold" HorizontalAlignment="Center"/>
             </StackPanel>
             <TextBlock x:Name="StatusText" Grid.Row="1" Margin="0,16,0,10"
                        Text="Starting…" TextAlignment="Center" TextWrapping="Wrap"
-                       FontFamily="Segoe UI" FontSize="13"/>
+                       FontSize="{DynamicResource Theme.FontSizeBase}"/>
             <ProgressBar Grid.Row="2" Height="5" IsIndeterminate="True"/>
         </Grid>
     </Border>

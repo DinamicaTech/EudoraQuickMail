@@ -233,28 +233,75 @@ public partial class LocalStoreService
             Directory.CreateDirectory(directory);
             var safeName = SanitizeAttachmentFileName(attachment.FileName);
             var hash = Convert.ToHexString(SHA256.HashData(attachment.Content)).ToLowerInvariant();
-            var path = Path.Combine(directory, $"{hash[..16]}-{safeName}");
-            if (!File.Exists(path))
-            {
-                var temporaryPath = path + ".tmp-" + Guid.NewGuid().ToString("N");
-                try
-                {
-                    await File.WriteAllBytesAsync(temporaryPath, attachment.Content, ct);
-                    File.Move(temporaryPath, path, overwrite: false);
-                }
-                catch (IOException) when (File.Exists(path))
-                {
-                    if (File.Exists(temporaryPath)) File.Delete(temporaryPath);
-                }
-                finally
-                {
-                    if (File.Exists(temporaryPath)) File.Delete(temporaryPath);
-                }
-            }
+            var path = attachment.IsInline
+                ? await MaterializeHashedResourceAsync(directory, safeName, attachment.Content, hash, ct)
+                : await MaterializeFriendlyAttachmentAsync(directory, safeName, attachment.Content, hash, ct);
             attachment.PartSpecifier = path;
             attachment.FileSize = attachment.Content.LongLength;
             attachment.Content = null;
         }
+    }
+
+    private static async Task<string> MaterializeHashedResourceAsync(
+        string directory, string safeName, byte[] content, string hash, CancellationToken ct)
+    {
+        var path = Path.Combine(directory, $"{hash[..16]}-{safeName}");
+        if (!File.Exists(path)) await WriteFileAtomicallyAsync(path, content, ct);
+        return path;
+    }
+
+    private static async Task<string> MaterializeFriendlyAttachmentAsync(
+        string directory, string safeName, byte[] content, string contentHash, CancellationToken ct)
+    {
+        var stem = Path.GetFileNameWithoutExtension(safeName);
+        var extension = Path.GetExtension(safeName);
+        for (var ordinal = 1; ; ordinal++)
+        {
+            ct.ThrowIfCancellationRequested();
+            var fileName = ordinal == 1 ? safeName : $"{stem} ({ordinal}){extension}";
+            var path = Path.Combine(directory, fileName);
+            if (File.Exists(path))
+            {
+                if (FileHashEquals(path, contentHash)) return path;
+                continue;
+            }
+
+            if (await WriteFileAtomicallyAsync(path, content, ct)) return path;
+            // Another receive operation won the same name between Exists and Move. Re-evaluate it:
+            // identical content is reused; different content advances to the next ordinal.
+            if (FileHashEquals(path, contentHash)) return path;
+        }
+    }
+
+    private static async Task<bool> WriteFileAtomicallyAsync(string path, byte[] content, CancellationToken ct)
+    {
+        var temporaryPath = path + ".tmp-" + Guid.NewGuid().ToString("N");
+        try
+        {
+            await File.WriteAllBytesAsync(temporaryPath, content, ct);
+            File.Move(temporaryPath, path, overwrite: false);
+            return true;
+        }
+        catch (IOException) when (File.Exists(path))
+        {
+            return false;
+        }
+        finally
+        {
+            if (File.Exists(temporaryPath)) File.Delete(temporaryPath);
+        }
+    }
+
+    private static bool FileHashEquals(string path, string expectedHash)
+    {
+        try
+        {
+            using var stream = File.OpenRead(path);
+            return Convert.ToHexString(SHA256.HashData(stream))
+                .Equals(expectedHash, StringComparison.OrdinalIgnoreCase);
+        }
+        catch (IOException) { return false; }
+        catch (UnauthorizedAccessException) { return false; }
     }
 
     private static string SanitizeAttachmentFileName(string? fileName)
@@ -264,6 +311,180 @@ public partial class LocalStoreService
         value = value.Trim();
         if (value.Length == 0) value = "attachment.bin";
         return value.Length <= 160 ? value : value[..160];
+    }
+
+    /// <summary>
+    /// Converts the former <c>{sha16}-{original name}</c> layout used for received attachments to
+    /// Explorer-style names. Copies are created before the database transaction and the old files
+    /// are deleted only after it commits, so interruption can leave an orphan but never a broken
+    /// message reference. Embedded resources deliberately remain content-addressed.
+    /// </summary>
+    private void MigrateLegacyReceivedAttachmentNames(SqliteConnection connection)
+    {
+        var profileDir = Path.GetDirectoryName(_dbPath);
+        if (string.IsNullOrWhiteSpace(profileDir)) return;
+        var receivedRoot = Path.GetFullPath(Path.Combine(profileDir, "Attachments", "Received"));
+        if (!Directory.Exists(receivedRoot)) return;
+
+        var started = Stopwatch.GetTimestamp();
+        var pathMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var updates = new List<(long RowId, string Json)>();
+        using (var select = connection.CreateCommand())
+        {
+            // The LIKE is deliberately broad enough for escaped JSON paths and both directory
+            // separators, but avoids deserializing hundreds of thousands of message rows that can
+            // only contain Eudora links, IMAP part ids or no received attachment at all.
+            select.CommandText = """
+                SELECT rowid,attachments_json FROM MessageDetail
+                 WHERE attachments_json IS NOT NULL
+                   AND attachments_json LIKE '%Attachments%Received%';
+                """;
+            using var reader = select.ExecuteReader();
+            while (reader.Read())
+            {
+                var rowId = reader.GetInt64(0);
+                var json = reader.GetString(1);
+                List<AttachmentMeta>? attachments;
+                try { attachments = JsonSerializer.Deserialize<List<AttachmentMeta>>(json); }
+                catch { continue; }
+                if (attachments == null) continue;
+
+                var changed = false;
+                for (var index = 0; index < attachments.Count; index++)
+                {
+                    var attachment = attachments[index];
+                    if (attachment.IsInline || string.IsNullOrWhiteSpace(attachment.PartSpecifier)) continue;
+                    if (!TryResolveLegacyReceivedPath(attachment.PartSpecifier, receivedRoot,
+                            out var oldPath, out var originalName, out var contentHash)) continue;
+
+                    if (!pathMap.TryGetValue(oldPath, out var newPath))
+                    {
+                        try
+                        {
+                            newPath = AllocateFriendlyMigrationPath(oldPath, originalName, contentHash);
+                            pathMap[oldPath] = newPath;
+                        }
+                        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                        {
+                            LogService.Log($"Received attachment rename skipped for {oldPath}", ex);
+                            continue;
+                        }
+                    }
+                    attachments[index] = attachment with { PartSpecifier = newPath };
+                    changed = true;
+                }
+                if (changed) updates.Add((rowId, JsonSerializer.Serialize(attachments)));
+            }
+        }
+
+        if (updates.Count == 0) return;
+        using (var transaction = connection.BeginTransaction())
+        {
+            using var updateDetail = connection.CreateCommand();
+            updateDetail.Transaction = transaction;
+            updateDetail.CommandText = "UPDATE MessageDetail SET attachments_json=$json WHERE rowid=$rowid;";
+            var jsonParameter = updateDetail.Parameters.Add("$json", SqliteType.Text);
+            var rowParameter = updateDetail.Parameters.Add("$rowid", SqliteType.Integer);
+            foreach (var update in updates)
+            {
+                jsonParameter.Value = update.Json;
+                rowParameter.Value = update.RowId;
+                updateDetail.ExecuteNonQuery();
+            }
+
+            foreach (var mapping in pathMap)
+            {
+                using var updateIndex = connection.CreateCommand();
+                updateIndex.Transaction = transaction;
+                updateIndex.CommandText = "UPDATE AttachmentContent SET source_path=$new WHERE source_path=$old;";
+                updateIndex.Parameters.AddWithValue("$new", mapping.Value);
+                updateIndex.Parameters.AddWithValue("$old", mapping.Key);
+                updateIndex.ExecuteNonQuery();
+
+                using var migrateHash = connection.CreateCommand();
+                migrateHash.Transaction = transaction;
+                migrateHash.CommandText = """
+                    INSERT OR REPLACE INTO AttachmentFileHashCache
+                        (source_path,file_length,last_write_utc_ticks,sha256)
+                    SELECT $new,file_length,last_write_utc_ticks,sha256
+                      FROM AttachmentFileHashCache WHERE source_path=$old;
+                    DELETE FROM AttachmentFileHashCache WHERE source_path=$old;
+                    """;
+                migrateHash.Parameters.AddWithValue("$new", mapping.Value);
+                migrateHash.Parameters.AddWithValue("$old", mapping.Key);
+                migrateHash.ExecuteNonQuery();
+            }
+            transaction.Commit();
+        }
+
+        foreach (var mapping in pathMap)
+        {
+            try
+            {
+                if (!mapping.Key.Equals(mapping.Value, StringComparison.OrdinalIgnoreCase) &&
+                    File.Exists(mapping.Value) && File.Exists(mapping.Key))
+                    File.Delete(mapping.Key);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                LogService.Log($"Old received attachment could not be removed: {mapping.Key}", ex);
+            }
+        }
+        PerformanceLogService.Record("SQLite migration: friendly received attachment names",
+            Stopwatch.GetElapsedTime(started), $"files={pathMap.Count}; detailRows={updates.Count}");
+    }
+
+    private static bool TryResolveLegacyReceivedPath(string value, string receivedRoot,
+        out string oldPath, out string originalName, out string contentHash)
+    {
+        oldPath = originalName = contentHash = string.Empty;
+        if (!Path.IsPathFullyQualified(value)) return false;
+        try { oldPath = Path.GetFullPath(value); }
+        catch { return false; }
+        var rootPrefix = receivedRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+            + Path.DirectorySeparatorChar;
+        if (!oldPath.StartsWith(rootPrefix, StringComparison.OrdinalIgnoreCase) || !File.Exists(oldPath)) return false;
+
+        var storedName = Path.GetFileName(oldPath);
+        if (storedName.Length <= 17 || storedName[16] != '-') return false;
+        var prefix = storedName[..16];
+        if (prefix.Any(character => !Uri.IsHexDigit(character))) return false;
+        try
+        {
+            using var stream = File.OpenRead(oldPath);
+            contentHash = Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return false; }
+        if (!contentHash.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) return false;
+        originalName = SanitizeAttachmentFileName(storedName[17..]);
+        return true;
+    }
+
+    private static string AllocateFriendlyMigrationPath(
+        string oldPath, string originalName, string contentHash)
+    {
+        var directory = Path.GetDirectoryName(oldPath)!;
+        var stem = Path.GetFileNameWithoutExtension(originalName);
+        var extension = Path.GetExtension(originalName);
+        for (var ordinal = 1; ; ordinal++)
+        {
+            var candidateName = ordinal == 1 ? originalName : $"{stem} ({ordinal}){extension}";
+            var candidate = Path.Combine(directory, candidateName);
+            if (File.Exists(candidate))
+            {
+                if (FileHashEquals(candidate, contentHash)) return candidate;
+                continue;
+            }
+            try
+            {
+                File.Copy(oldPath, candidate, overwrite: false);
+                return candidate;
+            }
+            catch (IOException) when (File.Exists(candidate))
+            {
+                if (FileHashEquals(candidate, contentHash)) return candidate;
+            }
+        }
     }
 
     private static void AddMessageKey(SqliteCommand command, MailMessageDetail message)
@@ -733,6 +954,7 @@ public partial class LocalStoreService
         await using var conn = await OpenAsync();
         await PopulateExcludedFolderScopesAsync(conn, excludedFolderScopes, ct);
         var excludedFilter = BuildExcludedFolderScopesFilter("MessageSummary.", excludedFolderScopes);
+        const string snoozeFilter = " AND NOT EXISTS(SELECT 1 FROM SnoozedMessage z WHERE z.account_id=MessageSummary.account_id AND z.folder_name=MessageSummary.folder_name AND z.unique_id=MessageSummary.unique_id AND z.wake_ticks>$now)";
         PerformanceLogService.Record("Folder SQLite: open connection",
             Stopwatch.GetElapsedTime(stageStarted), detail);
 
@@ -753,16 +975,17 @@ public partial class LocalStoreService
                 ? $"""
                     SELECT COALESCE(SUM(amount), 0) FROM (
                         SELECT count(*) AS amount FROM MessageSummary
-                        WHERE 1=1{accountFilter} AND folder_name=$fn{excludedFilter}
+                        WHERE 1=1{accountFilter} AND folder_name=$fn{excludedFilter}{snoozeFilter}
                         UNION ALL
                         SELECT count(*) AS amount FROM MessageSummary
-                        WHERE 1=1{accountFilter} AND folder_name >= $ds AND folder_name < $de{excludedFilter}
+                        WHERE 1=1{accountFilter} AND folder_name >= $ds AND folder_name < $de{excludedFilter}{snoozeFilter}
                     );
                     """
-                : $"SELECT count(*) FROM MessageSummary WHERE 1=1{accountFilter}{folderFilter}{excludedFilter};";
+                : $"SELECT count(*) FROM MessageSummary WHERE 1=1{accountFilter}{folderFilter}{excludedFilter}{snoozeFilter};";
             AddAccountParameters(count, accountId, accountIds);
             if (!string.IsNullOrWhiteSpace(folderName)) count.Parameters.AddWithValue("$fn", folderName);
             if (!string.IsNullOrWhiteSpace(folderName) && includeDescendants) AddDescendantRange(count, folderName);
+            count.Parameters.AddWithValue("$now", DateTimeOffset.UtcNow.UtcTicks);
             stageStarted = Stopwatch.GetTimestamp();
             total = Convert.ToInt64(await count.ExecuteScalarAsync(ct) ?? 0);
             PerformanceLogService.Record("Folder SQLite: count matching messages",
@@ -774,7 +997,7 @@ public partial class LocalStoreService
             SELECT unique_id,account_id,folder_name,internet_message_id,from_disp,to_addr,
                    subject,date_ticks,is_read,preview_text,is_replied,is_forwarded,
                    has_attachments,is_mailing_list,flag_id,message_direction
-            FROM MessageSummary WHERE 1=1{accountFilter}{folderFilter}{excludedFilter}
+            FROM MessageSummary WHERE 1=1{accountFilter}{folderFilter}{excludedFilter}{snoozeFilter}
             ORDER BY {order} LIMIT $limit OFFSET $offset;
             """;
         AddAccountParameters(cmd, accountId, accountIds);
@@ -782,6 +1005,7 @@ public partial class LocalStoreService
         if (!string.IsNullOrWhiteSpace(folderName) && includeDescendants) AddDescendantRange(cmd, folderName);
         cmd.Parameters.AddWithValue("$limit", limit);
         cmd.Parameters.AddWithValue("$offset", offset);
+        cmd.Parameters.AddWithValue("$now", DateTimeOffset.UtcNow.UtcTicks);
         var messages = new List<MailMessageSummary>();
         stageStarted = Stopwatch.GetTimestamp();
         await using var reader = await cmd.ExecuteReaderAsync(ct);

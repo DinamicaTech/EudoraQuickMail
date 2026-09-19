@@ -314,6 +314,10 @@
                         <Button Content="Test Rule" Command="{Binding TestRuleCommand}"
                                 MinWidth="80" Margin="0,0,8,0"
                                 AutomationProperties.Name="Test rule against selected messages"/>
+                        <Button Content="Preview…" Command="{Binding PreviewRuleCommand}"
+                                MinWidth="80" Margin="0,0,8,0"
+                                AutomationProperties.Name="Preview rule against the current folder"
+                                ToolTip="Show what this rule would do without changing any messages"/>
                         <Button Content="{Binding ApplyToCurrentFolderLabel}"
                                 Command="{Binding ApplyToCurrentFolderCommand}"
                                 MinWidth="110" Margin="0,0,8,0"

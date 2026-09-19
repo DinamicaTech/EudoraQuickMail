@@ -18,7 +18,7 @@ namespace QuickMail.Tests;
 ///    alt text, table header semantics) intact.
 /// </summary>
 [Collection("WpfTests")]
-public class MarkdownRoundTripTests
+public class MarkdownRoundTripTests : WpfTestBase
 {
     private static readonly MarkdownService Svc = new();
 
@@ -65,14 +65,14 @@ public class MarkdownRoundTripTests
         Assert.Equal(markdown, RoundTrip(markdown));
     }
 
-    [StaFact]
+    [WpfFact]
     public void MarkdownRoundTrip_TableAlignment_Survives()
     {
         var md = "| Name | Score |\n| :---: | ---: |\n| Kelly | 10 |";
         Assert.Equal(md, RoundTrip(md));
     }
 
-    [StaFact]
+    [WpfFact]
     public void MarkdownRoundTrip_KitchenSink_IsStableAfterFirstPass()
     {
         // Anything not byte-exact on the first pass must at least be a fixed
@@ -85,7 +85,7 @@ public class MarkdownRoundTripTests
 
     // ── Accessibility information survives the trip into the editor ───────────
 
-    [StaFact]
+    [WpfFact]
     public void ImageAltText_SurvivesIntoEditorAndBack()
     {
         var doc = RichTextDocumentConverter.FromHtml(
@@ -101,7 +101,7 @@ public class MarkdownRoundTripTests
         Assert.Contains("src=\"https://example.com/q3.png\"", html);
     }
 
-    [StaFact]
+    [WpfFact]
     public void TableHeaders_SurviveAsThWithScope()
     {
         var doc = RichTextDocumentConverter.FromHtml(
@@ -113,7 +113,7 @@ public class MarkdownRoundTripTests
         Assert.Contains("<td>Kelly</td>", html);
     }
 
-    [StaFact]
+    [WpfFact]
     public void LinkHref_IsPreservedVerbatim()
     {
         // NavigateUri normalizes URIs (adds slashes, lowercases hosts); the
@@ -124,7 +124,7 @@ public class MarkdownRoundTripTests
         Assert.Contains("href=\"https://Example.com/Path?q=A%20B\"", html);
     }
 
-    [StaFact]
+    [WpfFact]
     public void SpacesBetweenStyledSpans_AreNotSwallowed()
     {
         var doc = RichTextDocumentConverter.FromHtml("<p><em>a</em> <strong>b</strong></p>");
@@ -132,7 +132,7 @@ public class MarkdownRoundTripTests
         Assert.Equal("*a* **b**", RichTextDocumentConverter.ToMarkdown(doc));
     }
 
-    [StaFact]
+    [WpfFact]
     public void DangerousLinkAndImageSchemes_DoNotRoundTrip()
     {
         var doc = RichTextDocumentConverter.FromHtml(
@@ -167,7 +167,7 @@ public class MarkdownRoundTripTests
         while (reader.Read()) { } // throws XmlException on malformed markup
     }
 
-    [StaFact]
+    [WpfFact]
     public void SentHtml_MarkdownMode_IsWellFormedAndAccessible()
     {
         // Exactly what BuildComposeModel produces in Markdown mode.
@@ -183,7 +183,7 @@ public class MarkdownRoundTripTests
         Assert.DoesNotContain("<input", document);
     }
 
-    [StaFact]
+    [WpfFact]
     public void SentHtml_HtmlMode_IsWellFormedAndAccessible()
     {
         // Exactly what BuildComposeModel produces in HTML mode: Markdig output
@@ -199,7 +199,7 @@ public class MarkdownRoundTripTests
         Assert.DoesNotContain("<script", document);
     }
 
-    [StaFact]
+    [WpfFact]
     public void SentHtml_PlainTextUpgrade_IsWellFormed()
     {
         var document = Svc.WrapDocument(

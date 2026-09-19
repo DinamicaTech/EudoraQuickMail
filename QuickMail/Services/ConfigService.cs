@@ -332,6 +332,10 @@ public class ConfigService : IConfigService
                         if (int.TryParse(value, out var asi))
                             config.AutoSaveIntervalSeconds = Math.Clamp(asi, 30, 600);
                         break;
+                    case "delaysendingmessagesseconds":
+                        if (int.TryParse(value, out var sendDelay))
+                            config.DelaySendingMessagesSeconds = Math.Clamp(sendDelay, 0, 600);
+                        break;
                     case "announceflagstatus": config.AnnounceFlagStatus = ParseBool(value); break;
                     case "defaultflagid":
                         if (Guid.TryParse(value, out _)) config.DefaultFlagId = value;
@@ -764,6 +768,11 @@ public class ConfigService : IConfigService
 
         sb.AppendLine($"AutoSaveIntervalSeconds = {Math.Clamp(config.AutoSaveIntervalSeconds, 30, 600)}");
         sb.AppendLine("# Seconds between automatic draft saves. Values: 30-600.");
+        sb.AppendLine();
+
+        sb.AppendLine($"DelaySendingMessagesSeconds = {Math.Clamp(config.DelaySendingMessagesSeconds, 0, 600)}");
+        sb.AppendLine("# Delay before an ordinary Send begins. Zero sends directly without the Scheduled queue;");
+        sb.AppendLine("# a positive value keeps the message cancelable in the main toolbar. Values: 0-600.");
         sb.AppendLine();
 
         sb.AppendLine($"AnnounceFlagStatus = {(config.AnnounceFlagStatus ? "on" : "off")}");

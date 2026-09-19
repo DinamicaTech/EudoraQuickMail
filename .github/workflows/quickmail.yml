@@ -10,7 +10,6 @@ on:
 
 permissions:
   contents: write   # create the GitHub release
-  id-token: write   # OIDC token azure/login exchanges for Azure creds (signing)
 
 jobs:
   # Protocol integration tests against a local GreenMail server (IMAP/SMTP), per
@@ -115,13 +114,6 @@ jobs:
 
   build:
     runs-on: windows-latest
-    # Runs in the `azure-signing` environment so the OIDC token's subject is
-    # repo:kellylford/QuickMail:environment:azure-signing, which the Azure
-    # federated credential trusts (wildcard tag subjects aren't supported in this
-    # tenant). This is ONLY a claim-matching mechanism, not a deployment gate — do
-    # not add protection rules to this environment or every build, including PRs,
-    # will require approval. Signing still only runs on v* tags (below).
-    environment: azure-signing
 
     steps:
       - uses: actions/checkout@v7
@@ -384,7 +376,7 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         continue-on-error: true
         shell: pwsh
-        run: vpk download github --repoUrl https://github.com/kellylford/QuickMail --token ${{ secrets.GITHUB_TOKEN }} --outputDir installer/Output/Releases
+        run: vpk download github --repoUrl "${{ github.server_url }}/${{ github.repository }}" --token ${{ secrets.GITHUB_TOKEN }} --outputDir installer/Output/Releases
 
       # Same, for the ARM64 channel. Its first release has no predecessor, which is
       # exactly what continue-on-error covers.
@@ -392,32 +384,7 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         continue-on-error: true
         shell: pwsh
-        run: vpk download github --repoUrl https://github.com/kellylford/QuickMail --token ${{ secrets.GITHUB_TOKEN }} --channel win-arm64 --outputDir installer/Output/Releases
-
-      # --- Code signing (Azure Artifact Signing via GitHub OIDC) --------------
-      # azure/login exchanges the workflow OIDC token for Azure creds; Velopack's
-      # bundled signtool then authenticates through that `az` session
-      # (DefaultAzureCredential). No signing cert or long-lived secret is stored.
-      - name: Azure login (code signing)
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: azure/login@v3
-        with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-
-      # UTF-8 without BOM is required by Velopack's --azureTrustedSignFile reader;
-      # [IO.File]::WriteAllText writes exactly that.
-      - name: Write signing metadata
-        if: startsWith(github.ref, 'refs/tags/v')
-        shell: pwsh
-        run: |
-          $json = @{
-            Endpoint               = 'https://eus.codesigning.azure.net/'
-            CodeSigningAccountName = 'kellylford'
-            CertificateProfileName = 'kellyford-public'
-          } | ConvertTo-Json
-          [System.IO.File]::WriteAllText("$env:GITHUB_WORKSPACE\signing-metadata.json", $json)
+        run: vpk download github --repoUrl "${{ github.server_url }}/${{ github.repository }}" --token ${{ secrets.GITHUB_TOKEN }} --channel win-arm64 --outputDir installer/Output/Releases
 
       # --shortcuts StartMenuRoot: Start Menu entry only, no desktop shortcut
       # (matches the previous installer's default).
@@ -432,13 +399,13 @@ jobs:
         run: |
           $version = '${{ github.ref_name }}'.TrimStart('v')
           Copy-Item LICENSE installer/velopack/license.txt
-          # --azureTrustedSignFile signs the packaged app binaries, Velopack's
-          # Update.exe / Setup bootstrapper, and the MSI as they are produced.
+          # Fork releases are unsigned until DinamicaTech provisions SignPath Foundation.
+          # The post-pack signing insertion point and promotion checklist are documented in
+          # docs/SIGNING.md. Never reuse the upstream project's credentials or certificate.
           vpk pack --packId QuickMail --packVersion $version --packDir publish `
-            --mainExe QuickMail.exe --packTitle QuickMail --packAuthors "Kelly Ford" `
+            --mainExe QuickMail.exe --packTitle QuickMail --packAuthors "DinamicaTech and QuickMail contributors" `
             --shortcuts StartMenuRoot --outputDir installer/Output/Releases `
             --framework webview2 `
-            --azureTrustedSignFile "$env:GITHUB_WORKSPACE\signing-metadata.json" `
             --msi --instLocation PerUser `
             --instWelcome installer/velopack/welcome.txt `
             --instLicense installer/velopack/license.txt `
@@ -476,10 +443,9 @@ jobs:
           $version = '${{ github.ref_name }}'.TrimStart('v')
           vpk pack --packId QuickMail --packVersion $version --packDir publish-arm64 `
             --runtime win-arm64 --channel win-arm64 `
-            --mainExe QuickMail.exe --packTitle QuickMail --packAuthors "Kelly Ford" `
+            --mainExe QuickMail.exe --packTitle QuickMail --packAuthors "DinamicaTech and QuickMail contributors" `
             --shortcuts StartMenuRoot --outputDir installer/Output/Releases `
             --framework webview2 `
-            --azureTrustedSignFile "$env:GITHUB_WORKSPACE\signing-metadata.json" `
             --msi --instLocation PerUser `
             --instWelcome installer/velopack/welcome.txt `
             --instLicense installer/velopack/license.txt `
@@ -489,41 +455,12 @@ jobs:
           Write-Host "--- Velopack output (both channels) ---"
           Get-ChildItem installer/Output/Releases | Select-Object -ExpandProperty Name
 
-      # Sign the standalone portable exe that ships as its own release asset.
-      # Velopack signed the copies inside the package/MSI during pack, but not
-      # this pre-pack file, so it is signed after pack to avoid double-signing.
-      - name: Sign portable QuickMail.exe
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: azure/artifact-signing-action@v2.0.0
-        with:
-          endpoint: https://eus.codesigning.azure.net/
-          signing-account-name: kellylford
-          certificate-profile-name: kellyford-public
-          files-folder: ${{ github.workspace }}\publish
-          files-folder-filter: exe
-          file-digest: SHA256
-          timestamp-rfc3161: http://timestamp.acs.microsoft.com
-          timestamp-digest: SHA256
-
-      - name: Sign portable QuickMail.exe (ARM64)
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: azure/artifact-signing-action@v2.0.0
-        with:
-          endpoint: https://eus.codesigning.azure.net/
-          signing-account-name: kellylford
-          certificate-profile-name: kellyford-public
-          files-folder: ${{ github.workspace }}\publish-arm64
-          files-folder-filter: exe
-          file-digest: SHA256
-          timestamp-rfc3161: http://timestamp.acs.microsoft.com
-          timestamp-digest: SHA256
-
       # Both publish directories produce a file literally named QuickMail.exe — the one
       # genuine filename collision between the two architectures, since this asset is
       # uploaded straight from the publish folder rather than through vpk (which suffixes
       # everything by channel). Rename the ARM64 copy so both can live in one release.
       # The x64 asset keeps the bare QuickMail.exe name that existing links and habits
-      # depend on. Signing already happened above; a rename does not disturb it.
+      # depend on. A future signing step must run before this harmless ARM64 rename.
       - name: Name the ARM64 portable exe
         if: startsWith(github.ref, 'refs/tags/v')
         shell: pwsh

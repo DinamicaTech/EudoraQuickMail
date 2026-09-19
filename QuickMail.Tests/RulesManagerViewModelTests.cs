@@ -422,6 +422,25 @@ public class RulesManagerViewModelTests
         Assert.NotEmpty(vm.StatusText);
     }
 
+    [Fact]
+    public async Task PreviewRule_RequestsReadOnlySimulationAndPublishesResult()
+    {
+        var vm = new RulesManagerViewModel(new StubRuleService(), accounts: []);
+        vm.NewRuleCommand.Execute(null);
+        vm.SelectedRule!.Name = "Preview me";
+        vm.SelectedRule.Action = RuleAction.MarkAsRead;
+        vm.SelectedRule.FromContains = "example.com";
+        var expected = new RulePreviewResult("Preview me", "In", "Would mark read", 12, 3, 2, 1, 3, []);
+        RulePreviewResult? shown = null;
+        vm.PreviewRuleRequested += _ => Task.FromResult(expected);
+        vm.PreviewReady += result => shown = result;
+
+        await vm.PreviewRuleCommand.ExecuteAsync(null);
+
+        Assert.Same(expected, shown);
+        Assert.Contains("3 of 12", vm.StatusText);
+    }
+
     // ── CancelCommand ────────────────────────────────────────────────────────
 
     [Fact]

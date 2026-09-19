@@ -23,7 +23,7 @@ namespace QuickMail.Tests;
 /// here.</para>
 /// </summary>
 [Collection("WpfTests")]
-public class RuleTargetPickerTests
+public class RuleTargetPickerTests : WpfTestBase
 {
     private static readonly Guid AccountId = Guid.NewGuid();
 
@@ -121,7 +121,7 @@ public class RuleTargetPickerTests
                     $"Open is disabled although the picker opened on '{label}'.");
     }
 
-    [StaFact]
+    [WpfFact]
     public void ShowsTheTreeAndHidesTheFlatList()
     {
         var window = Picker();
@@ -138,14 +138,16 @@ public class RuleTargetPickerTests
         finally { window.Close(); }
     }
 
-    [StaFact]
+    [WpfFact]
     public void NestsSubfoldersUnderTheirParent()
     {
         var window = Picker();
         try
         {
-            var inbox = Roots(window).FirstOrDefault(n => n.Label == "INBOX");
-            Assert.True(inbox is not null, "INBOX is not a root of the picker tree.");
+            var logicalRoot = Assert.Single(Roots(window));
+            Assert.True(logicalRoot.IsHeader);
+            var inbox = logicalRoot.Children.FirstOrDefault(n => n.Label == "INBOX");
+            Assert.True(inbox is not null, "INBOX is not nested under the logical root.");
 
             var projects = inbox!.Children.FirstOrDefault(n => n.Label == "Projects");
             Assert.True(projects is not null, "Projects is not nested under INBOX — the picker is still flat.");
@@ -161,7 +163,7 @@ public class RuleTargetPickerTests
     /// row ("Personal - Archive"); a tree carries it on a header rows away, so scoping is what keeps
     /// them apart.
     /// </summary>
-    [StaFact]
+    [WpfFact]
     public void OffersOnlyTheRulesOwnAccount()
     {
         var other = Guid.NewGuid();
@@ -179,7 +181,7 @@ public class RuleTargetPickerTests
     }
 
     /// <summary>Editing a rule that already files somewhere opens on that folder, not at the top.</summary>
-    [StaFact]
+    [WpfFact]
     public void OpensOnTheFolderTheRuleAlreadyTargets()
     {
         var window = Shown(Picker(currentFolderKey: "INBOX/Projects"));
@@ -195,7 +197,7 @@ public class RuleTargetPickerTests
     /// a server rule stores as its move/copy target — so the lookup must match on FullName, not on
     /// anything path-shaped.
     /// </summary>
-    [StaFact]
+    [WpfFact]
     public void OpensOnTheTargetFolderForGraphShapedOpaqueIds()
     {
         var graphFolders = new Dictionary<Guid, List<MailFolderModel>>
@@ -226,7 +228,7 @@ public class RuleTargetPickerTests
     /// A new rule has no target yet. Opening with nothing selected announces the tree and no item and
     /// leaves the user to work out that Down is what starts things, so a real folder stands in.
     /// </summary>
-    [StaFact]
+    [WpfFact]
     public void NewRuleWithNoTargetStillOpensOnARealFolder()
     {
         var window = Shown(Picker(currentFolderKey: null));
@@ -245,7 +247,7 @@ public class RuleTargetPickerTests
     /// A target the account no longer has — the folder was deleted or renamed on the server since the
     /// rule was written — must not open on nothing either.
     /// </summary>
-    [StaFact]
+    [WpfFact]
     public void TargetThatNoLongerExistsStillOpensOnARealFolder()
     {
         var window = Shown(Picker(currentFolderKey: "INBOX/Deleted Long Ago"));
@@ -264,7 +266,7 @@ public class RuleTargetPickerTests
     /// account whose folders are not cached yet both fall back to every account rather than putting
     /// up a tree with no folder in it.
     /// </summary>
-    [StaFact]
+    [WpfFact]
     public void FallsBackToEveryAccountWhenThereIsNothingToScopeTo()
     {
         var other = Guid.NewGuid();

@@ -23,4 +23,13 @@ public interface ILocalMailboxStore
         IReadOnlyCollection<string> messageIds, CancellationToken ct = default);
     Task DeleteLocalMessagesAsync(Guid accountId, string folderName,
         IReadOnlyCollection<string> messageIds, CancellationToken ct = default);
+    Task SnoozeMessagesAsync(IReadOnlyCollection<SnoozedMessageKey> messages,
+        DateTimeOffset wakeAtUtc, CancellationToken ct = default) =>
+        throw new NotSupportedException("Snooze is not implemented by this store.");
+    Task<IReadOnlyList<MailMessageSummary>> LoadSnoozedMessagesAsync(
+        IReadOnlyCollection<Guid>? accountIds = null, CancellationToken ct = default) =>
+        Task.FromResult<IReadOnlyList<MailMessageSummary>>([]);
+    Task<IReadOnlyList<MailMessageSummary>> WakeDueSnoozedMessagesAsync(
+        DateTimeOffset nowUtc, CancellationToken ct = default) =>
+        Task.FromResult<IReadOnlyList<MailMessageSummary>>([]);
 }

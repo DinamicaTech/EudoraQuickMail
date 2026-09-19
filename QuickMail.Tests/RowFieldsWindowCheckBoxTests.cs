@@ -23,7 +23,7 @@ namespace QuickMail.Tests;
 /// rather than the template, because the template looked identical in all three versions.</para>
 /// </summary>
 [Collection("WpfTests")]
-public class RowFieldsWindowCheckBoxTests
+public class RowFieldsWindowCheckBoxTests : WpfTestBase
 {
     private static (RowFieldsWindow window, RowFieldsViewModel vm) MakeWindow()
     {
@@ -86,7 +86,7 @@ public class RowFieldsWindowCheckBoxTests
     /// control view, so its name is spoken once. If a wrapper container reappears between the list
     /// and the check boxes, these children stop being check-box peers and this fails.
     /// </summary>
-    [StaFact]
+    [WpfFact]
     public void EachRowIsExactlyOneNamedElement_NotAContainerPlusACheckBox()
     {
         var (window, vm) = MakeWindow();
@@ -123,7 +123,7 @@ public class RowFieldsWindowCheckBoxTests
         finally { CloseAndReleaseFocus(window); }
     }
 
-    [StaFact]
+    [WpfFact]
     public void EveryFieldRowIsARealFocusableCheckBox()
     {
         var (window, vm) = MakeWindow();
@@ -140,7 +140,7 @@ public class RowFieldsWindowCheckBoxTests
         finally { CloseAndReleaseFocus(window); }
     }
 
-    [StaFact]
+    [WpfFact]
     public void RowPeer_ReportsCheckBoxRoleAndToggleState()
     {
         var (window, _) = MakeWindow();
@@ -168,7 +168,7 @@ public class RowFieldsWindowCheckBoxTests
         finally { CloseAndReleaseFocus(window); }
     }
 
-    [StaFact]
+    [WpfFact]
     public void FocusingARowSelectsIt_SoMoveUpAndDownActOnIt()
     {
         var (window, vm) = MakeWindow();
@@ -255,7 +255,7 @@ public class RowFieldsWindowCheckBoxTests
             _ => s.GetType().Name,
         }));
 
-    [StaFact]
+    [WpfFact]
     public void TabbingThroughTheWindow_NeverStopsOnTheListItself_OnlyOnOneRow()
     {
         var (window, _) = MakeWindow();
@@ -288,7 +288,7 @@ public class RowFieldsWindowCheckBoxTests
     /// The container being a tab stop is the cause, so pin that too and not only the behaviour it
     /// produced — a future edit that re-enables it fails here, whatever else changes.
     /// </summary>
-    [StaFact]
+    [WpfFact]
     public void TheListContainerIsNotATabStop_OnlyItsRowsAre()
     {
         var (window, _) = MakeWindow();
@@ -308,7 +308,7 @@ public class RowFieldsWindowCheckBoxTests
     /// the list passes it to a row, because a container the user cannot act on is not what "focus
     /// the field list" means (#464).
     /// </summary>
-    [StaFact]
+    [WpfFact]
     public void FocusHandedToTheList_LandsOnARow_SoTheLabelsAccessKeyStillWorks()
     {
         var (window, _) = MakeWindow();
@@ -350,7 +350,7 @@ public class RowFieldsWindowCheckBoxTests
     /// own index, Alt+F and F6 would land on different rows — and Move Up/Down act on whichever
     /// one selection followed.
     /// </summary>
-    [StaFact]
+    [WpfFact]
     public void ChangingTheRowType_ForgetsTheRememberedRow_SoAltFAndF6Agree()
     {
         var (window, vm) = MakeWindow();
@@ -392,7 +392,7 @@ public class RowFieldsWindowCheckBoxTests
     private static bool Arrow(CheckBox from, FocusNavigationDirection direction) =>
         from.MoveFocus(new TraversalRequest(direction));
 
-    [StaFact]
+    [WpfFact]
     public void DownArrow_OnTheLastField_StaysOnIt()
     {
         var (window, _) = MakeWindow();
@@ -415,7 +415,7 @@ public class RowFieldsWindowCheckBoxTests
         finally { CloseAndReleaseFocus(window); }
     }
 
-    [StaFact]
+    [WpfFact]
     public void UpArrow_OnTheFirstField_StaysOnIt()
     {
         var (window, _) = MakeWindow();
@@ -441,7 +441,7 @@ public class RowFieldsWindowCheckBoxTests
     /// The other half of the fix: stopping at the ends must not have stopped arrows working in
     /// between, and it must not have stranded focus outside the list either.
     /// </summary>
-    [StaFact]
+    [WpfFact]
     public void ArrowsStillMoveBetweenAdjacentFields()
     {
         var (window, vm) = MakeWindow();
@@ -474,7 +474,7 @@ public class RowFieldsWindowCheckBoxTests
     // control's own methods rather than synthesized keystrokes, so they are deterministic and
     // are not gated behind QUICKMAIL_RUN_INPUT_TESTS (#415).
 
-    [StaFact]
+    [WpfFact]
     public void HomeAndEnd_MoveToTheFirstAndLastField()
     {
         var (window, vm) = MakeWindow();
@@ -498,7 +498,7 @@ public class RowFieldsWindowCheckBoxTests
         finally { CloseAndReleaseFocus(window); }
     }
 
-    [StaFact]
+    [WpfFact]
     public void FirstLetter_JumpsToTheNextFieldStartingWithIt()
     {
         var (window, vm) = MakeWindow();
@@ -521,7 +521,7 @@ public class RowFieldsWindowCheckBoxTests
         finally { CloseAndReleaseFocus(window); }
     }
 
-    [StaFact]
+    [WpfFact]
     public void RepeatingTheSameLetter_CyclesThroughMatchesAndWraps()
     {
         var (window, vm) = MakeWindow();
@@ -551,7 +551,7 @@ public class RowFieldsWindowCheckBoxTests
         finally { CloseAndReleaseFocus(window); }
     }
 
-    [StaFact]
+    [WpfFact]
     public void TypeAheadIgnoresSpace_SoSpaceStillTogglesTheCheckBox()
     {
         var (window, _) = MakeWindow();
@@ -570,7 +570,7 @@ public class RowFieldsWindowCheckBoxTests
         finally { CloseAndReleaseFocus(window); }
     }
 
-    [StaFact]
+    [WpfFact]
     public void TypeAheadWithNoMatch_LeavesFocusWhereItWas()
     {
         var (window, _) = MakeWindow();
@@ -589,7 +589,7 @@ public class RowFieldsWindowCheckBoxTests
         finally { CloseAndReleaseFocus(window); }
     }
 
-    [StaFact]
+    [WpfFact]
     public void SpaceIsLeftToTheCheckBox_NotInterceptedByTheWindow()
     {
         var (window, _) = MakeWindow();

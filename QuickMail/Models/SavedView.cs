@@ -56,4 +56,14 @@ public class SavedView
     /// If the referenced flag is deleted, MainViewModel treats this as no filter.
     /// </summary>
     public string? FlagFilterId { get; set; }
+
+    /// <summary>
+    /// Optional quick-search expression associated with this view. When populated the saved view
+    /// behaves as a smart folder: selecting it restores the folder scope and reruns the search.
+    /// Empty for ordinary saved views, so existing views.json files remain fully compatible.
+    /// </summary>
+    public string? SearchQuery { get; set; }
+
+    /// <summary>Run <see cref="SearchQuery"/> across every materialized-mail folder.</summary>
+    public bool SearchEverywhere { get; set; }
 }

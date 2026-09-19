@@ -30,20 +30,20 @@ using Xunit;
 namespace QuickMail.Tests;
 
 [Collection("WpfTests")]
-public class GroupsTabFocusTests
+public class GroupsTabFocusTests : WpfTestBase
 {
     private static string TempDir() =>
         Path.Combine(Path.GetTempPath(), $"QM-GroupsFocusTests-{Guid.NewGuid():N}");
 
-    [StaFact]
-    public void FocusGroupsPane_NoGroups_FocusesNewButton()
+    [WpfFact]
+    public async Task FocusGroupsPane_NoGroups_FocusesNewButton()
     {
         // With no groups, switching to the Groups tab should land on the
         // New button. The user has nothing to navigate in an empty list,
         // so the button is the most useful first stop.
         EnsureApplication();
 
-        var (vm, window, dir) = BuildWindowWithNoGroups(out var cleanup);
+        var (vm, window, dir, cleanup) = await BuildWindowWithNoGroupsAsync();
         try
         {
             InvokeFocusGroupsPane(window!);
@@ -58,13 +58,13 @@ public class GroupsTabFocusTests
         }
     }
 
-    [StaFact]
-    public void FocusGroupsPane_WithGroups_FocusesGroupsList()
+    [WpfFact]
+    public async Task FocusGroupsPane_WithGroups_FocusesGroupsList()
     {
         // With at least one group, the list is the most useful first stop.
         EnsureApplication();
 
-        var (vm, window, dir) = BuildWindowWithOneContactAndOneGroup(out var cleanup);
+        var (vm, window, dir, cleanup) = await BuildWindowWithOneContactAndOneGroupAsync();
         try
         {
             InvokeFocusGroupsPane(window!);
@@ -79,8 +79,8 @@ public class GroupsTabFocusTests
         }
     }
 
-    [StaFact]
-    public void NewGroupNameBox_IsNotInDefaultTabOrder()
+    [WpfFact]
+    public async Task NewGroupNameBox_IsNotInDefaultTabOrder()
     {
         // The "New or rename group" name box should not be in the default
         // tab order — pressing Tab from the groups list should skip past
@@ -89,7 +89,7 @@ public class GroupsTabFocusTests
         // (which focuses the box when empty), or the Alt+N label mnemonic.
         EnsureApplication();
 
-        var (vm, window, dir) = BuildWindowWithNoGroups(out var cleanup);
+        var (vm, window, dir, cleanup) = await BuildWindowWithNoGroupsAsync();
         try
         {
             var mainTabs = FindFirstVisualChild<TabControl>(window!);
@@ -110,8 +110,8 @@ public class GroupsTabFocusTests
         }
     }
 
-    [StaFact]
-    public void TabFromGroupsList_SkipsNameBox_AndLandsOnNewButton()
+    [WpfFact]
+    public async Task TabFromGroupsList_SkipsNameBox_AndLandsOnNewButton()
     {
         // Drive the WPF focus pipeline: with focus on the groups list,
         // pressing Tab should move past the NewGroupNameBox (which is
@@ -121,7 +121,7 @@ public class GroupsTabFocusTests
         // position in the order changes.
         EnsureApplication();
 
-        var (vm, window, dir) = BuildWindowWithOneContactAndOneGroup(out var cleanup);
+        var (vm, window, dir, cleanup) = await BuildWindowWithOneContactAndOneGroupAsync();
         try
         {
             var mainTabs = FindFirstVisualChild<TabControl>(window!);
@@ -176,8 +176,8 @@ public class GroupsTabFocusTests
         }
     }
 
-    [StaFact]
-    public void NewGroupButton_Click_WithEmptyName_FocusesNameBox()
+    [WpfFact]
+    public async Task NewGroupButton_Click_WithEmptyName_FocusesNameBox()
     {
         // When the user clicks the New button with an empty name box,
         // the click should focus the name box so the user can type a
@@ -186,7 +186,7 @@ public class GroupsTabFocusTests
         // is the name box has focus, ready for typing.
         EnsureApplication();
 
-        var (vm, window, dir) = BuildWindowWithNoGroups(out var cleanup);
+        var (vm, window, dir, cleanup) = await BuildWindowWithNoGroupsAsync();
         try
         {
             var mainTabs = FindFirstVisualChild<TabControl>(window!);
@@ -216,33 +216,31 @@ public class GroupsTabFocusTests
 
     // ── helpers ──────────────────────────────────────────────────────────────
 
-    private static (AddressBookViewModel vm, AddressBookWindow? window, string dir) BuildWindowWithNoGroups(out Action<string> cleanup)
+    private static async Task<(AddressBookViewModel vm, AddressBookWindow? window, string dir, Action<string> cleanup)> BuildWindowWithNoGroupsAsync()
     {
         var dir = TempDir();
         var profile = new ProfileContext(dir);
         var svc = new ContactService(profile);
         var vm = new AddressBookViewModel(svc);
         var window = new AddressBookWindow(vm);
-        vm.LoadAsync().GetAwaiter().GetResult();
+        await vm.LoadAsync();
         window.Show();
         window.UpdateLayout();
-        cleanup = DeleteDir;
-        return (vm, window, dir);
+        return (vm, window, dir, DeleteDir);
     }
 
-    private static (AddressBookViewModel vm, AddressBookWindow? window, string dir) BuildWindowWithOneContactAndOneGroup(out Action<string> cleanup)
+    private static async Task<(AddressBookViewModel vm, AddressBookWindow? window, string dir, Action<string> cleanup)> BuildWindowWithOneContactAndOneGroupAsync()
     {
         var dir = TempDir();
         var profile = new ProfileContext(dir);
         var svc = new ContactService(profile);
-        svc.CreateGroupAsync("Friends").GetAwaiter().GetResult();
+        await svc.CreateGroupAsync("Friends");
         var vm = new AddressBookViewModel(svc);
         var window = new AddressBookWindow(vm);
-        vm.LoadAsync().GetAwaiter().GetResult();
+        await vm.LoadAsync();
         window.Show();
         window.UpdateLayout();
-        cleanup = DeleteDir;
-        return (vm, window, dir);
+        return (vm, window, dir, DeleteDir);
     }
 
     private static void DeleteDir(string dir)
@@ -318,7 +316,7 @@ public class GroupsTabFocusTests
         lock (typeof(Application))
         {
             if (Application.Current == null)
-                new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
+                WpfTestApplication.EnsureStarted();
             const string stylesUri = "pack://application:,,,/QuickMail;component/Styles/AccessibleStyles.xaml";
             var uri = new Uri(stylesUri, UriKind.Absolute);
             if (Application.Current!.Resources.MergedDictionaries.All(d => d.Source != uri))

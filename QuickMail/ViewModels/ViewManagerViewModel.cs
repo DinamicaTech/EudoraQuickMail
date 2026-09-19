@@ -29,6 +29,8 @@ public partial class ViewManagerViewModel : ObservableObject
     public ViewMode          CurrentViewMode  { get; }
     public MessageFilter     CurrentFilter    { get; }
     public MessageSort       CurrentSort      { get; }
+    public string            CurrentSearchQuery { get; }
+    public bool              CurrentSearchEverywhere { get; }
 
     // ── Saved views list ──────────────────────────────────────────────────────────
 
@@ -109,6 +111,8 @@ public partial class ViewManagerViewModel : ObservableObject
 
     public string SelectedFoldersSummary =>
         SelectedView == null ? string.Empty
+        : !string.IsNullOrWhiteSpace(SelectedView.SearchQuery) && SelectedView.SearchEverywhere
+            ? "Everywhere"
         : SelectedView.Folders.Count > 0
             ? string.Join(" + ", SelectedView.Folders.Select(f => $"{f.AccountDisplayName} {f.FolderDisplayName}"))
         : !string.IsNullOrEmpty(SelectedView.VirtualFolderKey)
@@ -137,6 +141,8 @@ public partial class ViewManagerViewModel : ObservableObject
             var s = $"{ModeLabel(SelectedView.ViewMode)}  ·  {FilterLabel(SelectedView.Filter)}  ·  {SortLabel(SelectedView.Sort)}";
             if (SelectedView.DaysOfMail.HasValue)
                 s += $"  ·  Last {SelectedView.DaysOfMail} days";
+            if (!string.IsNullOrWhiteSpace(SelectedView.SearchQuery))
+                s += $"  ·  Search: {SelectedView.SearchQuery}";
             return s;
         }
     }
@@ -209,6 +215,8 @@ public partial class ViewManagerViewModel : ObservableObject
                 extras.Add(SortLabel(CurrentSort.ToString()));
             if (CurrentDayLimit.HasValue)
                 extras.Add($"last {CurrentDayLimit} days");
+            if (!string.IsNullOrWhiteSpace(CurrentSearchQuery))
+                extras.Add($"search: {CurrentSearchQuery}");
             if (extras.Count > 0)
                 sb.Append(", ").Append(string.Join(" ", extras));
             return sb.ToString();
@@ -276,7 +284,9 @@ public partial class ViewManagerViewModel : ObservableObject
         MessageSort      currentSort,
         int?             currentDayLimit = null,
         bool             isCreateMode    = false,
-        string?          activeFlagFilterId = null)
+        string?          activeFlagFilterId = null,
+        string?          currentSearchQuery = null,
+        bool             currentSearchEverywhere = false)
     {
         _viewService   = viewService;
         _configService = configService;
@@ -290,6 +300,8 @@ public partial class ViewManagerViewModel : ObservableObject
         CurrentSort      = currentSort;
         CurrentDayLimit  = currentDayLimit;
         _activeFlagFilterId = activeFlagFilterId;
+        CurrentSearchQuery = currentSearchQuery?.Trim() ?? string.Empty;
+        CurrentSearchEverywhere = currentSearchEverywhere;
 
         SavedViews = new ObservableCollection<SavedView>(savedViews);
     }
@@ -317,6 +329,8 @@ public partial class ViewManagerViewModel : ObservableObject
             Sort         = SortKey(CurrentSort),
             DaysOfMail   = CurrentDayLimit,
             FlagFilterId = _activeFlagFilterId,
+            SearchQuery  = string.IsNullOrWhiteSpace(CurrentSearchQuery) ? null : CurrentSearchQuery,
+            SearchEverywhere = !string.IsNullOrWhiteSpace(CurrentSearchQuery) && CurrentSearchEverywhere,
         };
 
         if (IsRealImapFolder(CurrentFolder) && CurrentAccount != null)
@@ -548,6 +562,17 @@ public partial class ViewManagerViewModel : ObservableObject
     /// <summary>Builds a suggested view name using the supplied day limit (or null for unlimited).</summary>
     private string BuildName(int? dayLimit)
     {
+        if (!string.IsNullOrWhiteSpace(CurrentSearchQuery))
+        {
+            var scope = CurrentSearchEverywhere
+                ? "Everywhere"
+                : CurrentFolder?.DisplayName ?? "Mail";
+            var query = CurrentSearchQuery.Length > 48
+                ? CurrentSearchQuery[..45] + "…"
+                : CurrentSearchQuery;
+            return $"{scope}: {query}";
+        }
+
         var sb = new StringBuilder();
 
         // Only prefix the account name for real IMAP folders.

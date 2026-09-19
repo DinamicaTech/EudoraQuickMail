@@ -29,14 +29,14 @@ using Xunit;
 namespace QuickMail.Tests;
 
 [Collection("WpfTests")]
-public class TabStripNavigationTests
+public class TabStripNavigationTests : WpfTestBase
 {
     private static void EnsureApplication()
     {
         lock (typeof(Application))
         {
             if (Application.Current == null)
-                new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
+                WpfTestApplication.EnsureStarted();
             const string stylesUri = "pack://application:,,,/QuickMail;component/Styles/AccessibleStyles.xaml";
             var uri = new Uri(stylesUri, UriKind.Absolute);
             if (Application.Current!.Resources.MergedDictionaries.All(d => d.Source != uri))
@@ -87,7 +87,7 @@ public class TabStripNavigationTests
 
     private static string? Header(object? tab) => (tab as TabItem)?.Header?.ToString();
 
-    [StaFact]
+    [WpfFact]
     public void RightArrow_MovesToTheNextTab_AndSelectsIt()
     {
         EnsureApplication();
@@ -102,7 +102,7 @@ public class TabStripNavigationTests
         finally { window.Close(); }
     }
 
-    [StaFact]
+    [WpfFact]
     public void RightArrow_FromTheLastTab_WrapsToTheFirst()
     {
         EnsureApplication();
@@ -116,7 +116,7 @@ public class TabStripNavigationTests
         finally { window.Close(); }
     }
 
-    [StaFact]
+    [WpfFact]
     public void LeftArrow_FromTheFirstTab_WrapsToTheLast()
     {
         EnsureApplication();
@@ -130,7 +130,7 @@ public class TabStripNavigationTests
         finally { window.Close(); }
     }
 
-    [StaFact]
+    [WpfFact]
     public void HomeAndEnd_GoToTheFirstAndLastTab()
     {
         EnsureApplication();
@@ -148,7 +148,7 @@ public class TabStripNavigationTests
         finally { window.Close(); }
     }
 
-    [StaFact]
+    [WpfFact]
     public void DisabledTabs_AreSkipped()
     {
         EnsureApplication();
@@ -165,7 +165,7 @@ public class TabStripNavigationTests
         finally { window.Close(); }
     }
 
-    [StaFact]
+    [WpfFact]
     public void ArrowsInTheTabsContent_AreLeftAlone()
     {
         // The behaviour must never take an arrow key away from a text box, list or combo box that
@@ -182,7 +182,7 @@ public class TabStripNavigationTests
         finally { window.Close(); }
     }
 
-    [StaFact]
+    [WpfFact]
     public void OtherKeys_FallThroughUnhandled()
     {
         // Only the four navigation keys are the strip's. Down in particular must stay WPF's, so
@@ -211,7 +211,7 @@ public class TabStripNavigationTests
         finally { window.Close(); }
     }
 
-    [StaFact]
+    [WpfFact]
     public void SettingsDialog_EveryTabIsReachableWithTheArrowKeys()
     {
         // The regression #528 reported, against the real dialog: its six tabs wrap onto two rows,

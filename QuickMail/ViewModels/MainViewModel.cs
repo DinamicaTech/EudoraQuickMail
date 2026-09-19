@@ -785,6 +785,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
         From,
         /// <summary>Mail addressed to the contact (matches the To header).</summary>
         To,
+        /// <summary>All mail exchanged with the contact (matches From or To).</summary>
+        Both,
     }
 
     /// <summary>
@@ -796,11 +798,18 @@ public partial class MainViewModel : ObservableObject, IDisposable
         string address, ContactMailDirection direction, string? label = null)
     {
         var who  = string.IsNullOrWhiteSpace(label) ? address : label!.Trim();
-        var kind = direction == ContactMailDirection.From ? "from" : "to";
+        var kind = direction switch
+        {
+            ContactMailDirection.From => "from",
+            ContactMailDirection.To   => "to",
+            _                         => "with",
+        };
         return new MailFolderModel
         {
             FullName    = $"{ContactMailPrefix}{kind}|{Uri.EscapeDataString(address)}",
-            DisplayName = $"Mail {kind} {who}",
+            DisplayName = direction == ContactMailDirection.Both
+                ? $"History with {who}"
+                : $"Mail {kind} {who}",
         };
     }
 
@@ -820,9 +829,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
         var sep  = tail.IndexOf('|', StringComparison.Ordinal);
         if (sep <= 0) return false;
 
-        direction = tail[..sep].Equals("to", StringComparison.Ordinal)
-            ? ContactMailDirection.To
-            : ContactMailDirection.From;
+        direction = tail[..sep] switch
+        {
+            "to"   => ContactMailDirection.To,
+            "with" => ContactMailDirection.Both,
+            _      => ContactMailDirection.From,
+        };
         address = Uri.UnescapeDataString(tail[(sep + 1)..]);
         return address.Length > 0;
     }
@@ -833,10 +845,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// looked for inside them rather than compared whole.
     /// </summary>
     private static bool MatchesContactAddress(
-        MailMessageSummary msg, string address, ContactMailDirection direction) =>
-        HeaderNamesAddress(
-            direction == ContactMailDirection.From ? msg.From : msg.To,
-            address);
+        MailMessageSummary msg, string address, ContactMailDirection direction) => direction switch
+        {
+            ContactMailDirection.From => HeaderNamesAddress(msg.From, address),
+            ContactMailDirection.To   => HeaderNamesAddress(msg.To, address),
+            _ => HeaderNamesAddress(msg.From, address) || HeaderNamesAddress(msg.To, address),
+        };
 
     /// <summary>
     /// True when <paramref name="header"/> contains <paramref name="address"/> as a whole address
@@ -1292,6 +1306,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private CancellationTokenSource? _localSearchCts;
     private IReadOnlyList<AdvancedSearchCriterion>? _advancedSearchCriteria;
     private bool _searchEverywhere;
+    public bool SearchEverywhere => _searchEverywhere;
     private bool _suppressSearchTextExecution;
 
     /// <summary>Raised when the search box should receive focus (View concern).</summary>
@@ -1803,6 +1818,32 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private string _statusText = "Ready";
 
     [ObservableProperty]
+    private bool _isStatusError;
+
+    partial void OnStatusTextChanged(string value) =>
+        IsStatusError = IsErrorStatusMessage(value);
+
+    /// <summary>
+    /// Keeps important failures visually consistent even when they originate in different
+    /// subsystems (POP3, IMAP, SMTP, searching, attachments, or link safety).
+    /// </summary>
+    internal static bool IsErrorStatusMessage(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return false;
+
+        return value.StartsWith("Warning!", StringComparison.OrdinalIgnoreCase)
+            || value.StartsWith("Error", StringComparison.OrdinalIgnoreCase)
+            || value.StartsWith("Failed", StringComparison.OrdinalIgnoreCase)
+            || value.Contains(" failed", StringComparison.OrdinalIgnoreCase)
+            || value.Contains(" error", StringComparison.OrdinalIgnoreCase)
+            || value.Contains("could not", StringComparison.OrdinalIgnoreCase)
+            || value.Contains("cannot", StringComparison.OrdinalIgnoreCase)
+            || value.Contains("no password", StringComparison.OrdinalIgnoreCase)
+            || value.Contains("not connected", StringComparison.OrdinalIgnoreCase)
+            || value.Contains("unauthorized", StringComparison.OrdinalIgnoreCase);
+    }
+
+    [ObservableProperty]
     private bool _isStatusHighlighted;
 
     [ObservableProperty]
@@ -1860,6 +1901,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     // hotfix). Shared with the About dialog and update check via AppVersion; deliberately not the
     // informational/product version, which the SDK can suffix with a git commit hash.
     private static readonly string CurrentVersion = Helpers.AppVersion.Display;
+    internal static string ProductCaption { get; } = $"Eudora QuickMail v{CurrentVersion}";
 
     // Resting state of the update entry: no newer release, so surface the running version instead
     // (issue #169) so the Help menu always answers "what am I running?".
@@ -1906,7 +1948,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private string ComputeWindowTitle()
     {
             if (IsMessageOpen && !string.IsNullOrWhiteSpace(MessageDetail?.Subject))
-                return $"{MessageDetail.Subject} - Eudora QuickMail";
+                return $"{MessageDetail.Subject} - {ProductCaption}";
             if (ActiveView != null)
             {
                 var suffix = IsSearchActive && !string.IsNullOrWhiteSpace(SearchText)
@@ -1914,7 +1956,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                     : IsFilterActive
                     ? $" — {FilterLabel}"
                     : string.Empty;
-                return $"{ActiveView.Name}{suffix} - Eudora QuickMail";
+                return $"{ActiveView.Name}{suffix} - {ProductCaption}";
             }
             if (SelectedFolder != null && !SelectedFolder.IsHeader)
             {
@@ -1929,9 +1971,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
                     : IsFilterActive
                     ? $" — {FilterLabel}"
                     : string.Empty;
-                return $"{folderPart}{suffix} - Eudora QuickMail";
+                return $"{folderPart}{suffix} - {ProductCaption}";
             }
-            return "Eudora QuickMail";
+            return ProductCaption;
     }
 
     // ── Tab & Window Management (Phase 6) ────────────────────────────────────────
@@ -2670,6 +2712,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                     ?? new MailFolderModel { FullName = sentinelName, DisplayName = view.Name };
                 SelectedFolder = virtualFolder;
                 await FetchVirtualAsync(virtualFolder);
+                await ApplySavedSearchAsync(view);
                 return;
             }
             // Legacy view (null key or pre-fix garbled key): default to All Mail and
@@ -2677,10 +2720,18 @@ public partial class MainViewModel : ObservableObject, IDisposable
             view.VirtualFolderKey = AllMailFolder.FullName.Substring(1); // "AllMail"
             SelectedFolder = AllMailFolder;
             await FetchVirtualAsync(AllMailFolder);
+            await ApplySavedSearchAsync(view);
             return;
         }
 
         await ApplyViewFoldersAsync(view, allFolders);
+        await ApplySavedSearchAsync(view);
+    }
+
+    private async Task ApplySavedSearchAsync(SavedView view)
+    {
+        if (string.IsNullOrWhiteSpace(view.SearchQuery)) return;
+        await RunQuickSearchAsync(view.SearchQuery, view.SearchEverywhere);
     }
 
     /// <summary>
@@ -3597,6 +3648,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 "in" or "inbox" => SpecialFolderKind.Inbox,
                 "draft" or "drafts" => SpecialFolderKind.Drafts,
                 "scheduled" => SpecialFolderKind.Scheduled,
+                "snooze" or "snoozed" => SpecialFolderKind.Snoozed,
                 "out" or "sent" => SpecialFolderKind.Sent,
                 "trash" => SpecialFolderKind.Trash,
                 "junk" or "spam" => SpecialFolderKind.Junk,
@@ -4247,6 +4299,18 @@ public partial class MainViewModel : ObservableObject, IDisposable
                     // Flags are local-first metadata. A sync can introduce the built-in flag when
                     // the server reports \Flagged, but absence of that server bit must not erase a
                     // user's named local flag (or a flag preserved while moving the message).
+                    existing.IsServerFlagged = msg.IsServerFlagged;
+                    var builtInFlagId = Models.FlagDefinition.BuiltInFlagId.ToString();
+                    if (!msg.IsServerFlagged &&
+                        string.Equals(existing.FlagId, builtInFlagId, StringComparison.OrdinalIgnoreCase))
+                    {
+                        // The built-in flag mirrors the server's \Flagged bit. Named local flags
+                        // are deliberately preserved, but this synthetic one must disappear when
+                        // another client clears the server flag.
+                        existing.FlagId = null;
+                        existing.FlagName = null;
+                        existing.FlagColorHex = null;
+                    }
                 }
                 continue;
             }
@@ -5480,7 +5544,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 {
                     foreach (var node in FolderTreeBuilder.Build(folders.Where(f => f.Kind is not (
                                  SpecialFolderKind.Inbox or SpecialFolderKind.Drafts or SpecialFolderKind.Scheduled
-                                 or SpecialFolderKind.Sent or SpecialFolderKind.Trash or SpecialFolderKind.Junk))))
+                                 or SpecialFolderKind.Snoozed or SpecialFolderKind.Sent or SpecialFolderKind.Trash or SpecialFolderKind.Junk))))
                         accountRootNodes.Add((account, node));
                 }
             }
@@ -5488,7 +5552,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             var systemKinds = new[]
             {
                 SpecialFolderKind.Inbox, SpecialFolderKind.Drafts, SpecialFolderKind.Scheduled,
-                SpecialFolderKind.Sent, SpecialFolderKind.Trash, SpecialFolderKind.Junk,
+                SpecialFolderKind.Snoozed, SpecialFolderKind.Sent, SpecialFolderKind.Trash, SpecialFolderKind.Junk,
             };
             foreach (var kind in systemKinds)
             {
@@ -5505,6 +5569,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                         f.DisplayName.Equals("In", StringComparison.OrdinalIgnoreCase)) => "In",
                     SpecialFolderKind.Inbox => "Inbox", SpecialFolderKind.Drafts => "Draft",
                     SpecialFolderKind.Scheduled => "Scheduled", SpecialFolderKind.Sent => "Sent",
+                    SpecialFolderKind.Snoozed => "Snooze",
                     SpecialFolderKind.Trash => "Trash", SpecialFolderKind.Junk => "Junk",
                     _ => kind.ToString(),
                 };
@@ -5900,19 +5965,21 @@ public partial class MainViewModel : ObservableObject, IDisposable
             SpecialFolderKind.Inbox => 0,
             SpecialFolderKind.Drafts => 1,
             SpecialFolderKind.Scheduled => 2,
-            SpecialFolderKind.Sent => 3,
-            SpecialFolderKind.Trash => 4,
-            SpecialFolderKind.Junk => 5,
+            SpecialFolderKind.Snoozed => 3,
+            SpecialFolderKind.Sent => 4,
+            SpecialFolderKind.Trash => 5,
+            SpecialFolderKind.Junk => 6,
             _ when node.Label.Equals("In", StringComparison.OrdinalIgnoreCase) => 0,
             _ when node.Label.Equals("Draft", StringComparison.OrdinalIgnoreCase) ||
                    node.Label.Equals("Drafts", StringComparison.OrdinalIgnoreCase) => 1,
             _ when node.Label.Equals("Scheduled", StringComparison.OrdinalIgnoreCase) => 2,
+            _ when node.Label.Equals("Snooze", StringComparison.OrdinalIgnoreCase) => 3,
             _ when node.Label.Equals("Out", StringComparison.OrdinalIgnoreCase) ||
-                   node.Label.Equals("Sent", StringComparison.OrdinalIgnoreCase) => 3,
-            _ when node.Label.Equals("Trash", StringComparison.OrdinalIgnoreCase) => 4,
+                   node.Label.Equals("Sent", StringComparison.OrdinalIgnoreCase) => 4,
+            _ when node.Label.Equals("Trash", StringComparison.OrdinalIgnoreCase) => 5,
             _ when node.Label.Equals("Junk", StringComparison.OrdinalIgnoreCase) ||
-                   node.Label.Equals("Spam", StringComparison.OrdinalIgnoreCase) => 5,
-            _ => 6,
+                   node.Label.Equals("Spam", StringComparison.OrdinalIgnoreCase) => 6,
+            _ => 7,
         };
 
         var ordered = parent.Children
@@ -6371,6 +6438,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
         PerformanceLogService.Marker("Mailbox: local refresh BEGIN", details);
         try
         {
+            // Rule moves can add an account binding to an existing canonical destination while the
+            // application is running. Refresh that authoritative map before resolving the visible
+            // source and the optional filtered-destination tab; this also updates live tree counts.
+            if (_canonicalLocalTree != null)
+                await RefreshCanonicalFolderCountsAsync();
+
             if (SelectedFolder is { } rootFolder && TryParseRootMail(rootFolder.FullName, out var rootId))
             {
                 await FetchRootMailAsync(rootId, rootFolder);
@@ -7014,7 +7087,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         var loadVersion    = Interlocked.Increment(ref _folderLoadVersion);
         var expectedFolder = SelectedFolder;
-        var kind           = direction == ContactMailDirection.From ? "from" : "to";
+        var kind           = direction switch
+        {
+            ContactMailDirection.From => "from",
+            ContactMailDirection.To   => "to",
+            _                         => "with",
+        };
         Messages.Clear();
         StatusText = $"Searching for mail {kind} {address}…";
         IsBusy = true;
@@ -7637,9 +7715,39 @@ public partial class MainViewModel : ObservableObject, IDisposable
             {
                 var account = Accounts.FirstOrDefault(candidate => candidate.Id == binding.AccountId);
                 if (account == null || (connectedOnly && !_connectedAccountIds.Contains(account.Id))) continue;
-                if (!_cachedFolders.TryGetValue(account.Id, out var folders)) continue;
-                var folder = folders.FirstOrDefault(candidate => string.Equals(candidate.FullName,
+                _cachedFolders.TryGetValue(account.Id, out var folders);
+                var folder = folders?.FirstOrDefault(candidate => string.Equals(candidate.FullName,
                     binding.LegacyFullName, StringComparison.OrdinalIgnoreCase));
+
+                // A rule can create a physical binding for another local account while QuickMail is
+                // running. The canonical binding is committed transactionally with the destination
+                // Folder row, but the in-memory physical-folder cache predates it. Treating a cache
+                // miss as "not a source" made the moved mail disappear until restart. The canonical
+                // map is the durable authority; synthesize the lightweight query model until the next
+                // folder-list refresh catches up.
+                if (folder == null && account.BackendKind is BackendKind.LocalArchive or BackendKind.Pop3Smtp)
+                {
+                    var sourceCanonical = sources.FirstOrDefault(candidate => candidate.Bindings.Any(candidateBinding =>
+                        candidateBinding.AccountId == binding.AccountId &&
+                        candidateBinding.LegacyFullName.Equals(binding.LegacyFullName,
+                            StringComparison.OrdinalIgnoreCase)));
+                    if (sourceCanonical != null)
+                    {
+                        var slash = binding.LegacyFullName.LastIndexOf('/');
+                        folder = new MailFolderModel
+                        {
+                            AccountId = account.Id,
+                            FullName = binding.LegacyFullName,
+                            DisplayName = sourceCanonical.Name,
+                            ParentId = slash < 0 ? null : binding.LegacyFullName[..slash],
+                            Kind = sourceCanonical.Kind,
+                            IsContainer = sourceCanonical.IsContainer,
+                            MessageCount = sourceCanonical.MessageCount,
+                            UnreadCount = sourceCanonical.UnreadCount,
+                        };
+                    }
+                }
+
                 if (folder != null && yielded.Add((account.Id, folder.FullName.ToUpperInvariant())))
                     yield return (account, folder);
             }
@@ -7713,6 +7821,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
             SpecialFolderKind.Drafts => leaf.Equals("Draft", StringComparison.OrdinalIgnoreCase)
                 || leaf.Equals("Drafts", StringComparison.OrdinalIgnoreCase),
             SpecialFolderKind.Scheduled => leaf.Equals("Scheduled", StringComparison.OrdinalIgnoreCase),
+            SpecialFolderKind.Snoozed => leaf.Equals("Snooze", StringComparison.OrdinalIgnoreCase)
+                || leaf.Equals("Snoozed", StringComparison.OrdinalIgnoreCase),
             SpecialFolderKind.Trash => leaf.Equals("Trash", StringComparison.OrdinalIgnoreCase)
                 || leaf.Equals("Deleted Items", StringComparison.OrdinalIgnoreCase),
             SpecialFolderKind.Junk => leaf.Equals("Junk", StringComparison.OrdinalIgnoreCase)
@@ -7734,6 +7844,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             SpecialFolderKind.Inbox => "Inbox", SpecialFolderKind.Drafts => "Draft",
             SpecialFolderKind.Scheduled => "Scheduled", SpecialFolderKind.Sent => "Sent",
+            SpecialFolderKind.Snoozed => "Snooze",
             SpecialFolderKind.Trash => "Trash", SpecialFolderKind.Junk => "Junk",
             _ => rootKind.ToString(),
         }
@@ -7960,6 +8071,15 @@ public partial class MainViewModel : ObservableObject, IDisposable
         return failures;
     }
 
+    /// <summary>Refreshes Snooze counts and the current page without dropping an active search.
+    /// Snoozed mail is intentionally searchable even while hidden from its original folder.</summary>
+    public async Task RefreshAfterSnoozeAsync()
+    {
+        if (_canonicalLocalTree != null)
+            await RefreshCanonicalFolderCountsAsync();
+        await ReloadCurrentLocalPageAsync();
+    }
+
     /// <summary>
     /// Makes an SMTP-accepted message visible in the canonical Out folder without waiting for the
     /// next periodic all-folder sweep. Local/POP3 backends have already written their Sent copy;
@@ -8020,6 +8140,22 @@ public partial class MainViewModel : ObservableObject, IDisposable
             var isCanonicalLocal = TryParseCanonicalFolder(fullName, out var localCanonicalId);
             if (isCanonicalLocal && _canonicalFolders.TryGetValue(localCanonicalId, out var canonicalScope))
                 localAggregateKind = canonicalScope.Kind;
+
+            if (localAggregateKind == SpecialFolderKind.Snoozed &&
+                _localStore is ILocalMailboxStore snoozeStore)
+            {
+                var snoozed = await snoozeStore.LoadSnoozedMessagesAsync(
+                    RootAccountIdsFor(expectedFolder), ct);
+                if (!IsCurrentFolderLoad(loadVersion, expectedFolder)) return;
+                await ResolveFlagNamesAsync(snoozed);
+                LocalTotalMessages = snoozed.Count;
+                SetMessages(SortMessageSequence(snoozed, ActiveSort).ToList());
+                if (expectedFolder != null) expectedFolder.MessageCount = snoozed.Count;
+                StatusText = snoozed.Count == 0
+                    ? "No snoozed messages."
+                    : $"{snoozed.Count:N0} snoozed {(snoozed.Count == 1 ? "message" : "messages")}.";
+                return;
+            }
 
             // The canonical Out node is an aggregate over local Out plus each remote account's
             // real Sent folder. Those IMAP/Graph folders are excluded from the All Mail VIEW, but
@@ -8114,7 +8250,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 foreach (var message in sorted)
                     if (queue.TryGetValue(message.MessageId, out var item))
                         message.DeliveryStatus = string.IsNullOrWhiteSpace(item.LastError)
-                            ? "Scheduled" : "SMTP error";
+                            ? item.TransportAccepted ? "Finalizing"
+                                : item.IsImmediate ? "Queued" : "Scheduled"
+                            : "SMTP error";
             }
             SetMessages(sorted);
             // Scheduled uses a total-message badge rather than unread count. Refresh it from the
@@ -8306,6 +8444,22 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         if (account.FolderTreeRootId is { } assignedRoot) return assignedRoot == rootId;
         if (account.Id == rootId) return true;
+
+        // A rootless IMAP/Graph account may already have physical folders bound into a canonical
+        // tree (for example after filing Gmail messages into Eudora folders). That durable binding
+        // is stronger evidence than the number of roots currently visible. Previously the account
+        // joined Eudora while it was the only root, then silently dropped out of In as soon as a
+        // second independent root was added. Only infer membership when every binding agrees on
+        // one root; an account genuinely spanning several roots remains intentionally ambiguous.
+        var boundRoots = _canonicalFolders.Values
+            .Where(folder => folder.Bindings.Any(binding => binding.AccountId == account.Id))
+            .Select(folder => folder.RootId)
+            .Distinct()
+            .Take(2)
+            .ToList();
+        if (boundRoots.Count > 0)
+            return boundRoots.Count == 1 && boundRoots[0] == rootId;
+
         var roots = _canonicalFolders.Values
             .Where(folder => folder.ParentFolderId == null)
             .Select(folder => folder.RootId)
@@ -9697,6 +9851,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// connect, so that question is true offline and the fetch would fail.</summary>
     public bool IsAccountReady(Guid accountId) => _connectedAccountIds.Contains(accountId);
 
+    public DateTimeOffset? LastSyncedUtc(Guid accountId) => _syncService.LastSyncedUtc(accountId);
+
     [RelayCommand]
     private void Exit() => ExitRequested?.Invoke();
 
@@ -11036,7 +11192,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private void ViewUserGuide()
     {
         // All ShellExecute launches go through the allow-list. See ExternalUriPolicy.
-        Helpers.ExternalUriPolicy.TryOpenExternal("https://kellylford.github.io/QuickMail/");
+        Helpers.ExternalUriPolicy.TryOpenExternal("https://DinamicaTech.github.io/QuickMail/");
     }
 #pragma warning restore CA1822
 
@@ -11778,7 +11934,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     // a page of its own. Both halves are asserted against docs/USER-GUIDE.md by NativeArmNoticeTests.
     internal const string ArmSwitchGuideAnchor = "moving-to-the-arm-version-on-a-snapdragon-pc";
     internal const string ArmSwitchGuideUrl =
-        $"https://kellylford.github.io/QuickMail/installing-and-updating-quickmail.html#{ArmSwitchGuideAnchor}";
+        $"https://DinamicaTech.github.io/QuickMail/installing-and-updating-quickmail.html#{ArmSwitchGuideAnchor}";
 
     // Version string of a found update (e.g. "0.8.1"); empty when up to date. Feeds the
     // update dialog for self-updating (installed) copies.

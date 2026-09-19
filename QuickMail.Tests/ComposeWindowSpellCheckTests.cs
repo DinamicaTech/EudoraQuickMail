@@ -14,7 +14,7 @@ using Xunit;
 namespace QuickMail.Tests;
 
 [Collection("WpfTests")]
-public class ComposeWindowSpellCheckTests
+public class ComposeWindowSpellCheckTests : WpfTestBase
 {
     private static QuickMail.Views.ComposeWindow NewHeadlessComposeWindow()
     {
@@ -24,6 +24,7 @@ public class ComposeWindowSpellCheckTests
             new StubCredentialService(),
             new StubImapMailService(),
             new StubTemplateService());
+        vm.SpellLanguage = "en-US";
 
         return new QuickMail.Views.ComposeWindow(
             vm, new StubContactService(), new StubTemplateService(), new StubConfigService())
@@ -35,7 +36,7 @@ public class ComposeWindowSpellCheckTests
         };
     }
 
-    [StaFact]
+    [WpfFact]
     public void SpellCheck_IsNotEnabledDuringConstruction_ButEnabledAfterBackgroundIdle()
     {
         var window = NewHeadlessComposeWindow();

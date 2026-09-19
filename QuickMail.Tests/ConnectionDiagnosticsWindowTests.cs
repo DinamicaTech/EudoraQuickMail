@@ -21,7 +21,7 @@ namespace QuickMail.Tests;
 // the ConnectionDiagnostics collection, which mutates the same static journal — so these tests
 // deliberately assert nothing about journal CONTENT, only about the window and its bound VM.
 [Collection("WpfTests")]
-public class ConnectionDiagnosticsWindowTests
+public class ConnectionDiagnosticsWindowTests : WpfTestBase
 {
     private static IReadOnlyList<AccountModel> TwoAccounts() =>
     [
@@ -29,7 +29,7 @@ public class ConnectionDiagnosticsWindowTests
         new() { Id = Guid.NewGuid(), AccountName = "Idea Place", ImapHost = "mail.example.net", IsConnected = true },
     ];
 
-    [StaFact]
+    [WpfFact]
     public void Window_LoadsAndExposesItsNamedElements()
     {
         var window = new ConnectionDiagnosticsWindow(probe: null, TwoAccounts)
@@ -55,7 +55,7 @@ public class ConnectionDiagnosticsWindowTests
         finally { window.Close(); }
     }
 
-    [StaFact]
+    [WpfFact]
     public void Window_ListsEveryAccountWithItsDisplayedStatus()
     {
         var accounts = TwoAccounts();
@@ -79,7 +79,7 @@ public class ConnectionDiagnosticsWindowTests
         finally { window.Close(); }
     }
 
-    [StaFact]
+    [WpfFact]
     public void Window_WithoutAProbe_CannotRunATest()
     {
         // The button must be disabled rather than throwing when no probe was supplied (the stub

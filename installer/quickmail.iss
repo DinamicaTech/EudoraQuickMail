@@ -9,7 +9,7 @@
 #define MyAppName "Eudora QuickMail"
 #define MyAppNameLower "eudora-quickmail"
 #define MyAppPublisher "Kelly Ford"
-#define MyAppURL "https://github.com/kellylford/QuickMail"
+#define MyAppURL "https://github.com/DinamicaTech/QuickMail"
 #define MyAppSupportURL MyAppURL + "/issues"
 #define MyAppExeName "QuickMail.exe"
 #define MyAppDescription "Keyboard-first, accessible desktop email client for Windows"

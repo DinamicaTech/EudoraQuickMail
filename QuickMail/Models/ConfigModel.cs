@@ -290,6 +290,13 @@ public class ConfigModel
 
     /// <summary>Seconds between automatic draft saves. Clamped to 30–600.</summary>
     public int AutoSaveIntervalSeconds { get; set; } = 120;
+
+    /// <summary>
+    /// Seconds an ordinary Send remains locally queued and can be undone. Zero bypasses the
+    /// outgoing queue and sends directly; positive values are clamped to 1–600 seconds.
+    /// </summary>
+    public int DelaySendingMessagesSeconds { get; set; } = 30;
+
     /// <summary>How far back sent mail is scanned for recipient autocomplete.</summary>
     public int RecipientCacheYears { get; set; } = 2;
 

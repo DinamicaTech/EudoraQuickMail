@@ -1,5 +1,6 @@
 using System.Windows.Controls;
 using System.Windows.Documents;
+using System.Windows.Markup;
 using QuickMail.Views;
 using Xunit;
 
@@ -12,11 +13,16 @@ namespace QuickMail.Tests;
 /// misspellings so engine vagaries about marginal words cannot cause flakes.
 /// </summary>
 [Collection("WpfTests")]
-public class SpellCheckSourceTests
+public class SpellCheckSourceTests : WpfTestBase
 {
     private static TextBox MakeSpellCheckedTextBox(string text, int caret = 0)
     {
-        var box = new TextBox { AcceptsReturn = true, Text = text };
+        var box = new TextBox
+        {
+            AcceptsReturn = true,
+            Text = text,
+            Language = XmlLanguage.GetLanguage("en-US"),
+        };
         box.SpellCheck.IsEnabled = true;
         // The spell engine attaches when the control enters a live tree; forcing
         // measure/arrange plus an explicit enable is enough in a headless test.
@@ -35,7 +41,7 @@ public class SpellCheckSourceTests
         return false;
     }
 
-    [StaFact]
+    [WpfFact]
     public void TextBoxSource_WalksErrorsInOrder_AndExhausts()
     {
         var box = MakeSpellCheckedTextBox("I will recieve the pacakge tomorow.");
@@ -50,7 +56,7 @@ public class SpellCheckSourceTests
         Assert.Null(source.MoveToNextError());
     }
 
-    [StaFact]
+    [WpfFact]
     public void TextBoxSource_WrapsFromCaretToStartPosition()
     {
         var text = "pacakge first then recieve";
@@ -65,7 +71,7 @@ public class SpellCheckSourceTests
         Assert.Null(source.MoveToNextError());
     }
 
-    [StaFact]
+    [WpfFact]
     public void TextBoxSource_ReplaceCurrent_UpdatesTextAndContinues()
     {
         var box = MakeSpellCheckedTextBox("recieve the pacakge");
@@ -83,7 +89,7 @@ public class SpellCheckSourceTests
         Assert.Null(source.MoveToNextError());
     }
 
-    [StaFact]
+    [WpfFact]
     public void TextBoxSource_GetContextLine_ReturnsLineContainingWord()
     {
         var box = MakeSpellCheckedTextBox("First line fine.\r\nSecond line has recieve in it.");
@@ -94,7 +100,7 @@ public class SpellCheckSourceTests
         Assert.Equal("Second line has recieve in it.", source.GetContextLine());
     }
 
-    [StaFact]
+    [WpfFact]
     public void TextBoxSource_SelectCurrent_SelectsTheWord()
     {
         var box = MakeSpellCheckedTextBox("say recieve now");
@@ -106,10 +112,10 @@ public class SpellCheckSourceTests
         Assert.Equal("recieve", box.SelectedText);
     }
 
-    [StaFact]
+    [WpfFact]
     public void RichTextBoxSource_WalksReplacesAndExhausts()
     {
-        var box = new RichTextBox();
+        var box = new RichTextBox { Language = XmlLanguage.GetLanguage("en-US") };
         box.SpellCheck.IsEnabled = true;
         box.Document.Blocks.Clear();
         box.Document.Blocks.Add(new Paragraph(new Run("I will recieve the pacakge soon.")));
@@ -135,7 +141,7 @@ public class SpellCheckSourceTests
         Assert.Contains("receive the package", text);
     }
 
-    [StaFact]
+    [WpfFact]
     public void SpellScan_FindErrorIndex_WrapsBothDirections()
     {
         var text = "pacakge middle recieve";
@@ -156,7 +162,7 @@ public class SpellCheckSourceTests
         return text[start..end];
     }
 
-    [StaFact]
+    [WpfFact]
     public void TextBoxSource_CaretInsideMisspelledWord_PresentsItOnlyOnce()
     {
         var box = MakeSpellCheckedTextBox("recieve then fine", caret: 3);   // caret inside "recieve"
@@ -170,10 +176,10 @@ public class SpellCheckSourceTests
         Assert.Null(source.MoveToNextError());
     }
 
-    [StaFact]
+    [WpfFact]
     public void RichTextBoxSource_CaretInsideMisspelledWord_PresentsItOnlyOnce()
     {
-        var box = new RichTextBox();
+        var box = new RichTextBox { Language = XmlLanguage.GetLanguage("en-US") };
         box.SpellCheck.IsEnabled = true;
         box.Document.Blocks.Clear();
         var run = new Run("recieve and pacakge");

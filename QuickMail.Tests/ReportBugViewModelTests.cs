@@ -10,7 +10,7 @@ namespace QuickMail.Tests;
 
 sealed class FakeBugReportService : IBugReportService
 {
-    public BugReportResult NextResult = BugReportResult.Succeeded("https://github.com/kellylford/QuickMail/issues/1");
+    public BugReportResult NextResult = BugReportResult.Succeeded("https://github.com/DinamicaTech/QuickMail/issues/1");
     public BugReportModel? LastSubmitted;
 
     public Task<BugReportResult> SubmitAsync(BugReportModel report, CancellationToken cancellationToken = default)
@@ -20,20 +20,37 @@ sealed class FakeBugReportService : IBugReportService
     }
 
     public string BuildFallbackUrl(BugReportModel report) =>
-        $"https://github.com/kellylford/QuickMail/issues/new?title={report.Summary}";
+        $"https://github.com/DinamicaTech/QuickMail/issues/new?title={report.Summary}";
 
     public string BuildReportText(BugReportModel report) => $"BODY:{report.WhatHappened}";
+}
+
+sealed class FakeReportClipboardService : IClipboardService
+{
+    public int SetTextCalls { get; private set; }
+    public string Text { get; private set; } = string.Empty;
+
+    public bool SetText(string text)
+    {
+        SetTextCalls++;
+        Text = text;
+        return true;
+    }
+
+    public string GetText() => Text;
 }
 
 // WpfTests collection: serialize with the other WPF/STA tests so no two STA window-owning
 // threads run concurrently (issue #211).
 [Collection("WpfTests")]
-public class ReportBugViewModelTests
+public class ReportBugViewModelTests : WpfTestBase
 {
-    private static ReportBugViewModel Make(out FakeBugReportService service)
+    private static ReportBugViewModel Make(
+        out FakeBugReportService service,
+        IClipboardService? clipboard = null)
     {
         service = new FakeBugReportService();
-        return new ReportBugViewModel(service);
+        return new ReportBugViewModel(service, clipboard: clipboard);
     }
 
     [Fact]
@@ -55,7 +72,7 @@ public class ReportBugViewModelTests
         var vm = Make(out var service);
         vm.Summary = "Something broke";
         vm.WhatHappened = "It broke.";
-        service.NextResult = BugReportResult.Succeeded("https://github.com/kellylford/QuickMail/issues/42");
+        service.NextResult = BugReportResult.Succeeded("https://github.com/DinamicaTech/QuickMail/issues/42");
 
         var succeeded = false;
         vm.SendSucceeded += (_, _) => succeeded = true;
@@ -64,7 +81,7 @@ public class ReportBugViewModelTests
 
         Assert.True(vm.IsSent);
         Assert.False(vm.IsSending);
-        Assert.Equal("https://github.com/kellylford/QuickMail/issues/42", vm.IssueUrl);
+        Assert.Equal("https://github.com/DinamicaTech/QuickMail/issues/42", vm.IssueUrl);
         Assert.True(succeeded);
         Assert.Equal("Close", vm.CancelButtonLabel);
     }
@@ -104,15 +121,15 @@ public class ReportBugViewModelTests
     // test run (see ExternalUriPolicyTests, which for the same reason only tests blocked
     // schemes, never an allowed one). The blank-summary guard below is safe to test because it
     // returns before either the clipboard or ExternalUriPolicy is touched.
-    [StaFact]
+    [Fact]
     public void CopyAndOpen_BlankSummary_DoesNotCopyOrOpen()
     {
-        var vm = Make(out var service);
-        Clipboard.SetText("unchanged");
+        var clipboard = new FakeReportClipboardService();
+        var vm = Make(out _, clipboard);
 
         vm.CopyAndOpenCommand.Execute(null);
 
-        Assert.Equal("unchanged", Clipboard.GetText());
+        Assert.Equal(0, clipboard.SetTextCalls);
     }
 
     [Fact]

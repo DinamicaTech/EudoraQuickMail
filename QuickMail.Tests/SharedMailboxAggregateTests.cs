@@ -111,15 +111,14 @@ public class SharedMailboxAggregateTests
     }
 
     [Fact]
-    public async Task SharedAccount_HasOwnTopLevelTreeNode_WithSharedAccessibleName()
+    public async Task SharedAccount_DoesNotCreateAParallelTopLevelTree()
     {
-        // PR 1 reality: a shared account has no backend access yet, so it renders as a placeholder
-        // top-level node (no folders) — which must still carry the account id and the shared qualifier.
+        // The unified physical tree deliberately avoids rendering one parallel root per account.
+        // Shared-account ownership remains metadata and must not recreate the old account tree.
         var vm = await MakeVmAsync([Shared(SharedId, ParentId, "Support")], new());
 
         var node = vm.FolderTree.FirstOrDefault(n => n.IsHeader && n.AccountId == SharedId);
-        Assert.NotNull(node);
-        Assert.True(node!.IsSharedAccount);
-        Assert.Equal("Support, shared mailbox", node.AutomationName);
+        Assert.Null(node);
+        Assert.True(vm.IsSharedAccountId(SharedId));
     }
 }

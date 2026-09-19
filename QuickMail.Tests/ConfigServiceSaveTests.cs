@@ -333,6 +333,22 @@ public class ConfigServiceSaveTests
         Assert.Equal(expected, reloaded.MailSyncPollMinutes);
     }
 
+    [Theory]
+    [InlineData(0, 0)]
+    [InlineData(30, 30)]
+    [InlineData(-1, 0)]
+    [InlineData(999, 600)]
+    public void DelaySendingMessagesSeconds_RoundTripsAndIsClamped(int written, int expected)
+    {
+        var profile = MakeTempProfile();
+        var service = new ConfigService(profile);
+        var config = service.Load();
+        config.DelaySendingMessagesSeconds = written;
+        service.Save(config);
+
+        Assert.Equal(expected, new ConfigService(profile).Load().DelaySendingMessagesSeconds);
+    }
+
 
     [Fact]
     public void SaveThenLoad_RoundTripsReadAsPlainText()

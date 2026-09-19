@@ -16,9 +16,9 @@ public class UpdateCheckService : IUpdateCheckService, IDisposable
     private const string StandaloneMarkerFile = "quickmail-standalone-install";
     // Single source of truth for the project location — VelopackRuntime and MainViewModel
     // build their URLs from these rather than repeating the literal.
-    public const string RepoUrl = "https://github.com/kellylford/QuickMail";
+    public const string RepoUrl = "https://github.com/DinamicaTech/QuickMail";
     public const string ReleasesPageUrl = $"{RepoUrl}/releases";
-    private const string ApiUrl = "https://api.github.com/repos/kellylford/QuickMail/releases/latest";
+    private const string ApiUrl = "https://api.github.com/repos/DinamicaTech/QuickMail/releases/latest";
 
     /// <summary>The release-notes page for a specific version — the "what's new" link.</summary>
     public static string ReleaseTagUrl(string version) => $"{ReleasesPageUrl}/tag/v{version}";

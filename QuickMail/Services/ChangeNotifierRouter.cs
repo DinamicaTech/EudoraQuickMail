@@ -23,10 +23,16 @@ namespace QuickMail.Services;
 public sealed class ChangeNotifierRouter : IChangeNotifier, IDisposable
 {
     private readonly IReadOnlyList<IChangeNotifier> _notifiers;
+    private readonly MailActivityPolicyService? _activity;
+    private IReadOnlyList<AccountModel> _accounts = [];
+    private CancellationToken _watchToken;
 
-    public ChangeNotifierRouter(IEnumerable<IChangeNotifier> notifiers)
+    public ChangeNotifierRouter(IEnumerable<IChangeNotifier> notifiers,
+        MailActivityPolicyService? activity = null)
     {
         _notifiers = notifiers.ToList();
+        _activity = activity;
+        if (_activity != null) _activity.Changed += OnActivityChanged;
         foreach (var n in _notifiers)
         {
             n.InboxNewMailDetected += OnInboxNewMail;
@@ -45,6 +51,9 @@ public sealed class ChangeNotifierRouter : IChangeNotifier, IDisposable
 
     public void StartWatchers(IReadOnlyList<AccountModel> accounts, CancellationToken ct = default)
     {
+        _accounts = accounts.ToList();
+        _watchToken = ct;
+        if (_activity is { CanReceive: false }) return;
         // Fan the full list out to each notifier; every notifier filters to the accounts it owns.
         foreach (var n in _notifiers)
             n.StartWatchers(accounts, ct);
@@ -56,8 +65,16 @@ public sealed class ChangeNotifierRouter : IChangeNotifier, IDisposable
             n.StopWatchers();
     }
 
+    private void OnActivityChanged()
+    {
+        StopWatchers();
+        if (_activity?.CanReceive == true && _accounts.Count > 0 && !_watchToken.IsCancellationRequested)
+            foreach (var notifier in _notifiers) notifier.StartWatchers(_accounts, _watchToken);
+    }
+
     public void Dispose()
     {
+        if (_activity != null) _activity.Changed -= OnActivityChanged;
         foreach (var n in _notifiers)
         {
             n.StopWatchers(); // tear down watcher tasks before severing the event chain

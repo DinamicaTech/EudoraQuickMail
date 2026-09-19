@@ -20,14 +20,15 @@ namespace QuickMail.Tests;
 /// nothing — and an over-broad trigger would strip real folders of the menu that is their only
 /// mouse path to Move, Copy, and Set as Archive.
 /// </summary>
-public class CalendarContextMenuTests
+[Collection("WpfTests")]
+public class CalendarContextMenuTests : WpfTestBase
 {
     private static void EnsureThemedApplication()
     {
         lock (typeof(Application))
         {
             if (Application.Current == null)
-                new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
+                WpfTestApplication.EnsureStarted();
         }
 
         var app = Application.Current!;
@@ -74,7 +75,7 @@ public class CalendarContextMenuTests
         return item.ContextMenu;
     }
 
-    [StaFact]
+    [WpfFact]
     public void CalendarNodesGetCalendarActions_AndMailFoldersKeepFolderActions()
     {
         EnsureThemedApplication();
@@ -119,7 +120,7 @@ public class CalendarContextMenuTests
     /// Both calendar actions must be on the menu — the context menu is the primary entry point, and
     /// a user who set a default with no way to unset it is worse off than before.
     /// </summary>
-    [StaFact]
+    [WpfFact]
     public void CalendarMenuOffersSetAndClear_WithShortAccessibleNames()
     {
         EnsureThemedApplication();

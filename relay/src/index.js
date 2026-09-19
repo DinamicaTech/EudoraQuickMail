@@ -14,7 +14,7 @@
  * See issue #501.
  */
 
-const REPO_OWNER = 'kellylford';
+const REPO_OWNER = 'DinamicaTech';
 const REPO_NAME = 'QuickMail';
 const USER_AGENT = 'QuickMail-BugReport-Relay';
 const ISSUE_LABELS = ['bug', 'user-reported'];

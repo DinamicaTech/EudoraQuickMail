@@ -2,6 +2,7 @@ using System;
 using System.Linq;
 using System.Threading.Tasks;
 using QuickMail.Models;
+using QuickMail.Services;
 using QuickMail.ViewModels;
 using Xunit;
 
@@ -153,6 +154,117 @@ public class ComposeViewModelSendFeedbackTests
     }
 
     [Fact]
+    public async Task ProductionSend_PersistsToOutgoingQueueAndClosesWithoutCallingTransport()
+    {
+        var smtp = new StubSmtpService();
+        var queue = new RecordingOutgoingQueue();
+        var vm = new ComposeViewModel(smtp, new StubAccountService(), new StubCredentialService(),
+            new RecordingMailService(), new StubTemplateService(), outgoingQueue: queue);
+        var status = StatusAnnouncementRecorder.Watch(vm);
+        vm.SenderAccount = Account();
+        vm.To = "someone@example.com";
+        vm.Subject = "queued message";
+        var closed = false;
+        vm.CloseRequested += () => closed = true;
+
+        await vm.SendCommand.ExecuteAsync(null);
+
+        Assert.Empty(smtp.Sent);
+        Assert.Equal("queued message", Assert.Single(queue.Immediate).Message.Subject);
+        Assert.Equal(("Message queued for sending.", AnnouncementCategory.Result), status.Last);
+        Assert.True(vm.IsSent);
+        Assert.True(closed);
+    }
+
+    [Fact]
+    public async Task ConfiguredSendDelay_QueuesForTheFutureAndOffersUndo()
+    {
+        var smtp = new StubSmtpService();
+        var queue = new RecordingOutgoingQueue();
+        var config = new StubConfigService();
+        config.Save(new ConfigModel { DelaySendingMessagesSeconds = 30 });
+        var vm = new ComposeViewModel(smtp, new StubAccountService(), new StubCredentialService(),
+            new RecordingMailService(), new StubTemplateService(), outgoingQueue: queue,
+            configService: config);
+        vm.SenderAccount = Account();
+        vm.To = "someone@example.com";
+        vm.Subject = "undo me";
+        (Guid Id, string Subject, DateTimeOffset Deadline)? undo = null;
+        vm.UndoSendAvailable += (id, subject, deadline) => undo = (id, subject, deadline);
+        var before = DateTimeOffset.UtcNow;
+
+        await vm.SendCommand.ExecuteAsync(null);
+
+        Assert.Empty(smtp.Sent);
+        var queued = Assert.Single(queue.Immediate);
+        Assert.NotNull(queued.NotBeforeUtc);
+        Assert.InRange(queued.NotBeforeUtc!.Value, before.AddSeconds(29), before.AddSeconds(32));
+        Assert.NotNull(undo);
+        Assert.Equal(queued.Id, undo!.Value.Id);
+        Assert.Equal("undo me", undo.Value.Subject);
+        Assert.Contains("30 seconds", vm.StatusText);
+    }
+
+    [Fact]
+    public async Task ZeroSendDelay_BypassesTheQueueAndUsesSmtpDirectly()
+    {
+        var smtp = new StubSmtpService();
+        var queue = new RecordingOutgoingQueue();
+        var config = new StubConfigService();
+        config.Save(new ConfigModel { DelaySendingMessagesSeconds = 0 });
+        var vm = new ComposeViewModel(smtp, new StubAccountService(), new StubCredentialService(),
+            new RecordingMailService(), new StubTemplateService(), outgoingQueue: queue,
+            configService: config);
+        vm.SenderAccount = Account();
+        vm.To = "someone@example.com";
+
+        await vm.SendCommand.ExecuteAsync(null);
+
+        Assert.Empty(queue.Immediate);
+        Assert.Single(smtp.Sent);
+        Assert.Equal("Message sent.", vm.StatusText);
+    }
+
+    [Fact]
+    public async Task SendImmediately_BypassesANonZeroConfiguredDelay()
+    {
+        var smtp = new StubSmtpService();
+        var queue = new RecordingOutgoingQueue();
+        var config = new StubConfigService();
+        config.Save(new ConfigModel { DelaySendingMessagesSeconds = 30 });
+        var vm = new ComposeViewModel(smtp, new StubAccountService(), new StubCredentialService(),
+            new RecordingMailService(), new StubTemplateService(), outgoingQueue: queue,
+            configService: config);
+        vm.SenderAccount = Account();
+        vm.To = "someone@example.com";
+
+        await vm.SendImmediatelyCommand.ExecuteAsync(null);
+
+        Assert.Empty(queue.Immediate);
+        Assert.Single(smtp.Sent);
+        Assert.Equal("Message sent.", vm.StatusText);
+    }
+
+    [Fact]
+    public async Task SchedulingForAPreviousDay_ShowsTheEudoraTimeMachineMessage()
+    {
+        var queue = new RecordingOutgoingQueue();
+        var vm = new ComposeViewModel(new StubSmtpService(), new StubAccountService(),
+            new StubCredentialService(), new RecordingMailService(), new StubTemplateService(),
+            outgoingQueue: queue);
+        vm.SenderAccount = Account();
+        vm.To = "someone@example.com";
+        vm.PromptScheduleTimeRequested = _ => DateTime.Today.AddDays(-1).AddHours(12);
+        string? warning = null;
+        vm.WarningDialogRequested += (message, _) => warning = message;
+
+        await vm.ScheduleSendCommand.ExecuteAsync(null);
+
+        Assert.Contains("time machine", warning, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("yesterday", vm.StatusText, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task AttachmentsAbove25Mb_WarnButDoNotPreventSending()
     {
         var (vm, smtp, _) = MakeVm();
@@ -264,5 +376,27 @@ public class ComposeViewModelSendFeedbackTests
 
         Assert.Contains("Save draft failed", vm.StatusText);
         Assert.Equal(AnnouncementCategory.Result, status.Last.Category);
+    }
+
+    private sealed class RecordingOutgoingQueue : IOutgoingMailQueue
+    {
+        public List<(Guid Id, ComposeModel Message, Guid? ReplacedId, DateTimeOffset? NotBeforeUtc)> Immediate { get; } = [];
+
+        public Task<Guid> QueueImmediateAsync(ComposeModel message, Guid? replaceScheduledId = null,
+            DateTimeOffset? notBeforeUtc = null, CancellationToken ct = default)
+        {
+            var id = replaceScheduledId ?? Guid.NewGuid();
+            Immediate.Add((id, message, replaceScheduledId, notBeforeUtc));
+            return Task.FromResult(id);
+        }
+
+        public Task<Guid> ScheduleAsync(ComposeModel message, DateTimeOffset sendAtUtc,
+            CancellationToken ct = default) => Task.FromResult(Guid.NewGuid());
+
+        public Task ReplaceAsync(Guid id, ComposeModel message, DateTimeOffset sendAtUtc,
+            CancellationToken ct = default) => Task.CompletedTask;
+
+        public Task<ComposeModel?> UndoSendAsync(Guid id, CancellationToken ct = default) =>
+            Task.FromResult<ComposeModel?>(null);
     }
 }

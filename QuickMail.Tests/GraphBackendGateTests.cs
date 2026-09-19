@@ -28,21 +28,22 @@ public class AddAccountViewModelGateTests
     }
 
     [Fact]
-    public void GateOff_OffersOnlyImap()
+    public void GateOff_OffersImapAndPop3()
     {
         var vm = MakeMicrosoft(graphEnabled: false);
-        Assert.Single(vm.AvailableBackends);
-        Assert.Equal(BackendKind.ImapSmtp, vm.AvailableBackends[0].Kind);
-        Assert.False(vm.ShowConnectionMethod);
+        Assert.Equal(2, vm.AvailableBackends.Count);
+        Assert.Contains(vm.AvailableBackends, b => b.Kind == BackendKind.ImapSmtp);
+        Assert.Contains(vm.AvailableBackends, b => b.Kind == BackendKind.Pop3Smtp);
+        Assert.True(vm.ShowConnectionMethod);
         Assert.Equal(BackendKind.ImapSmtp, vm.BackendKind);
         Assert.True(vm.IsImapBackend);
     }
 
     [Fact]
-    public void GateOn_OffersBothBackends()
+    public void GateOn_OffersImapPop3AndGraph()
     {
         var vm = MakeMicrosoft(graphEnabled: true);
-        Assert.Equal(2, vm.AvailableBackends.Count);
+        Assert.Equal(3, vm.AvailableBackends.Count);
         Assert.Contains(vm.AvailableBackends, b => b.Kind == BackendKind.MicrosoftGraph);
         Assert.True(vm.ShowConnectionMethod);
         // Default selection is still IMAP — picking the Microsoft provider must not silently move
@@ -51,16 +52,16 @@ public class AddAccountViewModelGateTests
     }
 
     [Fact]
-    public void ConnectionMethodIsHiddenForNonMicrosoftProviders()
+    public void ConnectionMethodRemainsVisibleForPop3ChoiceOnOtherProviders()
     {
         var vm = Make(graphEnabled: true);
         var catalog = new ProviderCatalog();
 
         vm.SelectedProvider = catalog.ById(ProviderCatalog.GmailId);
-        Assert.False(vm.ShowConnectionMethod);
+        Assert.True(vm.ShowConnectionMethod);
 
         vm.SelectedProvider = catalog.Other;
-        Assert.False(vm.ShowConnectionMethod);
+        Assert.True(vm.ShowConnectionMethod);
     }
 
     [Fact]

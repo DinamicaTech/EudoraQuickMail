@@ -67,7 +67,8 @@ public class ClientRulesOnGraphTests : IDisposable
         public Task<List<MailMessageSummary>> GetMessagesSinceAsync(Guid a, string f, string sinceId, int count, CancellationToken ct = default) => Task.FromResult(new List<MailMessageSummary>());
         public Task<MailMessageDetail> GetMessageDetailAsync(Guid a, string f, string id, CancellationToken ct = default) => Task.FromResult(new MailMessageDetail());
         public Task<MailMessageDetail> PrefetchMessageDetailAsync(Guid a, string f, string id, CancellationToken ct = default) => Task.FromResult(new MailMessageDetail());
-        public Task MarkReadBatchAsync(Guid a, string f, IList<string> ids, CancellationToken ct = default) => Task.CompletedTask;
+        public Task MarkReadBatchAsync(Guid a, string f, IList<string> ids, CancellationToken ct = default)
+        { Actions.Add(("MarkRead", a, f, null, [.. ids])); return Task.CompletedTask; }
         public Task SetMessageFlaggedAsync(Guid a, string f, string id, bool flagged, CancellationToken ct = default) => Task.CompletedTask;
         public Task MoveToTrashAsync(Guid a, string f, string id, CancellationToken ct = default) => Task.CompletedTask;
         public Task PermanentlyDeleteBatchAsync(Guid a, string f, IList<string> ids, CancellationToken ct = default) => Task.CompletedTask;
@@ -131,6 +132,7 @@ public class ClientRulesOnGraphTests : IDisposable
         SubjectContains = "invoice",
         Action = RuleAction.MoveToFolder,
         TargetFolder = "Archive",
+        AlsoMarkAsRead = false,
     };
 
     // ── The verification ─────────────────────────────────────────────────────────

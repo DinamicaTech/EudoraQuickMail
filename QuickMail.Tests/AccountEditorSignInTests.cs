@@ -18,7 +18,7 @@ public class AccountEditorSignInTests
     private sealed class FakeOAuthService : IOAuthService
     {
         public string ReturnUsername = string.Empty;
-        public bool ReturnPersonal;
+        public bool ReturnPersonal = false;
         public CancellationToken LastSignInToken = new(canceled: true); // sentinel: a real call must overwrite it
 
         private OAuthResult Capture(CancellationToken ct)

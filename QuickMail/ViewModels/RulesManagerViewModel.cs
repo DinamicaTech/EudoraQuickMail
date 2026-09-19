@@ -64,6 +64,12 @@ public partial class RulesManagerViewModel : ObservableObject
     /// <summary>Raised to apply only the edited rule to the folder active when this window opened.</summary>
     public event Func<MailRule, Task<int>>? ApplyToCurrentFolderRequested;
 
+    /// <summary>Raised to simulate the selected rule without changing messages or folders.</summary>
+    public event Func<MailRule, Task<RulePreviewResult>>? PreviewRuleRequested;
+
+    /// <summary>Raised after a simulation so the View can display the detailed result.</summary>
+    public event Action<RulePreviewResult>? PreviewReady;
+
     // ── Constructor ─────────────────────────────────────────────────────────
 
     public RulesManagerViewModel(
@@ -619,6 +625,27 @@ public partial class RulesManagerViewModel : ObservableObject
             ? $"Rule would match 0 of {messages.Count} selected messages."
             : $"Rule would match {matched.Count} of {messages.Count} selected messages.";
         Announce(StatusText, AnnouncementCategory.Result);
+    }
+
+    [RelayCommand(CanExecute = nameof(HasSelectedRule))]
+    private async Task PreviewRuleAsync()
+    {
+        if (SelectedRule == null || PreviewRuleRequested == null || !Validate(SelectedRule)) return;
+
+        StatusText = $"Simulating rule against {CurrentFolderName}…";
+        Announce(StatusText, AnnouncementCategory.Status);
+        try
+        {
+            var result = await PreviewRuleRequested.Invoke(SelectedRule);
+            StatusText = $"Preview: {result.MatchCount:N0} of {result.ScannedCount:N0} messages would match.";
+            Announce(StatusText, AnnouncementCategory.Result);
+            PreviewReady?.Invoke(result);
+        }
+        catch (Exception ex)
+        {
+            StatusText = $"Couldn't preview rule: {ex.Message}";
+            Announce(StatusText, AnnouncementCategory.Result);
+        }
     }
 
     [RelayCommand]

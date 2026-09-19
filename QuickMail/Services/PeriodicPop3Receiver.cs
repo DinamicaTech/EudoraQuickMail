@@ -9,17 +9,19 @@ public sealed class PeriodicPop3Receiver : IDisposable
     private readonly IAccountService _accounts;
     private readonly IPop3ReceiveService _receiver;
     private readonly IRuleService? _rules;
+    private readonly MailActivityPolicyService? _activity;
     private readonly Timer _timer;
     private readonly CancellationTokenSource _stop = new();
     private int _running;
     private int _disposed;
 
     public PeriodicPop3Receiver(IAccountService accounts, IPop3ReceiveService receiver,
-        IRuleService? rules = null, TimeSpan? interval = null)
+        IRuleService? rules = null, TimeSpan? interval = null, MailActivityPolicyService? activity = null)
     {
         _accounts = accounts;
         _receiver = receiver;
         _rules = rules;
+        _activity = activity;
         var cadence = interval ?? TimeSpan.FromMinutes(5);
         _timer = new Timer(_ => _ = SweepAsync(), null, TimeSpan.FromSeconds(2), cadence);
     }
@@ -30,6 +32,7 @@ public sealed class PeriodicPop3Receiver : IDisposable
 
     public async Task SweepAsync(bool includeAccountsWithAutomaticCheckDisabled = false)
     {
+        if (_activity is { CanReceive: false }) return;
         if (Interlocked.Exchange(ref _running, 1) != 0) return;
         try
         {

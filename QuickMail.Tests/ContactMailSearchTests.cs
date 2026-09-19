@@ -71,6 +71,19 @@ public class ContactMailSearchTests
     }
 
     [Fact]
+    public async Task ShowContactMail_Both_ReturnsMailSentByOrAddressedToTheContact()
+    {
+        var vm = MakeVm(Corpus);
+        await vm.InitialLoadAsync();
+
+        await vm.ShowContactMailAsync("bob@example.com", MainViewModel.ContactMailDirection.Both, "Bob Baker");
+
+        Assert.Equal(new[] { "4", "2", "1" }, vm.Messages.Select(m => m.MessageId).ToArray());
+        Assert.Equal("History with Bob Baker", vm.SelectedFolder?.DisplayName);
+        Assert.Contains("3 messages with bob@example.com", vm.StatusText, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task ShowContactMail_UsesContactNameInTheFolderTitle()
     {
         var vm = MakeVm(Corpus);

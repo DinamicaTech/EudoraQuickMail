@@ -47,6 +47,9 @@ public partial class App : Application
     /// from a normal launch too.
     /// </summary>
     public ProfileContext? Profile { get; private set; }
+    public MailActivityPolicyService? MailActivityPolicy { get; private set; }
+    public SnoozeService? Snooze { get; private set; }
+    public UnsubscribePreferenceService? UnsubscribePreferences { get; private set; }
 
     // Held so OnExit can dispose them.
     private GraphSendMailService? _graphSendMail;
@@ -72,6 +75,7 @@ public partial class App : Application
 
     public async Task<IReadOnlyList<MailOperationFailure>> CheckMailNowAsync(Action<string>? progress = null)
     {
+        MailActivityPolicy?.GoOnline();
         var failures = new List<MailOperationFailure>();
         progress?.Invoke("Checking incoming mail…");
         if (_pop3Receiver != null)
@@ -403,6 +407,9 @@ public partial class App : Application
             using (PerformanceLogService.Measure("Startup/splash: initialize local database"))
                 if (!onlineMode)
                     localStore.Initialize();
+            MailActivityPolicy = new MailActivityPolicyService(profile);
+            Snooze = onlineMode ? null : new SnoozeService(localStore);
+            UnsubscribePreferences = new UnsubscribePreferenceService(profile);
             splash?.SetStatus("Loading accounts and application settings…");
             // Provider presets + settings discovery for the Add Account dialog. The catalog is a
             // pure lookup table; the discovery service owns an HttpClient, so it is disposed in OnExit.
@@ -449,7 +456,8 @@ public partial class App : Application
             // connection lifecycle. Graph uses delta polling, which needs the local store for its
             // delta cursor — hence wired after localStore. Each notifier filters to its own accounts.
             _graphNotifier  = new GraphChangeNotifier(graphBackend.Client, localStore, configService);
-            _changeNotifier = new ChangeNotifierRouter(new IChangeNotifier[] { imapBackend, _graphNotifier });
+            _changeNotifier = new ChangeNotifierRouter(
+                new IChangeNotifier[] { imapBackend, _graphNotifier }, MailActivityPolicy);
 
             // Load accounts once — after the store is initialized — and reuse the list for the VM.
             // Router registration runs via mainVm.RegisterAccountBackend (set below), which also
@@ -493,7 +501,7 @@ public partial class App : Application
             }
             splash?.SetStatus("Preparing folders, messages and search services…");
             if (!probeMode) ScheduledSender = new ScheduledSendService(profile, effectiveSmtp,
-                accountService, credentialService, localStore, effectiveMail);
+                accountService, credentialService, localStore, effectiveMail, MailActivityPolicy);
 
             // One-time immutable-id cache rebuild (#366): clear cached mail for Graph accounts so the
             // next sync repopulates with immutable ids (mutable and immutable ids must not be mixed).
@@ -562,11 +570,13 @@ public partial class App : Application
             var ruleService = new RuleService(effectiveMail, localStore, profile.ProfileDir, accountService);
             if (!probeMode)
                 _pop3Receiver = new PeriodicPop3Receiver(accountService,
-                    new Pop3ReceiveService(new MailKitPop3TransportFactory(), localStore, accountSecrets), ruleService);
+                    new Pop3ReceiveService(new MailKitPop3TransportFactory(), localStore, accountSecrets),
+                    ruleService, activity: MailActivityPolicy);
             // Server-side (Exchange/Graph) Inbox rules — read/manage a Graph account's messageRules.
             // Reuses the shared GraphClient (no own disposables), so no disposal wiring needed.
             var serverRuleService = new GraphServerRuleService(accountService, graphBackend.Client);
-            var syncService = new SyncService(effectiveMail, localStore, configService, ruleService, probeMode: probeMode);
+            var syncService = new SyncService(effectiveMail, localStore, configService, ruleService,
+                probeMode: probeMode, activity: MailActivityPolicy);
             // The one-time immutable-id wipe emptied these accounts' store, so their first re-sync would
             // read old mail as new and re-run rules over it on upgrade day. Baseline it (#366/N5).
             if (immutableIdRebuilt) syncService.SeedRebuildBaseline(rebuiltGraphAccountIds);
@@ -708,7 +718,7 @@ public partial class App : Application
             var graphCalendarSync = new GraphCalendarSyncService(accountService, localStore, graphBackend.Client,
                                                                  _googleCalendarClient,
                                                                  _calDavCalendarClient, credentialService);
-            var imapBodyBackfill = new ImapBodyBackfillService(effectiveMail, localStore);
+            var imapBodyBackfill = new ImapBodyBackfillService(effectiveMail, localStore, MailActivityPolicy);
 
             _updateCheckService = new UpdateCheckService(configService, ParseUpdateFeed(e.Args));
             _bugReportService   = new BugReportService(credentialService);
@@ -743,6 +753,12 @@ public partial class App : Application
             // ConnectionJournal.Enabled — so nothing records until the user opts in.
             mainVm.ApplyConnectionDiagnosticsSetting(startupCfg.ConnectionDiagnostics);
             mainVm.LoadAccountList(accounts);
+            if (Snooze != null)
+                Snooze.MessagesAwakened += awakened => Dispatcher.BeginInvoke(async () =>
+                {
+                    mainVm.StatusText = $"{awakened.Count:N0} snoozed {(awakened.Count == 1 ? "message has" : "messages have")} returned as new.";
+                    await mainVm.RefreshAfterLocalMutationAsync("wake-snoozed-messages");
+                });
             RecordStartupStage("construct services and main view model", $"accounts={accounts.Count}");
 
             if (_pop3Receiver is not null)
@@ -770,7 +786,7 @@ public partial class App : Application
                 });
             }
 
-            var mainWindow = new MainWindow(mainVm, effectiveSmtp, accountService, credentialService, effectiveMail, effectiveOAuth, commandRegistry, contactService, configService, localStore, viewService, ruleService, templateService, featureGate, flagService, customDictionary, themeService, _bugReportService, _notificationService, contactSyncService, graphCalendarSync, serverRuleService, providerCatalog, _autoDiscoverService, _truthProbe, rowLayoutService, watchService, profile);
+            var mainWindow = new MainWindow(mainVm, effectiveSmtp, accountService, credentialService, effectiveMail, effectiveOAuth, commandRegistry, contactService, configService, localStore, viewService, ruleService, templateService, featureGate, flagService, customDictionary, themeService, _bugReportService, _notificationService, contactSyncService, graphCalendarSync, serverRuleService, providerCatalog, _autoDiscoverService, _truthProbe, rowLayoutService, watchService, profile, ScheduledSender);
             RecordStartupStage("construct main window");
 
             if (_pop3Receiver is not null)
@@ -791,6 +807,32 @@ public partial class App : Application
                 };
                 ScheduledSender.SentMailChanged += accountId =>
                     mainWindow.Dispatcher.BeginInvoke(() => mainVm.RefreshSentAfterSendAsync(accountId));
+                ScheduledSender.ProgressChanged += message =>
+                    mainWindow.Dispatcher.BeginInvoke(() =>
+                    {
+                        mainVm.IsStatusHighlighted = true;
+                        mainVm.StatusText = message;
+                    });
+                ScheduledSender.OriginalMessageReplied += (accountId, folderName, messageId, internetMessageId) =>
+                    mainWindow.Dispatcher.BeginInvoke(() =>
+                    {
+                        foreach (var message in mainVm.Messages.Where(message => message.AccountId == accountId
+                                     && ((message.MessageId == messageId
+                                          && message.FolderName.Equals(folderName,
+                                              StringComparison.OrdinalIgnoreCase))
+                                         || (!string.IsNullOrWhiteSpace(internetMessageId)
+                                             && message.InternetMessageId.Equals(internetMessageId,
+                                                 StringComparison.OrdinalIgnoreCase)))))
+                            message.IsReplied = true;
+
+                        if (mainVm.MessageDetail is { } detail && detail.AccountId == accountId
+                            && ((detail.MessageId == messageId
+                                 && detail.FolderName.Equals(folderName, StringComparison.OrdinalIgnoreCase))
+                                || (!string.IsNullOrWhiteSpace(internetMessageId)
+                                    && detail.InternetMessageId.Equals(internetMessageId,
+                                        StringComparison.OrdinalIgnoreCase))))
+                            detail.IsReplied = true;
+                    });
             }
 
             if (splash is not null)
@@ -851,6 +893,7 @@ public partial class App : Application
         BeginShutdown();
         LogService.Log("Shutdown: App.OnExit disposing application services.");
         _pop3Receiver?.Dispose();
+        Snooze?.Dispose();
         ScheduledSender?.Dispose();
         _changeNotifier?.Dispose(); // stops all watchers (IDLE + Graph poll) + severs the event chain
         _graphNotifier?.Dispose();  // disposes the Graph poll CTS (StopWatchers already ran; idempotent)
@@ -869,6 +912,7 @@ public partial class App : Application
         _notificationService?.Dispose(); // unhooks the toast-activation static event
         _autoDiscoverService?.Dispose(); // releases the autoconfig HttpClient
         _truthProbe?.Dispose();     // cancels in-flight probes before releasing their token source
+        MailActivityPolicy?.Dispose();
         ScreenshotCapture?.Dispose(); // flushes any in-flight PNG save (best effort, bounded)
         LogService.Log("Shutdown: application services disposed.");
         base.OnExit(e);
@@ -972,6 +1016,7 @@ public partial class App : Application
         config.NotifyOnNewMail = true;
         config.AutoSaveDrafts = true;
         config.AutoSaveIntervalSeconds = 30;
+        config.DelaySendingMessagesSeconds = 30;
         config.DefaultComposeMode = Models.ComposeMode.Html;
         config.Windowing.ComposeOpenMode = Models.ComposeOpenMode.DockedTab;
         config.StartupFolder = "In";

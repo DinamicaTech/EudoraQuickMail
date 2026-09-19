@@ -267,6 +267,7 @@ public class UnifiedRulesViewModelTests
         vm.NewRuleFromTemplate(new MailRule
         {
             Name = "Rule for x@y.com", FromContains = "x@y.com", SubjectContains = "Invoice", AccountId = b,
+            UseFromCondition = true, UseSubjectCondition = true,
         });
 
         Assert.Equal(b, vm.SelectedAccount?.Id);            // switched to the message's account

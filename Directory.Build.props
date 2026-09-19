@@ -25,6 +25,10 @@
   -->
   <PropertyGroup>
     <DefaultItemExcludes>$(DefaultItemExcludes);bin/**;obj/**</DefaultItemExcludes>
+    <!-- CommunityToolkit.Mvvm 8.4 requires this Windows SDK reference level.
+         Pin it explicitly so .NET 8 builds are reproducible on local machines
+         and GitHub Actions instead of depending on whichever SDK patch is newest. -->
+    <WindowsSdkPackageVersion>10.0.17763.56</WindowsSdkPackageVersion>
   </PropertyGroup>
 
 </Project>

@@ -29,7 +29,7 @@ namespace QuickMail.Tests;
 // the concurrency that produces the intermittent HwndSubclass teardown crash and focus-
 // navigation flakes (issue #211).
 [Collection("WpfTests")]
-public class SelectorItemAccessibilityTests
+public class SelectorItemAccessibilityTests : WpfTestBase
 {
     /// <summary>
     /// MainWindow's item container styles use <c>BasedOn="{StaticResource {x:Type ListViewItem}}"</c>,
@@ -42,7 +42,7 @@ public class SelectorItemAccessibilityTests
         lock (typeof(Application))
         {
             if (Application.Current == null)
-                new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
+                WpfTestApplication.EnsureStarted();
         }
 
         var app = Application.Current!;
@@ -57,7 +57,7 @@ public class SelectorItemAccessibilityTests
 
     // End-to-end: the actual reported control. Reads the real UIA item peer names a
     // screen reader would speak — this is what the reviews never checked.
-    [StaFact]
+    [WpfFact]
     public void ThemeComboBox_ItemPeerNames_AreCleanDisplayNames()
     {
         var combo = new ComboBox
@@ -133,7 +133,10 @@ public class SelectorItemAccessibilityTests
         var cell = new MonthCell(new System.DateTime(2026, 7, 21), displayedMonth: 7, dayEvents:
             [new CalendarEvent { Summary = "A" }, new CalendarEvent { Summary = "B" }]);
         Assert.Equal(cell.AccessibleName, cell.ToString());
-        Assert.Contains("Tuesday July 21", cell.ToString());
+        Assert.Contains(
+            new System.DateTime(2026, 7, 21).ToString("dddd MMMM dd", System.Globalization.CultureInfo.CurrentCulture),
+            cell.ToString(),
+            StringComparison.CurrentCultureIgnoreCase);
         Assert.Contains("2 events", cell.ToString());
 
         var group = new GroupModel { Name = "Team" };
@@ -179,7 +182,7 @@ public class SelectorItemAccessibilityTests
     // End-to-end against the REAL RulesManagerWindow: what a screen reader actually speaks for a
     // rule row must be "name, account" (issue: account-in-row not announced). Reads the live
     // ListBoxItemAutomationPeer name — the ground truth, not the eyeballed template.
-    [StaFact]
+    [WpfFact]
     public void RulesManagerWindow_RuleRow_ItemPeerName_IncludesAccount()
     {
         var acctId = Guid.NewGuid();
@@ -218,7 +221,7 @@ public class SelectorItemAccessibilityTests
     // which is the HwndSubclass teardown crash this class's header warns about (#211). What
     // MainWindow contributes — that the setter is present on all six row styles — is covered
     // without a window by MessageRowStyles_AllCarryTheRowSpeechSetter below.
-    [StaFact]
+    [WpfFact]
     public void RowSpeech_PutsTheComposedStringOnTheRowContainer()
     {
         var msg = new MailMessageSummary
@@ -278,7 +281,7 @@ public class SelectorItemAccessibilityTests
     // Every message-list row style in MainWindow must carry the RowSpeech.Kind setter, with the
     // right kind. Constructing MainWindow (never showing it) is the same safe pattern XamlParseTests
     // uses; this is what catches a row style that was added, or edited, without its spoken name.
-    [StaFact]
+    [WpfFact]
     public void MessageRowStyles_AllCarryTheRowSpeechSetter()
     {
         EnsureThemedApplication();

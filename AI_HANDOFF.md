@@ -6,7 +6,7 @@
 - Last reviewed: 2026-09-07
 - Code snapshot audited: `codex/local-first-fork` at `3b2a1f6`
 - Fork base: upstream QuickMail commit `deb82e88aa80cdca9e2f087a345c727c9b3ab9f9`
-- Current product version: `0.8.62`
+- Current product version: `0.8.70`
 
 ## 1. Purpose
 
@@ -98,7 +98,9 @@ Before work, run `git rev-parse --show-toplevel` and require
 - Optional IMAP/manual synchronization integrated into the local model/search.
 - DPAPI-protected passwords and actionable connection/transport diagnostics.
 - Shared account roots and one canonical visible folder tree.
-- Draft, Scheduled, Sent/Out, Trash and Junk system folders; scheduled delivery.
+- Draft, Scheduled, Snooze, Sent/Out, Trash and Junk system folders; scheduled delivery.
+- Persistent Offline mode pauses send/receive, while timed Focus mode pauses receiving only;
+  Check Mail restores Online mode explicitly.
 - Fast bulk read/unread, flag, move, Trash and permanent-delete operations.
 
 ### 4.2 Eudora migration
@@ -120,6 +122,10 @@ Before work, run `git rev-parse --show-toplevel` and require
 - SHA-256 extraction reuse, repair/rebuild tools and detailed timing log.
 - Persistent last-ten quick-search history.
 - Explicit Search Everywhere action over all active non-shared accounts, independent of selection.
+- Saving a view while a quick search is active retains the query and folder/global scope; selecting
+  that view reruns it as a smart folder. **Save as Virtual Folder…** in the active search bar is the
+  explicit opt-in entry point; ad-hoc searches never create views automatically. Existing views
+  without a query remain unchanged.
 - `Tools > Analyze Folder`: top 20 sender domains and double-click filtered navigation.
 
 ### 4.4 Folders and messages
@@ -132,6 +138,13 @@ Before work, run `git rev-parse --show-toplevel` and require
   sort/column/preview layout per screen resolution.
 - Detached second-monitor preview, source/browser view, link-domain warning and richer
   attachment actions.
+- HTTP unsubscribe links are detected from `List-Unsubscribe` and message content. The reading pane
+  opens them only after showing the exact URL, in an ephemeral WebView2 profile with permissions,
+  downloads, autofill and password saving disabled. Maintain subscription suppresses the controls
+  persistently for that exact sender address.
+- Message context export supports one or many messages as EML/HTML and copies original raw headers;
+  EML reconstruction includes attachments that can be materialized locally or downloaded. Export
+  and View Source are available from both the message list and reading-pane contextual menus.
 - Restricted local Subject/body edit, Send Again, Reply/Reply All/Forward.
 
 ### 4.5 Rules and rapid classification
@@ -140,6 +153,8 @@ Before work, run `git rev-parse --show-toplevel` and require
 - From, To, optional Cc/Bcc, Subject, Body and attachment conditions.
 - Move/read/unread/delete and move-plus-mark-read actions.
 - Compatible-rule view, rule-definition search, cleanup and apply-to-folder.
+- Read-only rule preview uses the real matcher over current-folder scope (plus Out when requested),
+  reports action/counts and samples up to 20 matches before any mutation.
 - Keyboard/drag quick-filter workflows and optional manual Out-mailbox classification.
 - Optional background destination tab showing where the last filtered message went.
 
@@ -148,8 +163,12 @@ Before work, run `git rev-parse --show-toplevel` and require
 - HTML default; docked-tab or floating compose, with docked preferred.
 - HugeRTE formatting, links, lists, colours, fonts, charmap, emoji, preview and word count.
 - Editable HTML reply/forward quote, account HTML signatures and recipient autocomplete.
-- Draft autosave/recovery, templates and scheduled delivery.
+- Draft autosave/recovery, newline-preserving templates and scheduled delivery. Compose uses a
+  split Send control: ordinary Send is the default; its menu exposes Send later, Save as Draft and
+  Send immediately, which explicitly bypasses the configured Undo Send delay.
 - Spanish/Catalan/English spelling and one-shot language detection.
+- Send and Send Later warn when the newly written text mentions an attachment in English, Spanish
+  or Catalan but no file is present; quoted message history is ignored to avoid false positives.
 - Selected-text Argos/DeepL translation and local LanguageTool grammar checking.
 
 ### 4.7 Calendar, shell and maintenance
@@ -157,10 +176,13 @@ Before work, run `git rev-parse --show-toplevel` and require
 - Google Calendar OAuth, FullCalendar views, day sync and direct event actions.
 - Incoming ICS recognition for POP3/IMAP/Graph, with RSVP cards for meeting requests and explicit
   Add to Calendar for standalone publications; the original `.ics` remains an attachment.
-- Compact Today agenda with calendar selector.
+- Compact Today agenda with calendar selector and green appointment pills.
 - Separate taskbar notification/tray-icon settings and custom received icon.
 - Early splash, single-instance recovery, shutdown hardening and structured performance log.
 - Search/index/count maintenance, orphan attachment manager and safe embedded de-duplication.
+- Tools > Account Health gives a non-interactive snapshot of server configuration, credential or
+  silent OAuth availability, last session sync and Scheduled queue/error state for all accounts;
+  columns fit the viewport and accounts needing attention use the error background.
 - Windows default-mail registration candidate and installer guidance.
 
 ## 5. Non-negotiable invariants
@@ -201,6 +223,8 @@ anywhere under `Program Files` is rejected because normal users need write acces
 | `templates.json` | Compose templates |
 | `views.json`, `folderviews.json` | View settings |
 | `quickmail.log`, `performance.log` | Functional and timing diagnostics |
+| `mail-activity.json` | Persistent Online/Offline/Focus state and Focus expiry |
+| `unsubscribe-preferences.json` | Sender addresses whose subscription controls are suppressed |
 | `eudora-import.log` | Import detail/errors |
 | `Attachments/...` | Materialized received/embedded/migrated files |
 
@@ -225,7 +249,7 @@ physical names remain server-owned aliases; only newly created remote names are 
 bindings are also evidence that an active account belongs in a root view when an older
 `accounts.json` is missing `FolderTreeRootId`.
 
-System folders sort first: **In, Draft, Scheduled, Out/Sent, Trash, Junk**. Root-level
+System folders sort first: **In, Draft, Scheduled, Snooze, Out/Sent, Trash, Junk**. Root-level
 `Inbox`/`INBOX` bind into visible `In`. `_In`, `_Out`, `_Trash` are ordinary historical
 folders, not hidden aliases.
 
@@ -238,8 +262,19 @@ folders, not hidden aliases.
 - Receive means MIME parsed, rows committed and local visibility established before server
   deletion is attempted.
 - Sent mail is local outgoing mail with delivery status.
-- A scheduled SMTP failure remains in Scheduled with its error/attempt state and is retried by a
-  later dispatcher pass; it never becomes Draft merely because the Internet connection was down.
+- Normal **Send** obeys `DelaySendingMessagesSeconds` (0–600; default 30). Zero bypasses Scheduled
+  and calls the transport directly. A positive value first persists the complete message in the
+  same durable Scheduled outbox used by Send Later, then closes the editor and displays a
+  highlighted `Undo · subject` action beside Forward until the delay expires. Undo and dispatcher
+  claim the item under the same queue lock: Undo either wins and restores the latest content to
+  Draft, or SMTP has already claimed it and cancellation is rejected. Dismissing the banner only
+  hides it. Once claimed, the banner disappears and cancellation is not offered. SMTP, Sent-copy save,
+  replied-marker persistence and source-draft cleanup run in the background; another message can be
+  queued while transport is busy. The queue records SMTP acceptance before housekeeping so a crash
+  cannot submit an already accepted message twice on restart.
+- A failed send remains visible in Scheduled with its error/attempt state; transient failures use
+  bounded backoff, while credential/OAuth/certificate/configuration failures wait for an explicit
+  retry. It never becomes Draft merely because the Internet connection was down.
 - Successful normal and scheduled sends refresh the real remote/local Sent source immediately.
   `ExcludeFromAllMail` is only a view flag and must never suppress synchronization.
 - Errors name account/server and likely remedies: password, certificate, protocol or port.
@@ -374,8 +409,10 @@ When opened for a message, show compatible rules and leave `See all filters` unc
 none match, show all and check it. Search Filter matches entered rule-definition fields,
 not unrelated populated fields. Caption shows the listed count.
 
-Commands: Test, Save, Cancel, Run on Existing Mail, Save and Apply to current folder, and
-Cleanup. Save closes; Cancel discards. Cleanup removes move rules with missing/undefined
+Commands: Test selected messages, Preview current-folder effects, Save, Cancel, Run on Existing
+Mail, Save and Apply to current folder, and Cleanup. Preview never writes or saves the edited rule;
+it shows scanned/matched/direction/mark-read counts and the newest 20 matches. Save closes; Cancel
+discards. Cleanup removes move rules with missing/undefined
 stable targets and separately offers removal of imported rules pointing to In.
 
 ### 10.3 Keyboard and drag workflows
@@ -475,7 +512,9 @@ From replaces the old signature without deleting user text or stacking signature
 writable space/`<br>` above signature.
 
 Save Draft saves and closes. Autosave creates/reuses Draft without resurrecting a draft the
-user deliberately deleted. Send Later asks date/time and creates/reuses Scheduled. Recipient
+user deliberately deleted. Send Later asks date/time and creates/reuses Scheduled. Normal Send is
+also durable: it queues an immediately due Scheduled item and releases the editor before network
+I/O. Recipient
 autocomplete uses recently sent addresses, default two years, displayed as
 `Name <address>` when known.
 
@@ -556,7 +595,13 @@ Taskbar notification and received-mail tray icon are separate settings. Use cust
 `QuickMailReceived.ico`. New mail refreshes current matching mailbox/count without a second
 click while preserving selection where possible.
 
-### 15.3 Startup/shutdown
+### 15.3 Mail activity modes
+
+**Work Offline** pauses all automatic/manual transport dispatch and all receivers; pressing Send
+durably queues the message without network I/O. **Focus mode** pauses receivers until its deadline
+but leaves sending enabled. Pressing Check Mail ends either mode and then performs the check.
+
+### 15.4 Startup/shutdown
 
 Splash appears before expensive service/SQLite initialization, with 128×128 logo and named
 phase. Migrations/count construction may be slow but must be visible/logged.

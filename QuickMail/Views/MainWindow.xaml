@@ -203,9 +203,20 @@
             <MenuItem Header="Send _Again"
                       AutomationProperties.Name="Send again"
                       Command="{Binding SendAgainCommand}"/>
+            <MenuItem Header="_History"
+                      AutomationProperties.Name="Show message history with this contact"
+                      Click="MessageContextMenu_History_Click"/>
             <Separator/>
             <MenuItem Header="Mark as _Read" Click="MessageContextMenu_MarkRead_Click"/>
             <MenuItem Header="Mark as _Unread" Click="MessageContextMenu_MarkUnread_Click"/>
+            <MenuItem Header="Snoo_ze">
+                <MenuItem Header="For 1 _hour" Tag="hour" Click="MessageContextMenu_Snooze_Click"/>
+                <MenuItem Header="Until this _evening" Tag="evening" Click="MessageContextMenu_Snooze_Click"/>
+                <MenuItem Header="Until _tomorrow morning" Tag="tomorrow" Click="MessageContextMenu_Snooze_Click"/>
+                <MenuItem Header="Until next _week" Tag="week" Click="MessageContextMenu_Snooze_Click"/>
+                <Separator/>
+                <MenuItem Header="Choose date and _time…" Tag="custom" Click="MessageContextMenu_Snooze_Click"/>
+            </MenuItem>
             <Separator/>
             <MenuItem Header="_Move to Folder…"
                       AutomationProperties.Name="Move to Folder"
@@ -240,6 +251,13 @@
             <MenuItem Header="View _Source"
                       AutomationProperties.Name="View message source"
                       Click="MessageContextMenu_ViewSource_Click"/>
+            <MenuItem Header="E_xport"
+                      AutomationProperties.Name="Export message">
+                <MenuItem Header="Save as _EML…" Click="MessageContextMenu_SaveEml_Click"/>
+                <MenuItem Header="Save as _HTML…" Click="MessageContextMenu_SaveHtml_Click"/>
+                <Separator/>
+                <MenuItem Header="Copy Message _Headers" Click="MessageContextMenu_CopyHeaders_Click"/>
+            </MenuItem>
         </ContextMenu>
 
         <!-- Folder context menu — MUST live in Window.Resources, not inside a Style.Setter.Value.
@@ -673,6 +691,18 @@
             <!-- Tools — always available (mirrors the Compose window's Tools menu).
                  Each command lives here only; not duplicated in File/Message/View. -->
             <MenuItem Header="_Tools">
+                <MenuItem x:Name="OfflineModeMenuItem" Header="Work _Offline"
+                          IsCheckable="True" Click="OfflineModeMenuItem_Click"/>
+                <MenuItem Header="_Focus Mode">
+                    <MenuItem Header="15 minutes" Tag="15" Click="FocusModeMenuItem_Click"/>
+                    <MenuItem Header="30 minutes" Tag="30" Click="FocusModeMenuItem_Click"/>
+                    <MenuItem Header="1 hour" Tag="60" Click="FocusModeMenuItem_Click"/>
+                    <MenuItem Header="2 hours" Tag="120" Click="FocusModeMenuItem_Click"/>
+                    <Separator/>
+                    <MenuItem x:Name="EndFocusModeMenuItem" Header="End Focus Mode"
+                              Click="EndFocusModeMenuItem_Click"/>
+                </MenuItem>
+                <Separator/>
                 <MenuItem Header="Address _Book…"
                           Click="MenuAddressBook_Click"
                           InputGestureText="Ctrl+Shift+B"/>
@@ -691,6 +721,9 @@
                 <MenuItem Header="_Analyze Folder…"
                           Click="MenuAnalyzeFolder_Click"
                           AutomationProperties.Name="Analyze Folder"/>
+                <MenuItem Header="Account _Health…"
+                          Click="MenuAccountHealth_Click"
+                          AutomationProperties.Name="Account Health"/>
                 <Separator/>
                 <MenuItem Header="Recalculate _Folder Counts"
                           Click="MenuRecalculateFolderCounts_Click"
@@ -870,22 +903,36 @@
                              BorderThickness="0,0,1,0"
                              MouseDoubleClick="TodayAgendaList_MouseDoubleClick"
                              AutomationProperties.Name="Today's appointments">
+                        <ListBox.ItemContainerStyle>
+                            <Style TargetType="ListBoxItem" BasedOn="{StaticResource {x:Type ListBoxItem}}">
+                                <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                                <Setter Property="Padding" Value="0"/>
+                            </Style>
+                        </ListBox.ItemContainerStyle>
                         <ListBox.ItemTemplate>
                             <DataTemplate>
-                                <Grid Margin="3,2" ToolTip="{Binding DetailText}">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="Auto"/>
-                                        <ColumnDefinition Width="*"/>
-                                    </Grid.ColumnDefinitions>
-                                    <TextBlock Text="{Binding CompactTimeDisplay}" MinWidth="72" Margin="0,0,6,0"
-                                               FontSize="{DynamicResource Theme.FontSizeSmall}"/>
-                                    <StackPanel Grid.Column="1">
-                                        <TextBlock Text="{Binding Summary}" TextTrimming="CharacterEllipsis"/>
-                                        <TextBlock Text="{Binding Location}" TextTrimming="CharacterEllipsis"
-                                                   Foreground="{DynamicResource Theme.TextSecondary}"
+                                <Border Margin="3,2" Padding="6,3" CornerRadius="4"
+                                        Background="{DynamicResource Theme.Success}"
+                                        ToolTip="{Binding DetailText}">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="{Binding CompactTimeDisplay}" MinWidth="72" Margin="0,0,6,0"
+                                                   Foreground="{DynamicResource Theme.TextOnAccent}"
+                                                   FontWeight="SemiBold"
                                                    FontSize="{DynamicResource Theme.FontSizeSmall}"/>
-                                    </StackPanel>
-                                </Grid>
+                                        <StackPanel Grid.Column="1">
+                                            <TextBlock Text="{Binding Summary}" TextTrimming="CharacterEllipsis"
+                                                       Foreground="{DynamicResource Theme.TextOnAccent}"/>
+                                            <TextBlock Text="{Binding Location}" TextTrimming="CharacterEllipsis"
+                                                       Foreground="{DynamicResource Theme.TextOnAccent}"
+                                                       Opacity="0.85"
+                                                       FontSize="{DynamicResource Theme.FontSizeSmall}"/>
+                                        </StackPanel>
+                                    </Grid>
+                                </Border>
                             </DataTemplate>
                         </ListBox.ItemTemplate>
                     </ListBox>
@@ -1090,7 +1137,7 @@
                     <DockPanel>
                         <StackPanel DockPanel.Dock="Top" Margin="8,6,8,0">
                             <Grid>
-                              <StackPanel Margin="0,0,135,0">
+                              <StackPanel Margin="0,0,175,0">
                                <DockPanel>
                                  <TextBlock Text="Subject:" Width="58" FontWeight="SemiBold" VerticalAlignment="Center"/>
                                  <TextBox x:Name="SubjectField"
@@ -1147,10 +1194,21 @@
                                       BorderThickness="0" Background="Transparent" AutomationProperties.Name="Date"/>
                                </DockPanel>
                               </StackPanel>
-                              <Button Content="Detach Preview" HorizontalAlignment="Right"
-                                    VerticalAlignment="Top" Margin="8,0,0,0" Padding="10,3"
-                                    Click="DetachReadingPane_Click"
-                                    ToolTip="Open the preview on another screen; it follows the selected message"/>
+                              <StackPanel HorizontalAlignment="Right" VerticalAlignment="Top" Margin="8,0,0,0">
+                                <Button Content="Detach Preview" Padding="10,3"
+                                      Click="DetachReadingPane_Click"
+                                      ToolTip="Open the preview on another screen; it follows the selected message"/>
+                                <Button x:Name="UnsubscribeButton" Content="Unsubscribe" Margin="0,5,0,0" Padding="10,4"
+                                      FontWeight="SemiBold" Visibility="Collapsed"
+                                      Background="{DynamicResource Theme.WarningBackground}"
+                                      BorderBrush="{DynamicResource Theme.Warning}"
+                                      Click="Unsubscribe_Click"
+                                      AutomationProperties.Name="Unsubscribe from this sender"/>
+                                <Button x:Name="MaintainSubscriptionButton" Content="Maintain subscription"
+                                      Margin="0,3,0,0" Padding="8,3" Visibility="Collapsed"
+                                      Click="MaintainSubscription_Click"
+                                      AutomationProperties.Name="Keep subscription and hide unsubscribe controls for this sender"/>
+                              </StackPanel>
                             </Grid>
 
                             <!-- Attachments (visible when selected message has attachments) -->
@@ -1247,6 +1305,34 @@
                                 Content="Reply All" AutomationProperties.Name="Reply All" ToolTip="Reply All (Ctrl+Shift+R)"/>
                         <Button Style="{DynamicResource ToolbarButton}" Command="{Binding ForwardCommand}"
                                 Content="Forward" AutomationProperties.Name="Forward" ToolTip="Forward (Ctrl+F)"/>
+                        <Border x:Name="UndoSendBanner"
+                                Visibility="Collapsed"
+                                Margin="8,1,2,1" Padding="2"
+                                CornerRadius="3"
+                                Background="{DynamicResource Theme.WarningBackground}"
+                                BorderBrush="{DynamicResource Theme.Warning}"
+                                BorderThickness="1"
+                                VerticalAlignment="Center">
+                            <DockPanel LastChildFill="True">
+                                <Button DockPanel.Dock="Right"
+                                        Content="×"
+                                        Click="DismissUndoSend_Click"
+                                        Padding="5,1" Margin="3,0,0,0"
+                                        Background="Transparent" BorderThickness="0"
+                                        ToolTip="Hide this notice without cancelling the send"
+                                        AutomationProperties.Name="Dismiss undo send notice"/>
+                                <Button x:Name="UndoSendButton"
+                                        Click="UndoSendButton_Click"
+                                        Padding="6,1"
+                                        Background="Transparent" BorderThickness="0"
+                                        ToolTip="Cancel this queued message and save it in Draft">
+                                    <TextBlock x:Name="UndoSendText"
+                                               TextTrimming="CharacterEllipsis"
+                                               MaxWidth="430"
+                                               FontWeight="SemiBold"/>
+                                </Button>
+                            </DockPanel>
+                        </Border>
                         <Button x:Name="SyncRangeButton" Visibility="Collapsed"/>
                         <Button x:Name="ViewModeButton" Visibility="Collapsed"/>
                     </ToolBar>
@@ -1310,6 +1396,10 @@
                             <Button DockPanel.Dock="Right" Content="Advanced Search" Margin="6,0,0,0"
                                     Click="AdvancedSearchButton_Click"
                                     AutomationProperties.Name="Open advanced message search"/>
+                            <Button DockPanel.Dock="Right" Content="Save as Virtual Folder…" Margin="6,0,0,0"
+                                    Click="SaveSearchAsVirtualFolderButton_Click"
+                                    AutomationProperties.Name="Save this search as a virtual folder"
+                                    ToolTip="Create a user-selected virtual folder under Views from this search"/>
                             <TextBlock DockPanel.Dock="Right"
                                        VerticalAlignment="Center"
                                        Margin="6,0"
@@ -1340,7 +1430,7 @@
                                       MaxDropDownHeight="320"
                                       Text="{Binding SearchText, UpdateSourceTrigger=Explicit}"
                                       AutomationProperties.Name="Search messages"
-                                      ToolTip="Search messages, or select one of the last ten searches. Search runs only after Enter or Search."
+                                      ToolTip="Search messages, or select one of the last ten searches. Enter searches the current folder; Ctrl+Enter searches everywhere; Escape clears the search."
                                       PreviewKeyDown="SearchBox_PreviewKeyDown"/>
                         </DockPanel>
                     </Border>
@@ -1613,7 +1703,7 @@
                                         <DataTemplate>
                                             <TextBlock Text="{Binding ReplyIndicator}"
                                                        FontFamily="Segoe UI Symbol"
-                                                       FontSize="12"
+                                                       FontSize="{DynamicResource Theme.FontSizeSmall}"
                                                        TextAlignment="Center"
                                                        AutomationProperties.Name="{Binding ReadStatusLabel}"/>
                                         </DataTemplate>
@@ -2214,15 +2304,28 @@
                                     <DataTrigger Binding="{Binding IsStatusHighlighted}" Value="True">
                                         <Setter Property="Background" Value="{DynamicResource Theme.AccentSubtle}"/>
                                     </DataTrigger>
+                                    <DataTrigger Binding="{Binding IsStatusError}" Value="True">
+                                        <Setter Property="Background" Value="{DynamicResource Theme.ErrorBackground}"/>
+                                    </DataTrigger>
                                 </Style.Triggers>
                             </Style>
                         </Border.Style>
                         <Grid>
                             <TextBlock x:Name="StatusTextBox"
-                                       Style="{StaticResource StatusTextBlockStyle}"
                                        Focusable="True"
                                        TextTrimming="CharacterEllipsis"
-                                       Text="{Binding StatusText, Mode=OneWay}"/>
+                                       Text="{Binding StatusText, Mode=OneWay}">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock" BasedOn="{StaticResource StatusTextBlockStyle}">
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsStatusError}" Value="True">
+                                                <Setter Property="Foreground" Value="{DynamicResource Theme.Error}"/>
+                                                <Setter Property="FontWeight" Value="SemiBold"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
                             <ProgressBar x:Name="StatusProgressBar"
                                          Width="80" Height="12" HorizontalAlignment="Right"
                                          IsIndeterminate="True" Focusable="False"

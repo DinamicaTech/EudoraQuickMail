@@ -42,14 +42,10 @@ on:
 
 permissions:
   contents: read    # checkout
-  id-token: write   # OIDC token azure/login exchanges for Azure creds (signing)
 
 jobs:
   build-installer:
     runs-on: windows-latest
-    # Same azure-signing environment the release workflow uses, so the OIDC token
-    # subject matches the Azure federated credential. Unprotected; not a gate.
-    environment: azure-signing
 
     strategy:
       # Keep both legs going if one fails, so a broken ARM64 pack still yields a
@@ -163,24 +159,6 @@ jobs:
           "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           Write-Host "Package version: $version   (base $base, run ${{ github.run_number }} attempt ${{ github.run_attempt }}, commit ${{ github.sha }})"
 
-      # --- Code signing (Azure Artifact Signing via GitHub OIDC) --------------
-      - name: Azure login (code signing)
-        uses: azure/login@v3
-        with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-
-      - name: Write signing metadata
-        shell: pwsh
-        run: |
-          $json = @{
-            Endpoint               = 'https://eus.codesigning.azure.net/'
-            CodeSigningAccountName = 'kellylford'
-            CertificateProfileName = 'kellyford-public'
-          } | ConvertTo-Json
-          [System.IO.File]::WriteAllText("$env:GITHUB_WORKSPACE\signing-metadata.json", $json)
-
       # Near-identical vpk pack invocation to the release workflow, so the test installer runs
       # the same per-user install and WebView2-on-demand path a shipped one does. Differences:
       # no `vpk download github` beforehand, so this is a full package with no delta — and no
@@ -210,12 +188,12 @@ jobs:
           # machine. See docs/planning/windows-arm64-support-plan.md.
           $archArgs = @()
           if ($arch -eq 'arm64') { $archArgs = @('--runtime', 'win-arm64', '--channel', 'win-arm64') }
-          # --azureTrustedSignFile signs the app binaries and Velopack Update/Setup.
+          # Fork builds are unsigned until DinamicaTech provisions SignPath Foundation.
+          # See docs/SIGNING.md for the post-pack insertion point and promotion checklist.
           vpk pack --packId QuickMail --packVersion $version --packDir publish `
-            --mainExe QuickMail.exe --packTitle QuickMail --packAuthors "Kelly Ford" `
+            --mainExe QuickMail.exe --packTitle QuickMail --packAuthors "DinamicaTech and QuickMail contributors" `
             --shortcuts StartMenuRoot --outputDir installer/Output/Releases `
             --framework webview2 `
-            --azureTrustedSignFile "$env:GITHUB_WORKSPACE\signing-metadata.json" `
             --instLocation PerUser `
             --instWelcome installer/velopack/welcome.txt `
             --instLicense installer/velopack/license.txt `
@@ -235,19 +213,6 @@ jobs:
           if ($msi.Count -ne 0) { throw "Unexpected .msi in test-build output: $($msi.Name -join ', '). Test builds ship Setup.exe only — see the versioning note above." }
           Write-Host "--- Velopack output ($arch) ---"
           Get-ChildItem installer/Output/Releases | Select-Object -ExpandProperty Name
-
-      # Sign the standalone portable exe (vpk signed the copies inside the package).
-      - name: Sign portable QuickMail.exe
-        uses: azure/artifact-signing-action@v2.0.0
-        with:
-          endpoint: https://eus.codesigning.azure.net/
-          signing-account-name: kellylford
-          certificate-profile-name: kellyford-public
-          files-folder: ${{ github.workspace }}\publish
-          files-folder-filter: exe
-          file-digest: SHA256
-          timestamp-rfc3161: http://timestamp.acs.microsoft.com
-          timestamp-digest: SHA256
 
       - name: Upload installer artifact
         uses: actions/upload-artifact@v7

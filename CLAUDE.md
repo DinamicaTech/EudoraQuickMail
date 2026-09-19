@@ -80,7 +80,7 @@ The user guide (`docs/USER-GUIDE.md`) is automatically converted to HTML and pub
 **Manual publish** — any time, independent of release:
 1. Go to **Actions** → **Publish User Guide** → **Run workflow** (green button)
 2. Workflow generates single-page (`full.html`) and sectioned HTML with navigation (`index.html`)
-3. Deployed to `https://kellylford.github.io/QuickMail/`
+3. Deployed to `https://DinamicaTech.github.io/QuickMail/`
 
 **Automatic publish** — triggered by GitHub release creation:
 - When you create a release, the workflow runs and publishes the current user guide automatically.
@@ -96,11 +96,11 @@ Run the setup script once:
 .\scripts\setup-gh-pages.ps1
 ```
 
-This enables GitHub Pages to serve from the `gh-pages` branch. The published guide appears at `https://kellylford.github.io/QuickMail/`.
+This enables GitHub Pages to serve from the `gh-pages` branch. The published guide appears at `https://DinamicaTech.github.io/QuickMail/`.
 
 ### Help Menu Link
 
-Users access the guide via **Help** → **Open User Guide** (F1). The link in `MainViewModel.ViewUserGuide()` points to `https://kellylford.github.io/QuickMail/`.
+Users access the guide via **Help** → **Open User Guide** (F1). The link in `MainViewModel.ViewUserGuide()` points to `https://DinamicaTech.github.io/QuickMail/`.
 
 ## Architecture
 

@@ -449,7 +449,9 @@ public class PerFolderViewStateTests
 
         await vm.InitialLoadAsync();
 
-        Assert.Equal("INBOX", vm.SelectedFolder?.FullName);
+        Assert.NotNull(vm.SelectedFolder);
+        Assert.Equal(SpecialFolderKind.Inbox, vm.SelectedFolder!.Kind);
+        Assert.StartsWith("\0RootAggregate:", vm.SelectedFolder.FullName, StringComparison.Ordinal);
         Assert.Equal(ViewMode.Conversations, vm.ViewMode);
     }
 

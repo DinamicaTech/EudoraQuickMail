@@ -27,7 +27,7 @@ namespace QuickMail.Tests;
 /// both true of a HintFor that returns null for everything.
 /// </summary>
 [Collection("WpfTests")]
-public class AccountDialogHintTests
+public class AccountDialogHintTests : WpfTestBase
 {
     private static AddAccountViewModel NewAddVm() =>
         new(new StubFeatureGate { [FeatureFlag.GraphBackend] = true },
@@ -102,7 +102,7 @@ public class AccountDialogHintTests
             + (heard.Count == 0 ? "(nothing)" : string.Join(" | ", heard.Select(h => $"{h.Category}: {h.Text}"))));
     }
 
-    [StaFact]
+    [WpfFact]
     public void EveryHintedControlInTheAddAccountDialogSpeaksItsHintOnFocus()
     {
         var vm = NewAddVm();
@@ -134,7 +134,7 @@ public class AccountDialogHintTests
         }
     }
 
-    [StaFact]
+    [WpfFact]
     public void TheAddAccountSyncCheckboxesSpeakTheirHints()
     {
         var vm = NewAddVm();
@@ -161,7 +161,7 @@ public class AccountDialogHintTests
         }
     }
 
-    [StaFact]
+    [WpfFact]
     public void EveryHintedControlInTheManageAccountsDialogSpeaksItsHintOnFocus()
     {
         var vm = NewManagerVm();
@@ -236,7 +236,7 @@ public class AccountDialogHintTests
         }
     }
 
-    [StaFact]
+    [WpfFact]
     public void AHintIsNotRepeatedWhenFocusReturnsToTheSameControl()
     {
         // Keyboard focus comes back to the same control through no action of the user's — the window
@@ -274,7 +274,7 @@ public class AccountDialogHintTests
         }
     }
 
-    [StaFact]
+    [WpfFact]
     public void ARefusedSaveIsAnnouncedAsAResultNotAsBackgroundProgress()
     {
         // Refusing to add the account is the outcome of the button the user just pressed. Announced

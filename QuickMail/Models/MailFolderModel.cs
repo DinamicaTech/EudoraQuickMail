@@ -10,7 +10,7 @@ namespace QuickMail.Models;
 public enum SpecialFolderKind
 {
     None = 0, Inbox = 1, Sent = 2, Drafts = 3, Trash = 4, Junk = 5,
-    AllMail = 6, Important = 7, Starred = 8, Archive = 9, Scheduled = 10,
+    AllMail = 6, Important = 7, Starred = 8, Archive = 9, Scheduled = 10, Snoozed = 11,
 }
 
 public class MailFolderModel

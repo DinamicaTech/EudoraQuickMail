@@ -130,7 +130,7 @@ public class TestConnectionTests
         var imap = new RecordingConnectMailService();
         var vm = NewVm(imap);
         vm.SelectedProvider = Catalog.ById(ProviderCatalog.MicrosoftId);
-        vm.SelectedBackend = vm.AvailableBackends[1];   // Microsoft 365 (Graph)
+        vm.SelectedBackend = vm.AvailableBackends.First(b => b.Kind == BackendKind.MicrosoftGraph);
         vm.Username = "kelly@contoso.com";
 
         await vm.TestConnectionCommand.ExecuteAsync(null);
@@ -146,7 +146,7 @@ public class TestConnectionTests
     {
         var vm = NewVm(new FailingConnectMailService("mailbox not REST-enabled"));
         vm.SelectedProvider = Catalog.ById(ProviderCatalog.MicrosoftId);
-        vm.SelectedBackend = vm.AvailableBackends[1];
+        vm.SelectedBackend = vm.AvailableBackends.First(b => b.Kind == BackendKind.MicrosoftGraph);
         vm.Username = "kelly@contoso.com";
 
         await vm.TestConnectionCommand.ExecuteAsync(null);
@@ -160,7 +160,7 @@ public class TestConnectionTests
         var imap = new RecordingConnectMailService();
         var vm = NewVm(imap);
         vm.SelectedProvider = Catalog.ById(ProviderCatalog.MicrosoftId);
-        vm.SelectedBackend = vm.AvailableBackends[1];
+        vm.SelectedBackend = vm.AvailableBackends.First(b => b.Kind == BackendKind.MicrosoftGraph);
 
         await vm.TestConnectionCommand.ExecuteAsync(null);
 

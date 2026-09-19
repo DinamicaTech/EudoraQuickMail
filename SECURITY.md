@@ -4,7 +4,7 @@
 
 **Please do not open a public GitHub issue for security vulnerabilities.**
 
-Use GitHub's private vulnerability reporting instead: on the [Security tab](https://github.com/kellylford/QuickMail/security) of this repository, choose **Report a vulnerability**. If you are unable to use that, send a private message to [@kellylford](https://github.com/kellylford) on GitHub.
+Use GitHub's private vulnerability reporting instead: on the [Security tab](https://github.com/DinamicaTech/QuickMail/security) of this repository, choose **Report a vulnerability**.
 
 Include as much detail as you can:
 

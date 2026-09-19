@@ -22,7 +22,7 @@ namespace QuickMail.Tests;
 /// they had just opened.
 /// </summary>
 [Collection("WpfTests")]
-public class AddAccountTabOrderTests
+public class AddAccountTabOrderTests : WpfTestBase
 {
     private static AddAccountViewModel NewVm() =>
         new(new StubFeatureGate { [FeatureFlag.GraphBackend] = true },
@@ -38,7 +38,7 @@ public class AddAccountTabOrderTests
 
     private static void Drain() => TabOrderWalker.Drain();
 
-    [StaFact]
+    [WpfFact]
     public void AdvancedSettingsControlsComeAfterTheExpanderThatRevealsThem()
     {
         var vm = NewVm();
@@ -88,7 +88,7 @@ public class AddAccountTabOrderTests
         finally { window.Close(); }
     }
 
-    [StaFact]
+    [WpfFact]
     public void TheFieldsBeforeAdvancedAreInVisualOrder()
     {
         var vm = NewVm();

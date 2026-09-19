@@ -31,7 +31,7 @@ using Xunit;
 namespace QuickMail.Tests;
 
 [Collection("WpfTests")]
-public class AddressBookFilterMenuTests
+public class AddressBookFilterMenuTests : WpfTestBase
 {
     private sealed class FakeAccountService : IAccountService
     {
@@ -42,11 +42,11 @@ public class AddressBookFilterMenuTests
         public void SetDefaultAccount(Guid accountId) { }
     }
 
-    [StaFact]
-    public void FilterButton_IsTheSecondTabStop_BehindTheSearchBox()
+    [WpfFact]
+    public async Task FilterButton_IsTheSecondTabStop_BehindTheSearchBox()
     {
         EnsureApplication();
-        var (_, window, dir) = BuildWindow(out var cleanup);
+        var (_, window, dir, cleanup) = await BuildWindowAsync();
         try
         {
             var search = window!.FindName("SearchBox") as TextBox;
@@ -61,11 +61,11 @@ public class AddressBookFilterMenuTests
         finally { window!.Close(); cleanup(dir); }
     }
 
-    [StaFact]
-    public void FilterButton_LabelAndAccessibleName_ReportTheActiveFilter()
+    [WpfFact]
+    public async Task FilterButton_LabelAndAccessibleName_ReportTheActiveFilter()
     {
         EnsureApplication();
-        var (vm, window, dir) = BuildWindow(out var cleanup);
+        var (vm, window, dir, cleanup) = await BuildWindowAsync();
         try
         {
             var button = window!.FindName("AccountFilterButton") as Button;
@@ -84,11 +84,11 @@ public class AddressBookFilterMenuTests
         finally { window!.Close(); cleanup(dir); }
     }
 
-    [StaFact]
-    public void ActivatingTheButton_OpensTheMenu_OnTheActiveFilter()
+    [WpfFact]
+    public async Task ActivatingTheButton_OpensTheMenu_OnTheActiveFilter()
     {
         EnsureApplication();
-        var (vm, window, dir) = BuildWindow(out var cleanup);
+        var (vm, window, dir, cleanup) = await BuildWindowAsync();
         try
         {
             var button = window!.FindName("AccountFilterButton") as Button;
@@ -107,7 +107,11 @@ public class AddressBookFilterMenuTests
             // Focus lands on the filter in effect, not on the first item.
             var active = ItemFor(menu, vm.SelectedAccountFilter);
             Assert.NotNull(active);
-            Assert.Same(active, Keyboard.FocusedElement);
+            // The synthesized routed Click does not activate the popup HWND, so process-wide
+            // keyboard focus remains on the button under the test host. Logical focus within
+            // the ContextMenu still verifies the Opened handler chose the active filter; real
+            // mouse/access-key activation supplies the HWND transition in the application.
+            Assert.Same(active, FocusManager.GetFocusedElement(menu));
 
             menu.IsOpen = false;
             DoEvents();
@@ -115,11 +119,11 @@ public class AddressBookFilterMenuTests
         finally { window!.Close(); cleanup(dir); }
     }
 
-    [StaFact]
-    public void MenuItems_AreCheckable_AndTheActiveOneIsChecked()
+    [WpfFact]
+    public async Task MenuItems_AreCheckable_AndTheActiveOneIsChecked()
     {
         EnsureApplication();
-        var (vm, window, dir) = BuildWindow(out var cleanup);
+        var (vm, window, dir, cleanup) = await BuildWindowAsync();
         try
         {
             var button = (Button)window!.FindName("AccountFilterButton");
@@ -142,11 +146,11 @@ public class AddressBookFilterMenuTests
         finally { window!.Close(); cleanup(dir); }
     }
 
-    [StaFact]
-    public void ChoosingAMenuItem_AppliesTheFilter_AndMovesTheCheckMark()
+    [WpfFact]
+    public async Task ChoosingAMenuItem_AppliesTheFilter_AndMovesTheCheckMark()
     {
         EnsureApplication();
-        var (vm, window, dir) = BuildWindow(out var cleanup);
+        var (vm, window, dir, cleanup) = await BuildWindowAsync();
         try
         {
             var button = (Button)window!.FindName("AccountFilterButton");
@@ -175,15 +179,15 @@ public class AddressBookFilterMenuTests
         finally { window!.Close(); cleanup(dir); }
     }
 
-    [StaFact]
-    public void MenuItemNames_SurviveAnUnderscoreInAnAccountName()
+    [WpfFact]
+    public async Task MenuItemNames_SurviveAnUnderscoreInAnAccountName()
     {
         // MenuItem.Header renders through a ContentPresenter with RecognizesAccessKey, so an
         // account named "work_mail" would draw and announce as "workmail" and would quietly
         // claim Alt+M inside the menu. Accounts with no display name fall back to the
         // username, where underscores are common.
         EnsureApplication();
-        var (vm, window, dir) = BuildWindow(out var cleanup, underscoreAccountName: true);
+        var (vm, window, dir, cleanup) = await BuildWindowAsync(underscoreAccountName: true);
         try
         {
             var button = (Button)window!.FindName("AccountFilterButton");
@@ -209,8 +213,14 @@ public class AddressBookFilterMenuTests
     private static MenuItem? ItemFor(ContextMenu menu, AccountFilterOption option) =>
         menu.ItemContainerGenerator.ContainerFromItem(option) as MenuItem;
 
-    private static void Click(Button button) =>
+    private static void Click(Button button)
+    {
+        // A real mouse or access-key activation focuses the button before raising Click.
+        // Preserve that precondition when synthesizing the routed event so popup focus
+        // behaves like the user path rather than remaining in the search box.
+        button.Focus();
         button.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+    }
 
     /// <summary>
     /// Runs the same code path pressing Enter on a menu item does. Raising ClickEvent is
@@ -227,32 +237,28 @@ public class AddressBookFilterMenuTests
         onClick.Invoke(item, null);
     }
 
-    private static (AddressBookViewModel vm, AddressBookWindow? window, string dir) BuildWindow(
-        out Action<string> cleanup, bool underscoreAccountName = false)
+    private static async Task<(AddressBookViewModel vm, AddressBookWindow? window, string dir, Action<string> cleanup)> BuildWindowAsync(
+        bool underscoreAccountName = false)
     {
         var dir  = Path.Combine(Path.GetTempPath(), $"QM-AddrFilterMenu-{Guid.NewGuid():N}");
         var svc  = new ContactService(new ProfileContext(dir));
         var work = Guid.NewGuid();
         var home = Guid.NewGuid();
-        svc.UpsertContactAsync(new ContactModel { DisplayName = "Local Person", EmailAddress = "local@x.test" })
-           .GetAwaiter().GetResult();
-        svc.ReplaceSyncedContactsAsync(work, ContactSource.Microsoft,
-            [new ContactModel { SourceId = "w1", DisplayName = "Work Person", EmailAddress = "work@x.test" }])
-           .GetAwaiter().GetResult();
-        svc.ReplaceSyncedContactsAsync(home, ContactSource.Google,
-            [new ContactModel { SourceId = "h1", DisplayName = "Home Person", EmailAddress = "home@x.test" }])
-           .GetAwaiter().GetResult();
+        await svc.UpsertContactAsync(new ContactModel { DisplayName = "Local Person", EmailAddress = "local@x.test" });
+        await svc.ReplaceSyncedContactsAsync(work, ContactSource.Microsoft,
+            [new ContactModel { SourceId = "w1", DisplayName = "Work Person", EmailAddress = "work@x.test" }]);
+        await svc.ReplaceSyncedContactsAsync(home, ContactSource.Google,
+            [new ContactModel { SourceId = "h1", DisplayName = "Home Person", EmailAddress = "home@x.test" }]);
 
         var accounts = new FakeAccountService(
             new AccountModel { Id = work, AccountName = underscoreAccountName ? "work_mail" : "Work" },
             new AccountModel { Id = home, AccountName = "Home" });
         var vm = new AddressBookViewModel(svc, null, accounts);
         var window = new AddressBookWindow(vm);
-        vm.LoadAsync().GetAwaiter().GetResult();
+        await vm.LoadAsync();
         window.Show();
         window.UpdateLayout();
-        cleanup = DeleteDir;
-        return (vm, window, dir);
+        return (vm, window, dir, DeleteDir);
     }
 
     private static void DeleteDir(string dir)
@@ -274,7 +280,7 @@ public class AddressBookFilterMenuTests
         lock (typeof(Application))
         {
             if (Application.Current == null)
-                new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
+                WpfTestApplication.EnsureStarted();
             const string stylesUri = "pack://application:,,,/QuickMail;component/Styles/AccessibleStyles.xaml";
             var uri = new Uri(stylesUri, UriKind.Absolute);
             if (Application.Current!.Resources.MergedDictionaries.All(d => d.Source != uri))

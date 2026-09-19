@@ -20,18 +20,22 @@ public sealed class ImapBodyBackfillService : IImapBodyBackfillService
     private static readonly TimeSpan ErrorRetryDelay = TimeSpan.FromMinutes(15);
     private readonly IMailService _mail;
     private readonly ILocalStoreService _store;
+    private readonly MailActivityPolicyService? _activity;
     private int _running;
 
-    public ImapBodyBackfillService(IMailService mail, ILocalStoreService store)
+    public ImapBodyBackfillService(IMailService mail, ILocalStoreService store,
+        MailActivityPolicyService? activity = null)
     {
         _mail = mail;
         _store = store;
+        _activity = activity;
     }
 
     public event Action<ImapBodyBackfillProgress>? ProgressChanged;
 
     public async Task RunAsync(IReadOnlyCollection<AccountModel> accounts, CancellationToken ct = default)
     {
+        if (_activity is { CanReceive: false }) return;
         if (Interlocked.Exchange(ref _running, 1) != 0) return;
         try
         {

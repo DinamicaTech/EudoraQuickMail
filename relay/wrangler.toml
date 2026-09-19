@@ -4,7 +4,7 @@ compatibility_date = "2026-01-01"
 
 # Secrets (set with `wrangler secret put`, never committed):
 #   GITHUB_APP_ID           the App's numeric ID
-#   GITHUB_INSTALLATION_ID  the installation of that App on kellylford/QuickMail
+#   GITHUB_INSTALLATION_ID  the installation of that App on DinamicaTech/QuickMail
 #   GITHUB_PRIVATE_KEY      the App's private key PEM (PKCS#1 or PKCS#8 both work)
 #   RELAY_KEY               shared with the shipped app; low-value, rotatable
 

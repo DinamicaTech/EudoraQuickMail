@@ -156,6 +156,7 @@ public partial class MainWindow : Window
     private string? _pendingStatusText;
     private string? _statusBeforeLinkHover;
     private string? _currentLinkHoverStatus;
+    private UnsubscribeCandidate? _unsubscribeCandidate;
     private Point _readingPaneAttachmentDragStart;
     private AttachmentModel? _readingPaneAttachmentDragItem;
     private bool _readingPaneAttachmentDragPreparing;
@@ -169,6 +170,8 @@ public partial class MainWindow : Window
     private string? _pendingSearchAnnounceText;
     private static readonly TimeSpan SearchAnnounceDebounce = TimeSpan.FromMilliseconds(300);
     private readonly DispatcherTimer _statusClockTimer = new() { Interval = TimeSpan.FromSeconds(1) };
+    private DispatcherTimer? _undoSendTimer;
+    private Guid? _undoSendQueueId;
     private long? _splashClosedTimestamp;
 
     private static readonly TimeSpan WebViewNavigationTimeout = TimeSpan.FromSeconds(4);
@@ -182,6 +185,7 @@ public partial class MainWindow : Window
     private readonly IRuleService _ruleService;
     private readonly IServerRuleService? _serverRuleService;
     private readonly ITemplateService _templateService;
+    private readonly IOutgoingMailQueue? _outgoingQueue;
     private readonly IFlagService? _flagService;
     private readonly ICustomDictionaryService? _customDictionary;
     private readonly IThemeService? _themeService;
@@ -254,7 +258,8 @@ public partial class MainWindow : Window
         ConnectionTruthProbe? truthProbe = null,
         IRowLayoutService? rowLayoutService = null,
         IWatchService? watchService = null,
-        ProfileContext? profileContext = null)
+        ProfileContext? profileContext = null,
+        IOutgoingMailQueue? outgoingQueue = null)
     {
         _vm = vm;
         _watchService = watchService;
@@ -281,6 +286,7 @@ public partial class MainWindow : Window
         _viewService = viewService;
         _ruleService = ruleService;
         _templateService = templateService;
+        _outgoingQueue = outgoingQueue;
         _featureGate = featureGate;
         _flagService = flagService;
         _customDictionary = customDictionary;
@@ -296,6 +302,11 @@ public partial class MainWindow : Window
         _vm.FolderSelectionDataReady += OnFolderSelectionDataReady;
         _vm.NewMailArrived += OnNewMailArrived;
         Loaded += (_, _) => EnsureTrayIcon();
+        if (Application.Current is App { MailActivityPolicy: { } activity })
+        {
+            activity.Changed += OnMailActivityChanged;
+            UpdateMailActivityMenu();
+        }
         var initialConfig = _configService.Load();
         foreach (var search in QuickSearchHistory.Normalize(initialConfig.QuickSearchHistory))
             _quickSearchHistory.Add(search);
@@ -906,6 +917,7 @@ public partial class MainWindow : Window
             (currentApplication as App)?.BeginShutdown();
         _statusClockTimer.Stop();
         _statusClockTimer.Tick -= StatusClockTimer_Tick;
+        _undoSendTimer?.Stop();
         _vm.FolderSelectionDataReady -= OnFolderSelectionDataReady;
         foreach (var tab in _vm.OpenTabs.OfType<ComposeTabViewModel>().ToList())
             tab.ForceDispose();
@@ -919,6 +931,8 @@ public partial class MainWindow : Window
             w.Close();
         _rulesWindow?.Close(); // unowned (#347), so not auto-closed with the main window
         _vm.NewMailArrived -= OnNewMailArrived;
+        if (Application.Current is App { MailActivityPolicy: { } activity })
+            activity.Changed -= OnMailActivityChanged;
         _trayIcon?.Dispose(); // remove the tray icon so it doesn't linger after exit
         // Cancels all in-flight VM operations (sync, prefetch, loads) and releases
         // their CTS handles. OnClosed, not OnClosing — the close cannot be cancelled here.
@@ -1019,19 +1033,45 @@ public partial class MainWindow : Window
 
     private async Task ExecuteSearchAsync(bool everywhere = false)
     {
-        var updated = QuickSearchHistory.Add(_quickSearchHistory, SearchBox.Text);
+        // Capture the editable text before rebuilding ItemsSource. When the current value was
+        // selected from history, clearing the observable collection also cleared ComboBox.Text;
+        // Search Everywhere then received an empty query and merely reset the result set.
+        var query = SearchBox.Text ?? string.Empty;
+        var updated = QuickSearchHistory.Add(_quickSearchHistory, query);
         _quickSearchHistory.Clear();
         foreach (var search in updated) _quickSearchHistory.Add(search);
+        // Keep the editor stable even when SearchText already equals query and therefore raises no
+        // PropertyChanged notification capable of restoring the text cleared by ItemsSource.
+        SearchBox.Text = query;
         var config = _configService.Load();
         config.QuickSearchHistory = updated;
         _configService.Save(config);
-        await _vm.RunQuickSearchAsync(SearchBox.Text, everywhere);
+        await _vm.RunQuickSearchAsync(query, everywhere);
     }
 
     private async void SearchButton_Click(object sender, RoutedEventArgs e) => await ExecuteSearchAsync();
 
     private async void SearchEverywhereButton_Click(object sender, RoutedEventArgs e) =>
         await ExecuteSearchAsync(everywhere: true);
+
+    private void SaveSearchAsVirtualFolderButton_Click(object sender, RoutedEventArgs e)
+    {
+        var query = SearchBox.Text?.Trim() ?? string.Empty;
+        if (query.Length == 0)
+        {
+            _vm.IsStatusHighlighted = true;
+            _vm.StatusText = "Enter and run a search before saving it as a virtual folder.";
+            SearchBox.Focus();
+            return;
+        }
+
+        // The View Manager already persists the current folder, query and Everywhere scope.
+        // Surfacing that capability here keeps virtual folders opt-in and avoids silently
+        // creating one for every ad-hoc search.
+        _vm.SearchText = query;
+        _vm.IsSearchActive = true;
+        OpenViewManager(createMode: true);
+    }
 
     private void SearchHistoryButton_Click(object sender, RoutedEventArgs e)
     {
@@ -1060,22 +1100,12 @@ public partial class MainWindow : Window
     {
         if (e.Key == Key.Enter)
         {
-            await ExecuteSearchAsync();
+            await ExecuteSearchAsync(everywhere: Keyboard.Modifiers == ModifierKeys.Control);
             e.Handled = true;
         }
         else if (e.Key == Key.Escape)
         {
-            if (SearchBox.IsDropDownOpen)
-            {
-                SearchBox.IsDropDownOpen = false;
-                e.Handled = true;
-                return;
-            }
-            var count = _vm.Messages.Count;
-            _vm.ClearSearchCommand.Execute(null);
-            ReturnFocusToMessageList();
-            var word = count == 1 ? "message" : "messages";
-            AccessibilityHelper.Announce(this, $"Search cleared. {count} {word}.", interrupt: true, category: AnnouncementCategory.Result);
+            await ClearMessageSearchAsync();
             e.Handled = true;
         }
         else if (e.Key == Key.Down)
@@ -1096,6 +1126,20 @@ public partial class MainWindow : Window
             SyncFolderTreeSelection(true);
             e.Handled = true;
         }
+    }
+
+    private async Task ClearMessageSearchAsync()
+    {
+        // A single Escape always clears the active query. Previously the first press only closed
+        // the editable ComboBox history popup, and the async reload was started without awaiting
+        // it, so the old result set could remain visible briefly (or until another folder click).
+        SearchBox.IsDropDownOpen = false;
+        await _vm.ClearSearchCommand.ExecuteAsync(null);
+        ReturnFocusToMessageList();
+        var count = _vm.Messages.Count;
+        var word = count == 1 ? "message" : "messages";
+        AccessibilityHelper.Announce(this, $"Search cleared. {count} {word}.", interrupt: true,
+            category: AnnouncementCategory.Result);
     }
 
     // Returns true when the main menu bar or toolbar currently holds keyboard focus,
@@ -1978,6 +2022,7 @@ public partial class MainWindow : Window
         {
             e.Handled = true;
             var selected = MessageList.SelectedItems.OfType<MailMessageSummary>().ToList();
+            if (!ConfirmPermanentDelete(selected.Count)) return;
             _vm.IsBusy = true;
             _vm.IsStatusHighlighted = true;
             _vm.StatusText = $"Deleting message 1/{selected.Count:N0}…";
@@ -2101,6 +2146,14 @@ public partial class MainWindow : Window
                 case Key.F6:
                     e.Handled = true;
                     await CycleFocusAsync(true);
+                    return;
+                case Key.Escape when _vm.IsMessagesView && !_vm.IsComposeTabActive
+                                     && _vm.IsSearchActive:
+                    // Search results may have moved focus back to the grid. Escape still means
+                    // "clear this search and restore the selected folder", regardless of which
+                    // message-pane control currently owns keyboard focus.
+                    await ClearMessageSearchAsync();
+                    e.Handled = true;
                     return;
                 case Key.Escape when _vm.IsCalendarView && CalendarPaneFocused
                                      && _vm.CalendarVm?.IsSearchActive == true:
@@ -3741,6 +3794,7 @@ public partial class MainWindow : Window
             LogService.Debug($"Delete key: SelectedItems.Count={MessageList.SelectedItems.Count} toDelete={toDelete.Count}");
             if ((Keyboard.Modifiers & ModifierKeys.Shift) != 0)
             {
+                if (!ConfirmPermanentDelete(toDelete.Count)) return;
                 _vm.IsBusy = true;
                 _vm.IsStatusHighlighted = true;
                 _vm.StatusText = $"Deleting message 1/{toDelete.Count:N0}…";
@@ -4388,7 +4442,7 @@ public partial class MainWindow : Window
                 // is inside this WebView2 then. Note the key is 'W' (upper case) with Shift held.
                 +"else if(e.ctrlKey&&e.shiftKey&&(e.key==='w'||e.key==='W')){window.chrome.webview.postMessage('ctrl-shift-w');e.preventDefault();}"
                 +"});"
-                +"window.addEventListener('contextmenu',function(e){e.preventDefault();window.chrome.webview.postMessage('message-body-context');});"
+                +"window.addEventListener('contextmenu',function(e){e.preventDefault();const a=e.target.closest&&e.target.closest('a[href]');window.chrome.webview.postMessage('message-body-context:'+(a?a.href:''));});"
                 +"document.addEventListener('mouseover',function(e){const a=e.target.closest&&e.target.closest('a[href]');if(a)window.chrome.webview.postMessage('link-hover:'+a.href);});"
                 +"document.addEventListener('mouseout',function(e){const a=e.target.closest&&e.target.closest('a[href]');if(a&&(!e.relatedTarget||!a.contains(e.relatedTarget)))window.chrome.webview.postMessage('link-leave');});");
 
@@ -4416,8 +4470,10 @@ public partial class MainWindow : Window
                         () => _registry.FindByGesture(Key.W, ModifierKeys.Control | ModifierKeys.Shift)
                                        ?.Execute(),
                         DispatcherPriority.Input);
-                else if (msg == "message-body-context")
-                    Dispatcher.InvokeAsync(OpenMessageBodyContextMenu, DispatcherPriority.Input);
+                else if (msg.StartsWith("message-body-context:", StringComparison.Ordinal))
+                    Dispatcher.InvokeAsync(
+                        () => OpenMessageBodyContextMenu(msg["message-body-context:".Length..]),
+                        DispatcherPriority.Input);
                 else if (msg.StartsWith("link-hover:", StringComparison.Ordinal))
                     Dispatcher.InvokeAsync(() => ShowHoveredLink(msg["link-hover:".Length..]), DispatcherPriority.Input);
                 else if (msg == "link-leave")
@@ -4522,6 +4578,7 @@ public partial class MainWindow : Window
     // list-scoped shortcuts (Shift+F, Delete, flags, etc.) remain available after the preview loads.
     private async Task ShowMessageBodyAsync(MailMessageDetail detail, bool focusMessageBody = true)
     {
+        UpdateUnsubscribeActions(detail);
         if (!_webViewReady) return;
 
         var renderVersion = Interlocked.Increment(ref _messageBodyRenderVersion);
@@ -4684,9 +4741,11 @@ public partial class MainWindow : Window
         catch (Exception ex) { LogService.Log("OnOpenInviteCardStatus", ex); }
     }
 
-    private void HandleQuickMailUri(string uri)
+    internal void HandleQuickMailUri(string uri)
     {
-        if (uri.StartsWith("quickmail:ics-accept", StringComparison.OrdinalIgnoreCase))
+        if (SnoozeReminderBuilder.TryParseLink(uri, out var reminderTarget))
+            _ = OpenSnoozeReminderTargetAsync(reminderTarget);
+        else if (uri.StartsWith("quickmail:ics-accept", StringComparison.OrdinalIgnoreCase))
             _vm.AcceptInviteCommand.Execute(null);
         else if (uri.StartsWith("quickmail:ics-tentative", StringComparison.OrdinalIgnoreCase))
             _vm.TentativeInviteCommand.Execute(null);
@@ -4694,6 +4753,42 @@ public partial class MainWindow : Window
             _vm.DeclineInviteCommand.Execute(null);
         else if (uri.StartsWith("quickmail:ics-add", StringComparison.OrdinalIgnoreCase))
             _vm.AddCalendarItemCommand.Execute(null);
+    }
+
+    private async Task OpenSnoozeReminderTargetAsync(SnoozeReminderTarget target)
+    {
+        RestoreFromTray();
+        try
+        {
+            var resolved = _localStore is LocalStoreService localStore
+                ? await localStore.ResolveSnoozeReminderTargetAsync(target)
+                : null;
+            var accountId = resolved?.AccountId ?? target.AccountId;
+            var folderName = resolved?.FolderName ?? target.FolderName;
+            var messageId = resolved?.MessageId ?? target.MessageId;
+
+            if (resolved is null && _localStore is LocalStoreService)
+            {
+                _vm.StatusText = "The original snoozed message could not be found. It may have been permanently deleted.";
+                _vm.IsStatusHighlighted = true;
+                return;
+            }
+
+            if (_vm.CachedFolders.TryGetValue(accountId, out var folders)
+                && folders.FirstOrDefault(folder => folder.FullName.Equals(
+                    folderName, StringComparison.OrdinalIgnoreCase)) is { } folder)
+                await _vm.SelectFolderCommand.ExecuteAsync(folder);
+
+            await OpenMessageByIdentityAsync(accountId, folderName, messageId);
+            _vm.StatusText = "Opened the original snoozed message.";
+            Activate();
+        }
+        catch (Exception ex)
+        {
+            LogService.Log("Open snooze reminder target", ex);
+            _vm.StatusText = $"The original snoozed message could not be opened: {ex.Message}";
+            _vm.IsStatusHighlighted = true;
+        }
     }
 
     // Message content is untrusted; only allow-listed schemes (http/https/mailto)
@@ -4807,9 +4902,18 @@ public partial class MainWindow : Window
         }
     }
 
-    private void OpenMessageBodyContextMenu()
+    private void OpenMessageBodyContextMenu(string? linkUrl)
     {
         var menu = new ContextMenu { PlacementTarget = MessageBody, Placement = PlacementMode.MousePoint };
+
+        if (ExternalUriPolicy.IsAllowed(linkUrl))
+        {
+            var copyUrl = new MenuItem { Header = "Copy _URL" };
+            copyUrl.Click += (_, _) => CopyPreviewUrl(linkUrl!);
+            menu.Items.Add(copyUrl);
+            menu.Items.Add(new Separator());
+        }
+
         var expanded = new MenuItem { Header = "Bla bla bla" };
         expanded.Click += (_, _) => ShowExpandedMessageInformation();
         menu.Items.Add(expanded);
@@ -4817,6 +4921,23 @@ public partial class MainWindow : Window
         var browser = new MenuItem { Header = "Send to _browser" };
         browser.Click += async (_, _) => await SendPreviewToBrowserAsync();
         menu.Items.Add(browser);
+
+        var viewSource = new MenuItem { Header = "View _Source" };
+        viewSource.Click += MessageContextMenu_ViewSource_Click;
+        menu.Items.Add(viewSource);
+
+        var export = new MenuItem { Header = "E_xport" };
+        var saveEml = new MenuItem { Header = "Save as _EML…" };
+        saveEml.Click += MessageContextMenu_SaveEml_Click;
+        var saveHtml = new MenuItem { Header = "Save as _HTML…" };
+        saveHtml.Click += MessageContextMenu_SaveHtml_Click;
+        var copyHeaders = new MenuItem { Header = "Copy Message _Headers" };
+        copyHeaders.Click += MessageContextMenu_CopyHeaders_Click;
+        export.Items.Add(saveEml);
+        export.Items.Add(saveHtml);
+        export.Items.Add(new Separator());
+        export.Items.Add(copyHeaders);
+        menu.Items.Add(export);
         menu.Items.Add(new Separator());
 
         var reply = new MenuItem { Header = "_Reply", Command = _vm.ReplyCommand };
@@ -4826,6 +4947,20 @@ public partial class MainWindow : Window
         if (_vm.SelectedMessage is { } selected && IsOutgoingMessage(selected))
             menu.Items.Add(new MenuItem { Header = "Send _again", Command = _vm.SendAgainCommand });
         menu.IsOpen = true;
+    }
+
+    private void CopyPreviewUrl(string url)
+    {
+        try
+        {
+            Clipboard.SetText(url);
+            _vm.StatusText = $"URL copied: {url}";
+        }
+        catch (Exception ex)
+        {
+            LogService.Log("Copy preview URL", ex);
+            _vm.StatusText = $"Could not copy URL: {ex.Message}";
+        }
     }
 
     private async Task SendPreviewToBrowserAsync()
@@ -4930,6 +5065,20 @@ public partial class MainWindow : Window
             LogService.Log("Find existing rule for selected message", ex);
         }
         OpenRulesManager(template);
+    }
+
+    private bool ConfirmPermanentDelete(int messageCount)
+    {
+        if (!PermanentDeleteConfirmationPolicy.RequiresConfirmation(messageCount)) return true;
+
+        return MessageBox.Show(
+                   this,
+                   PermanentDeleteConfirmationPolicy.BuildPrompt(messageCount),
+                   "Permanently Delete Messages",
+                   MessageBoxButton.YesNo,
+                   MessageBoxImage.Warning,
+                   MessageBoxResult.No)
+               == MessageBoxResult.Yes;
     }
 
     private MailRule CreateRuleTemplateFromMessage(MailMessageSummary message)
@@ -5087,12 +5236,7 @@ public partial class MainWindow : Window
             {
                 Report($"{outcome} {failures.Count:N0} source{(failures.Count == 1 ? "" : "s")} failed.");
                 var details = string.Join(Environment.NewLine, failures.Distinct());
-                var reconnectHint = failures.Any(failure =>
-                    failure.Contains("invalid_grant", StringComparison.OrdinalIgnoreCase))
-                    ? Environment.NewLine + Environment.NewLine +
-                      "Google authorization has expired or was revoked. Open File > Manage Accounts, " +
-                      "edit the affected account and link it again."
-                    : string.Empty;
+                var reconnectHint = BuildGoogleAuthorizationFailureHint(failures);
                 MessageBox.Show(this,
                     $"{outcome}\n\nSome account folders could not be processed:\n{details}{reconnectHint}",
                     "Filter All Like This completed with errors",
@@ -5113,6 +5257,29 @@ public partial class MainWindow : Window
             if (createRuleInstead && newRuleSource != null)
                 OpenRulesManager(CreateRuleTemplateFromMessage(newRuleSource));
         }
+    }
+
+    internal static string BuildGoogleAuthorizationFailureHint(IEnumerable<string> failures)
+    {
+        var failureList = failures as IReadOnlyCollection<string> ?? failures.ToArray();
+        var isUnauthorizedClient = failureList.Any(failure =>
+            failure.Contains("unauthorized_client", StringComparison.OrdinalIgnoreCase) ||
+            failure.Contains("invalid_client", StringComparison.OrdinalIgnoreCase));
+        if (isUnauthorizedClient)
+        {
+            return Environment.NewLine + Environment.NewLine +
+                   "Google rejected the configured OAuth client. Verify the Desktop app Client ID and " +
+                   "Client Secret in Settings > Advanced > Google integration, restart QuickMail, then " +
+                   "open File > Manage Accounts, edit the affected Gmail account and sign in again.";
+        }
+
+        var isInvalidGrant = failureList.Any(failure =>
+            failure.Contains("invalid_grant", StringComparison.OrdinalIgnoreCase));
+        return isInvalidGrant
+            ? Environment.NewLine + Environment.NewLine +
+              "Google authorization has expired or was revoked. Open File > Manage Accounts, " +
+              "edit the affected Gmail account and sign in again."
+            : string.Empty;
     }
 
     private async Task ApplyRulesToSelectedMessagesAsync()
@@ -5355,7 +5522,7 @@ public partial class MainWindow : Window
         if (string.IsNullOrWhiteSpace(url)) return;
         if (_currentLinkHoverStatus == null) _statusBeforeLinkHover = _vm.StatusText;
         _currentLinkHoverStatus = MessageLinkDomain.IsForeign(url, _vm.MessageDetail?.From)
-            ? "Warning! " + url
+            ? "Warning! Link domain does not match the sender: " + url
             : url;
         _vm.StatusText = _currentLinkHoverStatus;
     }
@@ -6807,7 +6974,8 @@ public partial class MainWindow : Window
         Dispatcher.InvokeAsync(() =>
         {
             var composeVm = new ComposeViewModel(_smtp, _accountService, _credentials, _imap,
-                _templateService, localStore: _localStore);
+                _templateService, localStore: _localStore, outgoingQueue: _outgoingQueue,
+                configService: _configService);
             composeVm.Seed(composeModel);
             composeVm.OriginalMessageReplied += (accountId, folderName, messageId) =>
             {
@@ -6872,6 +7040,7 @@ public partial class MainWindow : Window
 
     private ComposeWindow OpenComposeSurface(ComposeViewModel composeVm, Action? closed = null)
     {
+        composeVm.UndoSendAvailable += ShowUndoSend;
         var window = new ComposeWindow(composeVm, _contactService, _templateService, _configService,
             _customDictionary, _themeService);
         if (_configService.Load().Windowing.ComposeOpenMode == ComposeOpenMode.DockedTab)
@@ -6906,6 +7075,73 @@ public partial class MainWindow : Window
             window.Show();
         }
         return window;
+    }
+
+    private void ShowUndoSend(Guid queueId, string subject, DateTimeOffset undoUntilUtc)
+    {
+        _undoSendTimer?.Stop();
+        _undoSendQueueId = queueId;
+        var displaySubject = string.IsNullOrWhiteSpace(subject) ? "(no subject)" : subject.Trim();
+        if (displaySubject.Length > 80) displaySubject = displaySubject[..77] + "…";
+        UndoSendText.Text = "Undo · " + displaySubject;
+        UndoSendBanner.Visibility = Visibility.Visible;
+        UndoSendButton.IsEnabled = true;
+
+        var remaining = undoUntilUtc - DateTimeOffset.UtcNow;
+        if (remaining <= TimeSpan.Zero)
+        {
+            HideUndoSend(queueId);
+            return;
+        }
+
+        _undoSendTimer = new DispatcherTimer { Interval = remaining };
+        _undoSendTimer.Tick += (_, _) =>
+        {
+            _undoSendTimer?.Stop();
+            HideUndoSend(queueId);
+        };
+        _undoSendTimer.Start();
+    }
+
+    private async void UndoSendButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_undoSendQueueId is not { } queueId || _outgoingQueue is null) return;
+        UndoSendButton.IsEnabled = false;
+        try
+        {
+            var restored = await _outgoingQueue.UndoSendAsync(queueId);
+            HideUndoSend(queueId);
+            if (restored is null)
+            {
+                _vm.StatusText = "Could not undo send: the message is already being sent.";
+                return;
+            }
+
+            await _vm.RefreshFolderListAsync(restored.AccountId);
+            if (_vm.SelectedFolder?.Kind is SpecialFolderKind.Drafts or SpecialFolderKind.Scheduled)
+                await _vm.SelectFolderCommand.ExecuteAsync(_vm.SelectedFolder);
+            _vm.StatusText = "Send cancelled. The message was saved in Draft.";
+        }
+        catch (Exception ex)
+        {
+            LogService.Log("Undo queued send", ex);
+            HideUndoSend(queueId);
+            _vm.StatusText = $"Could not undo send: {ex.Message}";
+        }
+        finally
+        {
+            UndoSendButton.IsEnabled = true;
+        }
+    }
+
+    private void DismissUndoSend_Click(object sender, RoutedEventArgs e) => HideUndoSend();
+
+    private void HideUndoSend(Guid? expectedQueueId = null)
+    {
+        if (expectedQueueId is not null && _undoSendQueueId != expectedQueueId) return;
+        _undoSendTimer?.Stop();
+        _undoSendQueueId = null;
+        UndoSendBanner.Visibility = Visibility.Collapsed;
     }
 
     private void OnMessagesDeleting(IReadOnlyList<MailMessageSummary> messages)
@@ -7192,6 +7428,7 @@ public partial class MainWindow : Window
             }
         };
         win.CalendarAddRequested += detail => _vm.AddCalendarItemFromMessage(detail);
+        win.InternalLinkRequested += HandleQuickMailUri;
         _openMessageWindows.Add(win);
         // Wire mail action delegates so the window has full message operations.
         // Each delegate syncs MainViewModel selection to the window's current message
@@ -7309,6 +7546,11 @@ public partial class MainWindow : Window
     private async void CheckMailButton_Click(object sender, RoutedEventArgs e)
     {
         if (Application.Current is not App app) return;
+        if (app.MailActivityPolicy is { Mode: not MailActivityMode.Online } activity)
+        {
+            activity.GoOnline();
+            _vm.StatusText = "Online mode restored; checking mail…";
+        }
         _vm.IsBusy = true;
         _vm.IsStatusHighlighted = true;
         try
@@ -7923,7 +8165,8 @@ public partial class MainWindow : Window
         {
             if (pending is not null) return pending;
             var cvm = new ComposeViewModel(_smtp, _accountService, _credentials, _imap,
-                _templateService, localStore: _localStore);
+                _templateService, localStore: _localStore, outgoingQueue: _outgoingQueue,
+                configService: _configService);
             // Seed with an empty new-message model so the sender-account list is populated and the
             // default account + signature are applied — same as the normal "New message" path. Without
             // this the From picker is empty and the user can't choose who to send from (a pre-existing
@@ -8277,6 +8520,177 @@ public partial class MainWindow : Window
         await _vm.MarkMessagesUnreadAsync(MessageList.SelectedItems.Cast<MailMessageSummary>()
             .Concat(_vm.SelectedMessage is null ? [] : [_vm.SelectedMessage]).Distinct().ToList());
 
+    private async void MessageContextMenu_History_Click(object sender, RoutedEventArgs e)
+    {
+        var message = GetSelectedMessages().FirstOrDefault();
+        if (message is null) return;
+
+        var header = IsOutgoingMessage(message) ? message.To : message.From;
+        var addresses = new InternetAddressList();
+        AddressParser.AddAddresses(addresses, header);
+        var ownAddresses = _vm.Accounts
+            .Select(account => account.Username?.Trim())
+            .Where(address => !string.IsNullOrWhiteSpace(address))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var contact = addresses.OfType<MailboxAddress>()
+            .FirstOrDefault(address => !ownAddresses.Contains(address.Address))
+            ?? addresses.OfType<MailboxAddress>().FirstOrDefault();
+
+        if (contact is null || string.IsNullOrWhiteSpace(contact.Address))
+        {
+            _vm.StatusText = "History is unavailable because this message has no valid correspondent address.";
+            _vm.IsStatusHighlighted = true;
+            return;
+        }
+
+        await _vm.ShowContactMailAsync(contact.Address,
+            MainViewModel.ContactMailDirection.Both,
+            string.IsNullOrWhiteSpace(contact.Name) ? null : contact.Name);
+    }
+
+    private async void MessageContextMenu_Snooze_Click(object sender, RoutedEventArgs e)
+    {
+        if (Application.Current is not App { Snooze: { } snooze }) return;
+        var messages = GetSelectedMessages();
+        if (messages.Count == 0) return;
+        var now = DateTime.Now;
+        var preset = (sender as MenuItem)?.Tag as string;
+        var wakeLocal = preset switch
+        {
+            "evening" => now.Date.AddHours(18) > now ? now.Date.AddHours(18) : now.AddHours(2),
+            "tomorrow" => now.Date.AddDays(1).AddHours(9),
+            "week" => now.Date.AddDays(7).AddHours(9),
+            _ => now.AddHours(1),
+        };
+        if (preset == "custom")
+        {
+            var prompt = new TextPromptWindow("Snooze", "Return to the inbox at (local date and time):",
+                now.AddDays(1).Date.AddHours(9).ToString("g", CultureInfo.CurrentCulture)) { Owner = this };
+            if (prompt.ShowDialog() != true) return;
+            if (!DateTime.TryParse(prompt.Value, CultureInfo.CurrentCulture, DateTimeStyles.AllowWhiteSpaces,
+                    out wakeLocal) || wakeLocal <= now)
+            {
+                MessageBox.Show(this, "Enter a future local date and time.", "Snooze",
+                    MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+        }
+
+        var scheduleReminders = false;
+        if (wakeLocal - now > TimeSpan.FromHours(24))
+        {
+            var answer = MessageBox.Show(this,
+                $"The snoozed message will keep its original date and may be easy to miss when it returns on {wakeLocal:g}.\n\n" +
+                "Would you also like Eudora QuickMail to send a short reminder email to yourself at that time? " +
+                "The reminder will contain a direct link to the original message.",
+                "Long Snooze", MessageBoxButton.YesNoCancel, MessageBoxImage.Question,
+                MessageBoxResult.Yes);
+            if (answer == MessageBoxResult.Cancel) return;
+            scheduleReminders = answer == MessageBoxResult.Yes;
+        }
+        try
+        {
+            await snooze.SnoozeAsync(messages, new DateTimeOffset(wakeLocal));
+            var remindersScheduled = scheduleReminders
+                ? await ScheduleSnoozeRemindersAsync(messages, new DateTimeOffset(wakeLocal))
+                : 0;
+            await _vm.RefreshAfterSnoozeAsync();
+            _vm.StatusText = $"{messages.Count:N0} {(messages.Count == 1 ? "message" : "messages")} snoozed until {wakeLocal:g}." +
+                (scheduleReminders
+                    ? $" {remindersScheduled:N0} reminder {(remindersScheduled == 1 ? "email was" : "emails were")} scheduled."
+                    : string.Empty);
+        }
+        catch (Exception ex)
+        {
+            LogService.Log("Snooze messages", ex);
+            _vm.StatusText = $"Snooze failed: {ex.Message}";
+        }
+    }
+
+    private async Task<int> ScheduleSnoozeRemindersAsync(
+        IReadOnlyCollection<MailMessageSummary> messages, DateTimeOffset wakeAt)
+    {
+        var queue = _outgoingQueue ?? (Application.Current as App)?.ScheduledSender;
+        if (queue is null)
+        {
+            _vm.IsStatusHighlighted = true;
+            return 0;
+        }
+
+        var scheduled = 0;
+        foreach (var message in messages)
+        {
+            var source = _vm.Accounts.FirstOrDefault(account => account.Id == message.AccountId);
+            var sender = source is { IsActive: true, BackendKind: not BackendKind.LocalArchive }
+                         && EmailAddressValidator.IsValid(source.Username)
+                ? source
+                : _vm.Accounts.FirstOrDefault(account => account.IsActive && account.IsDefault
+                    && account.BackendKind != BackendKind.LocalArchive
+                    && EmailAddressValidator.IsValid(account.Username))
+                  ?? _vm.Accounts.FirstOrDefault(account => account.IsActive
+                      && account.BackendKind != BackendKind.LocalArchive
+                      && EmailAddressValidator.IsValid(account.Username));
+            if (sender is null)
+            {
+                LogService.Log($"Snooze reminder not scheduled for {message.MessageId}: no send-capable account.");
+                continue;
+            }
+
+            try
+            {
+                await queue.ScheduleAsync(SnoozeReminderBuilder.Build(message, sender), wakeAt);
+                scheduled++;
+            }
+            catch (Exception ex)
+            {
+                LogService.Log($"Snooze reminder scheduling failed for {message.MessageId}", ex);
+            }
+        }
+        return scheduled;
+    }
+
+    private void OfflineModeMenuItem_Click(object sender, RoutedEventArgs e)
+    {
+        if (Application.Current is not App { MailActivityPolicy: { } activity }) return;
+        if (activity.Mode == MailActivityMode.Offline) activity.GoOnline(); else activity.SetOffline();
+        UpdateMailActivityMenu();
+        _vm.StatusText = activity.DisplayText;
+    }
+
+    private void FocusModeMenuItem_Click(object sender, RoutedEventArgs e)
+    {
+        if (Application.Current is not App { MailActivityPolicy: { } activity } ||
+            !int.TryParse((sender as MenuItem)?.Tag as string, out var minutes)) return;
+        activity.StartFocus(TimeSpan.FromMinutes(minutes));
+        UpdateMailActivityMenu();
+        _vm.StatusText = activity.DisplayText;
+    }
+
+    private void EndFocusModeMenuItem_Click(object sender, RoutedEventArgs e)
+    {
+        if (Application.Current is not App { MailActivityPolicy: { } activity }) return;
+        activity.GoOnline();
+        UpdateMailActivityMenu();
+        _vm.StatusText = activity.DisplayText;
+    }
+
+    private void OnMailActivityChanged()
+    {
+        Dispatcher.BeginInvoke(() =>
+        {
+            UpdateMailActivityMenu();
+            if (Application.Current is App { MailActivityPolicy: { } activity })
+                _vm.StatusText = activity.DisplayText;
+        });
+    }
+
+    private void UpdateMailActivityMenu()
+    {
+        var mode = (Application.Current as App)?.MailActivityPolicy?.Mode ?? MailActivityMode.Online;
+        OfflineModeMenuItem.IsChecked = mode == MailActivityMode.Offline;
+        EndFocusModeMenuItem.IsEnabled = mode == MailActivityMode.Focus;
+    }
+
     private async void MenuRebuildSearchIndexes_Click(object sender, RoutedEventArgs e)
     {
         if (_localStore is not LocalStoreService store)
@@ -8359,6 +8773,144 @@ public partial class MainWindow : Window
         }
     }
 
+    private void UpdateUnsubscribeActions(MailMessageDetail? detail)
+    {
+        _unsubscribeCandidate = UnsubscribeDetector.Detect(detail);
+        if (_unsubscribeCandidate != null &&
+            Application.Current is App { UnsubscribePreferences: { } preferences } &&
+            preferences.IsMaintained(_unsubscribeCandidate.SourceKey))
+            _unsubscribeCandidate = null;
+        var visible = _unsubscribeCandidate == null ? Visibility.Collapsed : Visibility.Visible;
+        UnsubscribeButton.Visibility = visible;
+        MaintainSubscriptionButton.Visibility = visible;
+    }
+
+    private void Unsubscribe_Click(object sender, RoutedEventArgs e)
+    {
+        if (_unsubscribeCandidate is not { } candidate) return;
+        var choiceWindow = new UnsubscribeOpenChoiceWindow(candidate.Url) { Owner = this };
+        if (choiceWindow.ShowDialog() != true) return;
+
+        if (choiceWindow.Choice == UnsubscribeOpenChoice.Isolated)
+        {
+            var window = new UnsubscribeBrowserWindow(candidate.Url) { Owner = this };
+            window.Show();
+            return;
+        }
+
+        if (choiceWindow.Choice != UnsubscribeOpenChoice.DefaultBrowser) return;
+        try
+        {
+            Process.Start(new ProcessStartInfo(candidate.Url.AbsoluteUri) { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            LogService.Log("Open unsubscribe page in default browser", ex);
+            _vm.IsStatusHighlighted = true;
+            _vm.StatusText = $"Could not open the unsubscribe page: {ex.Message}";
+            MessageBox.Show(this, ex.Message, "Open unsubscribe page",
+                MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    private void MaintainSubscription_Click(object sender, RoutedEventArgs e)
+    {
+        if (_unsubscribeCandidate is not { } candidate ||
+            Application.Current is not App { UnsubscribePreferences: { } preferences }) return;
+        preferences.Maintain(candidate.SourceKey);
+        _unsubscribeCandidate = null;
+        UnsubscribeButton.Visibility = Visibility.Collapsed;
+        MaintainSubscriptionButton.Visibility = Visibility.Collapsed;
+        _vm.StatusText = $"Subscription controls hidden for {candidate.SourceKey}.";
+    }
+
+    private void MenuAccountHealth_Click(object sender, RoutedEventArgs e)
+    {
+        new AccountHealthWindow(BuildAccountHealthSnapshotAsync) { Owner = this }.ShowDialog();
+    }
+
+    private async Task<IReadOnlyList<AccountHealthRow>> BuildAccountHealthSnapshotAsync()
+    {
+        var accounts = _vm.Accounts.ToList();
+        var queued = _outgoingQueue is ScheduledSendService scheduler
+            ? await scheduler.GetSnapshotAsync()
+            : Array.Empty<ScheduledMail>();
+        var protector = new DpapiAccountSecretProtector();
+
+        async Task<AccountHealthRow> InspectAsync(AccountModel account)
+        {
+            var incoming = account.BackendKind switch
+            {
+                BackendKind.LocalArchive => "Local store",
+                BackendKind.MicrosoftGraph => account.CheckIncomingMail ? "Graph enabled" : "Disabled",
+                BackendKind.Pop3Smtp => !account.CheckIncomingMail ? "Disabled" :
+                    string.IsNullOrWhiteSpace(account.Pop3Host) ? "POP3 missing" : $"POP3 {account.Pop3Host}:{account.Pop3Port}",
+                _ => !account.CheckIncomingMail ? "Disabled" :
+                    string.IsNullOrWhiteSpace(account.ImapHost) ? "IMAP missing" : $"IMAP {account.ImapHost}:{account.ImapPort}",
+            };
+            var outgoing = account.BackendKind switch
+            {
+                BackendKind.LocalArchive => "Not available",
+                BackendKind.MicrosoftGraph => "Microsoft Graph",
+                _ when string.IsNullOrWhiteSpace(account.SmtpHost) => "SMTP missing",
+                _ => $"SMTP {account.SmtpHost}:{account.SmtpPort}",
+            };
+
+            var authentication = "Not required";
+            if (account.BackendKind != BackendKind.LocalArchive)
+            {
+                if (account.AuthType is AuthType.OAuth2Google or AuthType.OAuth2Microsoft)
+                {
+                    try
+                    {
+                        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+                        await _oauth.EnsureSilentTokenAsync(account, cts.Token);
+                        authentication = "OAuth token valid";
+                    }
+                    catch (Exception ex)
+                    {
+                        authentication = $"Sign-in required ({ex.Message})";
+                    }
+                }
+                else if (account.BackendKind == BackendKind.Pop3Smtp)
+                {
+                    var receive = !string.IsNullOrWhiteSpace(protector.GetPop3Password(account));
+                    var send = !string.IsNullOrWhiteSpace(protector.GetSmtpPassword(account));
+                    authentication = receive && send ? "Passwords saved" : "Password missing";
+                }
+                else
+                {
+                    authentication = string.IsNullOrWhiteSpace(_credentials.GetPassword(account.Id))
+                        ? "Password missing"
+                        : "Password saved";
+                }
+            }
+
+            var accountQueue = queued.Where(item => item.Message.AccountId == account.Id).ToList();
+            var errors = accountQueue.Where(item => !string.IsNullOrWhiteSpace(item.LastError)).ToList();
+            var queueText = accountQueue.Count == 0 ? "Empty" :
+                errors.Count == 0 ? $"{accountQueue.Count:N0} pending" :
+                $"{accountQueue.Count:N0} pending, {errors.Count:N0} error";
+            var lastError = errors.OrderByDescending(item => item.NextAttemptUtc ?? item.SendAtUtc)
+                .FirstOrDefault()?.LastError ?? string.Empty;
+            var needsAttention = incoming.EndsWith("missing", StringComparison.OrdinalIgnoreCase)
+                                 || outgoing.EndsWith("missing", StringComparison.OrdinalIgnoreCase)
+                                 || authentication.Contains("missing", StringComparison.OrdinalIgnoreCase)
+                                 || authentication.Contains("required", StringComparison.OrdinalIgnoreCase)
+                                 || errors.Count > 0;
+            var state = !account.IsActive ? "Inactive" : needsAttention ? "Needs attention" :
+                _vm.IsAccountReady(account.Id) ? "Connected" : "Ready";
+            var lastSync = _vm.LastSyncedUtc(account.Id)?.ToLocalTime().ToString("g", CultureInfo.CurrentCulture)
+                           ?? "Never this session";
+
+            return new AccountHealthRow(account.AccountLabel, state,
+                account.BackendKind.ToString(), incoming, outgoing, authentication,
+                lastSync, queueText, lastError, needsAttention);
+        }
+
+        return await Task.WhenAll(accounts.Select(InspectAsync));
+    }
+
     private bool HasLinkedGoogleCalendar() => _vm.Accounts.Any(account =>
         (account.CalendarProvider?.Equals("google", StringComparison.OrdinalIgnoreCase) == true &&
          !string.IsNullOrWhiteSpace(account.CalendarIdentity)) ||
@@ -8438,6 +8990,122 @@ public partial class MainWindow : Window
             _vm.StatusText = $"Could not open message source: {ex.Message}";
         }
         finally { _vm.IsBusy = false; }
+    }
+
+    private async void MessageContextMenu_SaveEml_Click(object sender, RoutedEventArgs e) =>
+        await ExportSelectedMessagesAsync("eml");
+
+    private async void MessageContextMenu_SaveHtml_Click(object sender, RoutedEventArgs e) =>
+        await ExportSelectedMessagesAsync("html");
+
+    private async void MessageContextMenu_CopyHeaders_Click(object sender, RoutedEventArgs e)
+    {
+        var selected = GetSelectedMessages();
+        if (selected.Count == 0) return;
+        try
+        {
+            var blocks = new List<string>();
+            foreach (var summary in selected)
+            {
+                var detail = await LoadMessageDetailForExportAsync(summary);
+                if (detail != null)
+                    blocks.Add(selected.Count == 1
+                        ? MessageExportService.Headers(detail)
+                        : $"===== {summary.Subject} =====\r\n{MessageExportService.Headers(detail)}");
+            }
+            if (blocks.Count == 0) return;
+            Clipboard.SetText(string.Join("\r\n\r\n", blocks));
+            _vm.StatusText = $"Copied headers for {blocks.Count:N0} message{(blocks.Count == 1 ? "" : "s")}.";
+        }
+        catch (Exception ex)
+        {
+            LogService.Log("Copy message headers", ex);
+            _vm.StatusText = $"Could not copy message headers: {ex.Message}";
+        }
+    }
+
+    private async Task ExportSelectedMessagesAsync(string extension)
+    {
+        var selected = GetSelectedMessages();
+        if (selected.Count == 0) return;
+
+        string? singlePath = null;
+        string? directory = null;
+        if (selected.Count == 1)
+        {
+            var safeSubject = ExportFileName(selected[0], extension);
+            var dialog = new Microsoft.Win32.SaveFileDialog
+            {
+                FileName = safeSubject,
+                DefaultExt = "." + extension,
+                Filter = extension == "eml" ? "Email message (*.eml)|*.eml" : "HTML document (*.html)|*.html"
+            };
+            if (dialog.ShowDialog(this) != true) return;
+            singlePath = dialog.FileName;
+        }
+        else
+        {
+            var dialog = new Microsoft.Win32.OpenFolderDialog
+            {
+                Title = $"Choose a folder for {selected.Count:N0} exported messages",
+                Multiselect = false
+            };
+            if (dialog.ShowDialog(this) != true) return;
+            directory = dialog.FolderName;
+        }
+
+        _vm.IsBusy = true;
+        _vm.IsStatusHighlighted = true;
+        var exported = 0;
+        try
+        {
+            foreach (var summary in selected)
+            {
+                _vm.StatusText = $"Exporting message {exported + 1:N0}/{selected.Count:N0}…";
+                var detail = await LoadMessageDetailForExportAsync(summary)
+                    ?? throw new InvalidOperationException($"Message not found: {summary.Subject}");
+                var path = singlePath ?? UniqueExportPath(directory!, ExportFileName(summary, extension));
+                if (extension == "eml")
+                    await MessageExportService.WriteEmlAsync(detail, path, _imap);
+                else
+                    await File.WriteAllTextAsync(path, MessageExportService.Html(detail), System.Text.Encoding.UTF8);
+                exported++;
+            }
+            _vm.StatusText = $"Exported {exported:N0} message{(exported == 1 ? "" : "s")}.";
+        }
+        catch (Exception ex)
+        {
+            LogService.Log("Export messages", ex);
+            _vm.StatusText = $"Message export failed after {exported:N0}: {ex.Message}";
+            MessageBox.Show(this, ex.Message, "Export Messages", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally { _vm.IsBusy = false; }
+    }
+
+    private async Task<MailMessageDetail?> LoadMessageDetailForExportAsync(MailMessageSummary summary)
+    {
+        var detail = await _localStore.LoadDetailAsync(summary.AccountId, summary.FolderName, summary.MessageId);
+        return detail ?? await _imap.GetMessageDetailAsync(summary.AccountId, summary.FolderName, summary.MessageId);
+    }
+
+    private static string ExportFileName(MailMessageSummary summary, string extension)
+    {
+        var subject = string.IsNullOrWhiteSpace(summary.Subject) ? "No subject" : summary.Subject;
+        var stamp = summary.Date.Year > 1 ? summary.Date.ToLocalTime().ToString("yyyy-MM-dd HHmmss") : "Unknown date";
+        return AttachmentSafety.SanitizeFileName($"{stamp} - {subject}.{extension}");
+    }
+
+    private static string UniqueExportPath(string directory, string fileName)
+    {
+        var path = Path.Combine(directory, fileName);
+        if (!File.Exists(path)) return path;
+        var stem = Path.GetFileNameWithoutExtension(fileName);
+        var extension = Path.GetExtension(fileName);
+        for (var ordinal = 2; ; ordinal++)
+        {
+            path = Path.Combine(directory, $"{stem} ({ordinal}){extension}");
+            if (!File.Exists(path)) return path;
+        }
     }
 
     private void MenuImportEudora_Click(object sender, RoutedEventArgs e)
@@ -8650,7 +9318,9 @@ public partial class MainWindow : Window
             currentSort:      _vm.ActiveSort,
             currentDayLimit:  _vm.ActiveDayLimit,
             isCreateMode:     createMode,
-            activeFlagFilterId: _vm.ActiveFlagFilterId);
+            activeFlagFilterId: _vm.ActiveFlagFilterId,
+            currentSearchQuery: _vm.IsSearchActive ? _vm.SearchText : null,
+            currentSearchEverywhere: _vm.SearchEverywhere);
 
         var dialog = new ViewManagerWindow(vmVm, createMode) { Owner = this };
         dialog.ShowDialog();
@@ -8748,6 +9418,45 @@ public partial class MainWindow : Window
             if (result.RemovedMessages.Count > 0)
                 _vm.ShowLatestFilteredDestination(rule, result.RemovedMessages[0]);
             return result.MatchedCount;
+        }
+
+        async Task<RulePreviewResult> PreviewSelectedRule(MailRule rule)
+        {
+            var messages = await _vm.LoadCurrentFolderSummariesForRulesAsync(currentFolder);
+            if (rule.AlsoFilterOutMailbox)
+            {
+                messages.AddRange(await _vm.LoadOutFolderSummariesForRulesAsync(currentFolder, rule.AccountId));
+                messages = messages
+                    .DistinctBy(message => (message.AccountId, message.FolderName, message.MessageId))
+                    .ToList();
+            }
+
+            var matches = _ruleService.TestRule(rule, messages)
+                .OrderByDescending(message => message.Date)
+                .ToList();
+            var action = rule.Action switch
+            {
+                RuleAction.MoveToFolder => $"Would move matching messages to {rule.TargetFolder ?? "(no folder)"}" +
+                                           (rule.AlsoMarkAsRead ? " and mark them as read." : "."),
+                RuleAction.MarkAsRead => "Would mark matching messages as read.",
+                RuleAction.MarkAsUnread => "Would mark matching messages as unread.",
+                RuleAction.Delete => "Would move matching messages to Trash" +
+                                     (rule.AlsoMarkAsRead ? " after marking them as read." : "."),
+                _ => "No action."
+            };
+            var markRead = rule.Action == RuleAction.MarkAsRead || rule.AlsoMarkAsRead
+                ? matches.Count
+                : 0;
+            return new RulePreviewResult(
+                rule.Name,
+                rule.AlsoFilterOutMailbox ? $"{currentFolderName} + Out" : currentFolderName,
+                action,
+                messages.Count,
+                matches.Count,
+                matches.Count(message => message.Direction == MessageDirection.Incoming),
+                matches.Count(message => message.Direction == MessageDirection.Outgoing),
+                markRead,
+                matches.Take(20).ToList());
         }
 
         // Unowned (issue #347) so the window reads its own title, not the main window's. Modeless
@@ -8863,6 +9572,7 @@ public partial class MainWindow : Window
             if (selectRuleId is { } ruleId) rulesVm.SelectRule(ruleId);
             rulesVm.RunOnExistingRequested += RunClientRulesOnExisting;
             rulesVm.ApplyToCurrentFolderRequested += ApplySelectedRuleToCurrentFolder;
+            rulesVm.PreviewRuleRequested += PreviewSelectedRule;
             dialog = new RulesManagerWindow(rulesVm, accounts, _vm.CachedFolders,
                 (accountId, parentFullName, name) =>
                     _vm.CreateFolderReturningFoldersAsync(accountId, parentFullName, name),

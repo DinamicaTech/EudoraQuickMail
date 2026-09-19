@@ -1,31 +1,75 @@
 # Eudora QuickMail
 
-A keyboard-first WPF desktop email client for Windows. Multi-account IMAP/SMTP with a unified inbox, conversation threading, and an HTML reading pane.
+![Eudora QuickMail — Email that stays out of your way](quickmail-og.png)
 
-## Fork documentation
+**A free, open-source, local-first desktop email client for Windows.** Eudora QuickMail
+brings multiple accounts, large mail archives, calendars and contacts into one fast,
+keyboard-driven workspace.
 
-This repository contains the local-first **Eudora QuickMail** fork, whose scope now extends
-well beyond the original QuickMail feature summary below. See
-[`AI_HANDOFF.md`](AI_HANDOFF.md) for the complete product specification, architecture,
-behavioral invariants, build/release workflow and reconstruction checklist. See
-[`FORK_CHANGELOG.md`](FORK_CHANGELOG.md) for its incremental development history.
+[Product website](https://www.dinamica.tech/eudoraquickmail) ·
+[Download the latest release](https://github.com/DinamicaTech/QuickMail/releases/latest) ·
+[User guide](USERGUIDE.md) ·
+[Report a problem](https://github.com/DinamicaTech/QuickMail/issues)
 
-## Features
+> **Project status:** active development. QuickMail is already used with real mail archives,
+> but it has not yet reached a stable 1.0 release. Back up important data and review the
+> release notes before upgrading.
 
-- **Multi-account** — connect any number of IMAP/SMTP accounts simultaneously
-- **Unified inbox** — all mail from all accounts in one sorted view
-- **Conversation view** — threads grouped by subject with collapsible tree
-- **Pooled IMAP connections** — background sync, previews, attachment downloads, and message opening can run without reusing a busy IMAP connection
-- **Folder tree shortcut** — Ctrl+2 or Ctrl+Y moves focus to the main folder tree
-- **Search folders** — Ctrl+Shift+F opens a virtualized flat folder list; press / in the list to search
-- **Responsive reading pane** — complex marketing HTML falls back to a simplified reader mode
-- **HTML rendering** — WebView2 with strict CSP (no email-embedded scripts)
-- **Keyboard-first** — full navigation, reply, forward, and delete.
-- **Secure credentials** — passwords stored in Windows Credential Manager, never in plain text
+## Email that stays out of your way
+
+QuickMail is designed for people who live in email and want their client to help them work,
+not compete for their attention. It combines the speed and filing-oriented workflow that made
+classic Eudora distinctive with current Windows integration and modern mail services.
+
+| | Capability |
+|---|---|
+| **Mail, brought together** | Multiple IMAP, SMTP, POP3 and Microsoft Graph accounts; unified views; conversation threading; shared mailboxes; safe move, copy, archive, delete and restore workflows. |
+| **Fast local search** | SQLite-backed local storage, near-instant search across large archives, saved views and full-text search inside supported attachments. |
+| **Calendar in context** | Local calendars and Google Calendar integration; day, week and month views; event editing; ICS invitation detection and RSVP controls. |
+| **People and organization** | Local address book and groups, optional Google and Microsoft contact sync, iCloud support, rules with real-message preview and recipient discovery. |
+| **Productivity tools** | Templates, scheduled sending, snooze, watched conversations, forgotten-attachment warnings, message export and an offline outgoing queue. |
+| **Accessible by design** | Full keyboard navigation, customizable shortcuts, command palette, screen-reader labels, focus feedback, themed high-contrast-friendly controls and reader mode. |
+
+## Local-first and privacy-conscious
+
+QuickMail connects directly from your computer to the providers and servers you configure.
+It does not require a Dinámica Ingeniería cloud account.
+
+- Working mail data, calendars, contacts and search indexes stay in the local QuickMail profile.
+- Passwords are stored in Windows Credential Manager.
+- OAuth tokens are protected with Windows security.
+- Message HTML is rendered with scripts disabled and a restrictive content security policy.
+- Online integrations are optional and used only for the capabilities you enable.
+
+See the [privacy policy](https://www.dinamica.tech/privacy) for the complete description of
+data handling.
+
+## Bring your Eudora history forward
+
+The included Eudora importer provides a dedicated migration path for classic mailboxes,
+folders, messages and attachments. Large archives are processed with visible progress,
+recovery safeguards and a local data model designed to preserve message identity.
+
+The name reflects both sides of the project: **Eudora** honours the application and workflow
+that inspired it, while **QuickMail** credits the open-source project on which this fork was
+built and describes its goal—making serious email work remarkably fast.
+
+## Download and install
+
+Release installers are published on the
+[GitHub Releases page](https://github.com/DinamicaTech/QuickMail/releases). Choose the Windows
+x64 package for most PCs or the ARM64 package for native Windows on ARM. Portable executables
+are also provided.
+
+> The first DinamicaTech build is published as a **pre-release** and is temporarily unsigned
+> while the project onboards to SignPath Foundation. Windows may therefore show an
+> "Unknown publisher" warning. It will not be promoted to a stable release until project-owned
+> signing is in place.
 
 ## Requirements
 
 - Windows 10/11 x64
+- Windows 11 ARM64 for the native ARM64 build
 - [.NET 8 SDK](https://dotnet.microsoft.com/download) (to build from source)
 - [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/) (usually pre-installed on Windows 11)
 
@@ -49,7 +93,7 @@ Or with the CLI:
 dotnet run --project QuickMail
 ```
 
-## Keyboard Shortcuts
+## Keyboard shortcuts
 
 | Key | Action |
 |-----|--------|
@@ -76,9 +120,11 @@ dotnet run --project QuickMail
 | Delete | Delete selected contact |
 | Ctrl+Shift+P | Command palette (Add, Edit, Save, Cancel, etc.) |
 
-For the full list of keyboard shortcuts including customization options, see [`docs/release-notes-v0.7.1.md`](docs/release-notes-v0.7.1.md) (Address Book contacts management) and the **Keyboard Shortcuts** tab in Settings.
+For the full list, including shortcut customization, see
+[`docs/KEYBOARD-SHORTCUTS.md`](docs/KEYBOARD-SHORTCUTS.md) or the **Keyboard shortcuts** tab
+in Settings.
 
-## Project Layout
+## Project layout
 
 ```
 QuickMail/
@@ -110,7 +156,16 @@ QuickMail/
     └── ComposeModel.cs
 ```
 
-## CI / Releases
+## Documentation
+
+- [`USERGUIDE.md`](USERGUIDE.md) — complete user guide
+- [`FORK_CHANGELOG.md`](FORK_CHANGELOG.md) — history of this fork
+- [`CHANGELOG.md`](CHANGELOG.md) — project changelog
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — architecture overview
+- [`AI_HANDOFF.md`](AI_HANDOFF.md) — detailed product specification, behavioral invariants and reconstruction notes
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) — how to contribute
+
+## CI and releases
 
 Every push to `main` and every pull request builds and uploads `QuickMail.exe` as an artifact via GitHub Actions.
 
@@ -121,7 +176,10 @@ git tag v1.0.0
 git push origin v1.0.0
 ```
 
-This triggers a GitHub Release with the self-contained exe attached.
+This triggers a pre-release with installers, update-feed assets and portable executables.
+Signing is intentionally disabled until the repository is approved and configured for
+[SignPath Foundation](docs/SIGNING.md); no credentials from the upstream project are reused.
+See [`installer/README.md`](installer/README.md) for local installer builds.
 
 ## Dependencies
 
@@ -133,8 +191,14 @@ This triggers a GitHub Release with the self-contained exe attached.
 | [Microsoft.Web.WebView2](https://developer.microsoft.com/microsoft-edge/webview2/) | HTML email rendering |
 | [AdysTech.CredentialManager](https://github.com/AdysTech/CredentialManager) | Windows Credential Manager |
 
-## IMAP Concurrency
+## IMAP concurrency
 
 QuickMail opens a small per-account IMAP connection pool. This prevents MailKit's "ImapClient is currently busy" error when background sync is running and you open a message, preview text, download attachments, or move/copy mail. The default is 6 simultaneous IMAP connections per account and can be changed in `%AppData%\QuickMail\config.ini` with `MaxImapConnectionsPerAccount`.
 
 Foreground actions such as opening messages and downloading attachments get reserved connection capacity. Background sync, polling, UID checks, and preview fetching are deliberately capped below the full pool so they do not occupy every available connection.
+
+## Origin and license
+
+Eudora QuickMail is a fork of [QuickMail](https://github.com/kellylford/QuickMail), created
+by Kelly Ford and developed further by the Eudora QuickMail contributors. The project is
+released under the [MIT License](LICENSE).

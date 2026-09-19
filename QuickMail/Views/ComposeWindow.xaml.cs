@@ -61,6 +61,81 @@ internal sealed class AddressSuggestion
 [SuppressMessage("Design", "CA1001", Justification = "_autocompleteCts is cancelled and disposed in OnClosed; WPF never calls Dispose on a Window, so implementing IDisposable would be dead code.")]
 public partial class ComposeWindow : Window
 {
+    internal const string HtmlEditorBridgeResourceName = "QuickMail.Assets.HugeRte.editor.html";
+    // WebView2 runs this before any page script, including HugeRTE's iframe listeners.  Handling
+    // external files here is intentionally redundant with editor.html: the early bridge wins the
+    // event-order race that otherwise lets HugeRTE display "Dropped file type is not supported"
+    // before QuickMail's normal editor-init handler sees a PDF/Office/ZIP file.
+    internal const string EarlyAttachmentDropBridgeScript = """
+        (() => {
+          if (window.__quickMailEarlyAttachmentDropBridge) return;
+          window.__quickMailEarlyAttachmentDropBridge = true;
+
+          const isFileDrag = event => {
+            const transfer = event.dataTransfer;
+            return !!transfer &&
+              (Array.from(transfer.types || []).includes('Files') || transfer.files?.length > 0);
+          };
+          const consume = event => {
+            event.preventDefault();
+            event.stopPropagation();
+            event.stopImmediatePropagation();
+          };
+          const send = message => {
+            const payload = JSON.stringify(message);
+            // CoreWebView2.WebMessageReceived only receives messages from the top-level
+            // document.  HugeRTE edits in a child iframe, so relay its payload to the host page.
+            if (window.top !== window) {
+              window.top.postMessage({ quickMailAttachmentDrop: payload }, '*');
+              return;
+            }
+            window.chrome?.webview?.postMessage(payload);
+          };
+
+          if (window.top === window) {
+            window.addEventListener('message', event => {
+              const payload = event.data?.quickMailAttachmentDrop;
+              if (typeof payload === 'string') window.chrome?.webview?.postMessage(payload);
+            });
+          }
+
+          document.addEventListener('dragover', event => {
+            if (!isFileDrag(event)) return;
+            consume(event);
+            event.dataTransfer.dropEffect = 'copy';
+          }, true);
+
+          document.addEventListener('drop', event => {
+            if (!isFileDrag(event)) return;
+            const files = Array.from(event.dataTransfer?.files || []);
+            consume(event);
+            for (const file of files) {
+              const reader = new FileReader();
+              reader.onload = () => {
+                const dataUrl = String(reader.result || '');
+                const separator = dataUrl.indexOf(',');
+                if (separator < 0) {
+                  send({ type: 'attachment-drop-error', message: `Could not read ${file.name}.` });
+                  return;
+                }
+                send({
+                  type: 'attachment-drop',
+                  name: file.name,
+                  contentType: file.type || '',
+                  size: file.size,
+                  contentBase64: dataUrl.slice(separator + 1)
+                });
+              };
+              reader.onerror = () => send({
+                type: 'attachment-drop-error',
+                message: `Could not read ${file.name}.`
+              });
+              reader.readAsDataURL(file);
+            }
+          }, true);
+        })();
+        """;
+
     private readonly ComposeViewModel   _vm;
     private readonly IContactService    _contactService;
     private readonly ITemplateService   _templateService;
@@ -109,7 +184,7 @@ public partial class ComposeWindow : Window
     private Window DialogOwner => _dockedOwner ?? this;
 
     private ProfileContext TranslationProfile =>
-        ((App)Application.Current).Profile ?? ProfileContext.Default();
+        Application.Current is App app ? app.Profile ?? ProfileContext.Default() : ProfileContext.Default();
 
     private void TranslateSelectionShortcut_Executed(object sender, ExecutedRoutedEventArgs e) =>
         MenuTranslateSelection_Click(sender, new RoutedEventArgs());
@@ -986,6 +1061,7 @@ public partial class ComposeWindow : Window
 
     private async void Window_Drop(object sender, DragEventArgs e)
     {
+        e.Handled = true;
         if (e.Data.GetData(DataFormats.FileDrop) is string[] files)
         {
             var validFiles = files.Where(f => f != null).ToList();
@@ -1892,6 +1968,14 @@ public partial class ComposeWindow : Window
     private bool _suppressRichTextChanged;
     private bool _syncingModeSelector;
 
+    private void SendOptionsButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { ContextMenu: { } menu } button) return;
+        menu.PlacementTarget = button;
+        menu.Placement = PlacementMode.Bottom;
+        menu.IsOpen = true;
+    }
+
     private void WireRichCompose()
     {
         _vm.RichBodyProvider = () => _vm.CurrentMode == ComposeMode.Html
@@ -1948,10 +2032,36 @@ public partial class ComposeWindow : Window
             };
             var environment = await CoreWebView2Environment.CreateAsync(null, userDataFolder, options);
             await HtmlBodyEditor.EnsureCoreWebView2Async(environment);
+            // Register before navigation so this listener precedes HugeRTE in both the host page
+            // and the editable iframe.  AddScriptToExecuteOnDocumentCreatedAsync applies to future
+            // child-frame documents as well as the top-level page.
+            await HtmlBodyEditor.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync(
+                EarlyAttachmentDropBridgeScript);
             _htmlEnvironmentLanguage = environmentLanguage;
             var assetFolder = Path.Combine(AppContext.BaseDirectory, "Assets", "HugeRte");
             HtmlBodyEditor.CoreWebView2.SetVirtualHostNameToFolderMapping(
                 "quickmail.local", assetFolder, CoreWebView2HostResourceAccessKind.DenyCors);
+            // editor.html is the bridge between HugeRTE and ComposeViewModel (file drop, content
+            // snapshots, spelling, translation, and grammar).  Serve that one page from the EXE,
+            // even though HugeRTE's library files remain loose assets.  Users commonly update a
+            // portable installation by copying only QuickMail.exe; allowing an old editor.html to
+            // survive beside the new EXE silently restores HugeRTE's native "unsupported file"
+            // blocker for PDF/Office/ZIP drops.
+            HtmlBodyEditor.CoreWebView2.AddWebResourceRequestedFilter(
+                "https://quickmail.local/editor.html*", CoreWebView2WebResourceContext.Document);
+            HtmlBodyEditor.CoreWebView2.WebResourceRequested += (_, args) =>
+            {
+                if (!args.Request.Uri.StartsWith(
+                        "https://quickmail.local/editor.html", StringComparison.OrdinalIgnoreCase))
+                    return;
+
+                var bridge = OpenBundledHtmlEditorBridge();
+                args.Response = environment.CreateWebResourceResponse(
+                    bridge,
+                    200,
+                    "OK",
+                    "Content-Type: text/html; charset=utf-8\r\nCache-Control: no-store");
+            };
             HtmlBodyEditor.CoreWebView2.Settings.AreDefaultContextMenusEnabled = true;
             HtmlBodyEditor.CoreWebView2.Settings.AreDevToolsEnabled = false;
             HtmlBodyEditor.CoreWebView2.Settings.IsStatusBarEnabled = false;
@@ -1959,9 +2069,16 @@ public partial class ComposeWindow : Window
             {
                 if (!args.Uri.StartsWith("https://quickmail.local/", StringComparison.OrdinalIgnoreCase)
                     && !args.Uri.StartsWith("about:blank", StringComparison.OrdinalIgnoreCase))
+                {
                     args.Cancel = true;
+                    Helpers.ExternalUriPolicy.TryOpenExternal(args.Uri);
+                }
             };
-            HtmlBodyEditor.CoreWebView2.NewWindowRequested += (_, args) => args.Handled = true;
+            HtmlBodyEditor.CoreWebView2.NewWindowRequested += (_, args) =>
+            {
+                args.Handled = true;
+                Helpers.ExternalUriPolicy.TryOpenExternal(args.Uri);
+            };
             HtmlBodyEditor.CoreWebView2.WebMessageReceived += async (_, args) =>
             {
                 try
@@ -2031,10 +2148,10 @@ public partial class ComposeWindow : Window
                 else ready.TrySetException(new InvalidOperationException(
                     $"HugeRTE host navigation failed: {args.WebErrorStatus}"));
             };
-            // WebView2 persists its HTTP cache between runs. Use the deployed editor timestamp as
-            // a stable per-build cache key, otherwise an updated drag/drop bridge can keep running
-            // the old editor.html until Chromium eventually evicts it.
-            var editorAssetVersion = File.GetLastWriteTimeUtc(Path.Combine(assetFolder, "editor.html")).Ticks;
+            // Cache is disabled on the embedded bridge response, but retain a versioned URL to
+            // invalidate any response left by an older QuickMail build/profile.
+            var editorAssetVersion = typeof(ComposeWindow).Assembly.GetName().Version?.ToString()
+                ?? "current";
             HtmlBodyEditor.CoreWebView2.Navigate(
                 $"https://quickmail.local/editor.html?v={editorAssetVersion}");
             await ready.Task;
@@ -2061,6 +2178,13 @@ public partial class ComposeWindow : Window
         {
             LogService.Log("Compose HTML editor initialization failed", ex);
         }
+    }
+
+    internal static Stream OpenBundledHtmlEditorBridge()
+    {
+        return typeof(ComposeWindow).Assembly.GetManifestResourceStream(HtmlEditorBridgeResourceName)
+            ?? throw new InvalidOperationException(
+                $"Embedded HTML editor bridge '{HtmlEditorBridgeResourceName}' was not found.");
     }
 
     private async Task InitializeEditorOnLoadedAsync()

@@ -10,6 +10,50 @@ before a public release.
 
 ## Unreleased
 
+- Added message Snooze as a visible unified system folder. Snoozed mail is hidden from its
+  original folder but remains searchable; at the selected preset or custom local date/time it
+  returns to that folder as unread. The local metadata works for POP/archive and IMAP accounts.
+- Reading preview detects standards-based and visible HTTP unsubscribe links. It offers a prominent
+  Unsubscribe action in an ephemeral, permission/download-disabled WebView2 profile, plus a
+  persistent per-sender Maintain subscription suppression.
+- Compose warns before Send or Send Later when the new text mentions an attachment in English,
+  Spanish or Catalan but no file is attached, while ignoring common quoted-message history.
+- Added persistent Work Offline and timed Focus modes. Offline pauses every sender and receiver;
+  Focus pauses receiving only. Check Mail returns the application online before running.
+- Today's compact agenda renders each appointment as a full-width green pill so events remain
+  visibly distinct from the surrounding folder/navigation chrome.
+- Quick search now exposes **Save as Virtual Folder…** directly beside the search actions. Creation
+  remains explicit and the resulting search appears under the existing Views node instead of
+  accumulating automatically for ad-hoc searches.
+- Account Health now sizes every diagnostic column to the available window width and marks accounts
+  requiring attention with the theme's red error background.
+- The reading-pane contextual menu now includes the same View Source and Export (EML, HTML and
+  headers) actions as the message-list contextual menu.
+- Plain-text templates inserted into the HTML composer retain their line and paragraph breaks.
+- Compose now presents one split Send control: normal Send remains the primary click, while the
+  dropdown offers Send later, Save as Draft and Send immediately (which bypasses Undo Send delay).
+  Template actions moved beside Add Files, and scheduling a message before today shows Eudora's
+  original time-machine warning.
+- Saved views can now retain an active quick-search expression and its folder/global scope, turning
+  the existing Views tree into lightweight smart folders without a second persistence format.
+- Rules Manager now offers a read-only **Preview** over the current folder (and Out when configured),
+  reporting scanned/matched/incoming/outgoing/mark-read counts and showing the first 20 matches
+  before the operator commits any move or state change.
+- Added **Tools > Account Health**: one refreshable overview of active state, protocol/server
+  configuration, silent OAuth or saved-password availability, current-session last download and
+  Scheduled queue errors for every account.
+- The message-list contextual menu can export one or several messages as portable `.eml` files
+  (including available attachments), readable `.html` documents, or copy their original headers.
+- Added configurable **Delay sending messages** (0–600 seconds). Zero sends directly through the
+  transport; a positive delay persists the message in Scheduled and displays a highlighted
+  `Undo · subject` action beside Forward until dispatch claims it. Undo atomically cancels the
+  queued item and restores its latest content to Draft; dismissing the notice does not cancel it.
+- Normal **Send** now uses the durable Scheduled outbox and wakes its dispatcher immediately, so
+  SMTP/OAuth latency no longer blocks the compose window or the rest of QuickMail. The complete
+  message is persisted before the editor closes, concurrent sends can be queued while transport is
+  busy, transient errors use bounded retry backoff, and permanent credential/configuration errors
+  wait for manual retry. SMTP acceptance is checkpointed before Sent-copy and draft housekeeping to
+  prevent duplicate delivery after a crash or shutdown.
 - Sending from a POP3 account added during the current session now creates its physical Sent folder
   and binds it to the shared canonical Out node before saving the local sent copy. SMTP could
   previously succeed while the copy was lost with `This local account has no Sent folder`.

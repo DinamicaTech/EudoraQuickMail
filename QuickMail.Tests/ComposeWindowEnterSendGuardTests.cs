@@ -18,7 +18,7 @@ using Xunit;
 namespace QuickMail.Tests;
 
 [Collection("WpfTests")]
-public class ComposeWindowEnterSendGuardTests
+public class ComposeWindowEnterSendGuardTests : WpfTestBase
 {
     private static QuickMail.Views.ComposeWindow NewHeadlessComposeWindow(StubSmtpService smtp)
     {
@@ -39,7 +39,7 @@ public class ComposeWindowEnterSendGuardTests
         };
     }
 
-    [StaFact]
+    [WpfFact]
     public void SendButton_IsNotADefaultButton()
     {
         var window = NewHeadlessComposeWindow(new StubSmtpService());
@@ -57,7 +57,7 @@ public class ComposeWindowEnterSendGuardTests
         }
     }
 
-    [StaFact]
+    [WpfFact]
     public void FromCombo_SwallowsPlainEnter_WhenDropDownIsClosed()
     {
         var smtp = new StubSmtpService();
@@ -80,7 +80,7 @@ public class ComposeWindowEnterSendGuardTests
         }
     }
 
-    [StaFact]
+    [WpfFact]
     public void FromCombo_LeavesEnterAlone_WhenDropDownIsOpen()
     {
         var window = NewHeadlessComposeWindow(new StubSmtpService());

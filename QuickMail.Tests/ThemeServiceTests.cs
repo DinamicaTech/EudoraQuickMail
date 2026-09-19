@@ -13,7 +13,7 @@ namespace QuickMail.Tests;
 // In the WpfTests collection: the service publishes into Application.Current.Resources
 // when an Application exists, so these must not run in parallel with other WPF tests.
 [Collection("WpfTests")]
-public class ThemeServiceTests : IDisposable
+public class ThemeServiceTests : WpfTestBase, IDisposable
 {
     private readonly string _dir = Path.Combine(Path.GetTempPath(), $"QM-ThemeSvcTests-{Guid.NewGuid():N}");
 
@@ -46,7 +46,7 @@ public class ThemeServiceTests : IDisposable
 
     // ── Resolution ────────────────────────────────────────────────────────────
 
-    [StaFact]
+    [WpfFact]
     public void System_FollowsOsLightAndDark()
     {
         using var svc = NewService(osLight: true);
@@ -58,7 +58,7 @@ public class ThemeServiceTests : IDisposable
         Assert.Equal("dark", dark.ResolvedTheme.Id);
     }
 
-    [StaFact]
+    [WpfFact]
     public void UnknownThemeId_FallsBackToSystem_WithoutThrowing()
     {
         using var svc = NewService(osLight: true);
@@ -66,7 +66,7 @@ public class ThemeServiceTests : IDisposable
         Assert.Equal("microsoft365-blue", svc.ResolvedTheme.Id);
     }
 
-    [StaFact]
+    [WpfFact]
     public void ApplyTheme_SwitchesResolvedThemeAndRaisesThemeChanged()
     {
         using var svc = NewService();
@@ -86,7 +86,7 @@ public class ThemeServiceTests : IDisposable
         Assert.Equal(1, raised);
     }
 
-    [StaFact]
+    [WpfFact]
     public void ApplyTheme_NonPersistent_LeavesConfiguredIdUntouched()
     {
         using var svc = NewService();
@@ -98,7 +98,7 @@ public class ThemeServiceTests : IDisposable
         Assert.Equal("fjord", svc.ResolvedTheme.Id);
     }
 
-    [StaFact]
+    [WpfFact]
     public void ApplyAppearance_ThemeAndVisionTogether_RaisesThemeChangedOnce()
     {
         using var svc = NewService();
@@ -118,7 +118,7 @@ public class ThemeServiceTests : IDisposable
 
     // ── Announcement naming ───────────────────────────────────────────────────
 
-    [StaFact]
+    [WpfFact]
     public void ConfiguredThemeName_System_NamesTheResolvedBase()
     {
         using var light = NewService(osLight: true);
@@ -130,7 +130,7 @@ public class ThemeServiceTests : IDisposable
         Assert.Equal("System, showing Parchment Dark", dark.ConfiguredThemeName);
     }
 
-    [StaFact]
+    [WpfFact]
     public void ConfiguredThemeName_RealTheme_IsItsOwnName()
     {
         using var svc = NewService();
@@ -141,7 +141,7 @@ public class ThemeServiceTests : IDisposable
 
     // ── High Contrast passthrough ─────────────────────────────────────────────
 
-    [StaFact]
+    [WpfFact]
     public void HighContrast_ResolvesEveryTokenFromSystemColors()
     {
         using var svc = NewService(highContrast: true);
@@ -167,7 +167,7 @@ public class ThemeServiceTests : IDisposable
 
     // ── Token dictionary ──────────────────────────────────────────────────────
 
-    [StaFact]
+    [WpfFact]
     public void TokenDictionary_ContainsEveryTokenAsFrozenBrush_PlusTypographyAndFocus()
     {
         using var svc = NewService();
@@ -189,7 +189,7 @@ public class ThemeServiceTests : IDisposable
         Assert.Equal(2.0, dict[ThemeKeys.FocusThickness]);
     }
 
-    [StaFact]
+    [WpfFact]
     public void TokenDictionary_AppliesTextScaleAndVisionSettings()
     {
         using var svc = NewService();
@@ -208,7 +208,7 @@ public class ThemeServiceTests : IDisposable
     /// normalizes to comfortable. ApplyAppearance with a changed density must
     /// re-publish (the signature includes it).
     /// </summary>
-    [StaFact]
+    [WpfFact]
     public void TokenDictionary_ListDensity_PublishesPaddingOnly()
     {
         using var svc = NewService();
@@ -234,7 +234,7 @@ public class ThemeServiceTests : IDisposable
     /// to …" and re-render the reading pane, both wrong for padding. A real
     /// theme change still raises.
     /// </summary>
-    [StaFact]
+    [WpfFact]
     public void ThemeChanged_NotRaisedForDensityOnlyChanges()
     {
         using var svc = NewService();
@@ -256,7 +256,7 @@ public class ThemeServiceTests : IDisposable
 
     // ── WebView2 CSS bridge ───────────────────────────────────────────────────
 
-    [StaFact]
+    [WpfFact]
     public void BuildMessageCss_EmitsAllColorVariables()
     {
         using var svc = NewService();
@@ -270,7 +270,7 @@ public class ThemeServiceTests : IDisposable
         Assert.DoesNotContain("!important", css);
     }
 
-    [StaFact]
+    [WpfFact]
     public void BuildMessageCss_InvalidFontOverride_DoesNotReachCss()
     {
         using var svc = NewService();
@@ -285,7 +285,7 @@ public class ThemeServiceTests : IDisposable
         Assert.DoesNotContain("x;}", css);
     }
 
-    [StaFact]
+    [WpfFact]
     public void BuildMessageCss_ForceOnContent_AppendsImportantOverrides()
     {
         using var svc = NewService();
@@ -296,7 +296,7 @@ public class ThemeServiceTests : IDisposable
         Assert.Contains("color:var(--qm-text) !important", css);
     }
 
-    [StaFact]
+    [WpfFact]
     public void BuildMessageCss_UnderlineLinks_EmitsUnderlineRule()
     {
         using var svc = NewService();
@@ -305,7 +305,7 @@ public class ThemeServiceTests : IDisposable
         Assert.Contains("text-decoration:underline", svc.BuildMessageCss(forceOnContent: false));
     }
 
-    [StaFact]
+    [WpfFact]
     public void BuildMessageCss_HighContrast_EmitsNoColorVariables()
     {
         using var svc = NewService(highContrast: true);
@@ -322,7 +322,7 @@ public class ThemeServiceTests : IDisposable
 
     // ── Import / export ───────────────────────────────────────────────────────
 
-    [StaFact]
+    [WpfFact]
     public void ExportThenImport_RoundTrips_WithReIdOnCollision()
     {
         using var svc = NewService();
@@ -342,7 +342,7 @@ public class ThemeServiceTests : IDisposable
         Assert.Equal("#8F4531", imported.Colors["accent"]);
     }
 
-    [StaFact]
+    [WpfFact]
     public void ImportTheme_MalformedFile_ThrowsFriendlyThemeFormatException()
     {
         using var svc = NewService();
@@ -355,7 +355,7 @@ public class ThemeServiceTests : IDisposable
         Assert.Throws<ThemeFormatException>(() => svc.ImportTheme(path));
     }
 
-    [StaFact]
+    [WpfFact]
     public void ImportTheme_OversizedFile_IsRejectedBeforeParsing()
     {
         using var svc = NewService();
@@ -371,7 +371,7 @@ public class ThemeServiceTests : IDisposable
         Assert.Contains("too large", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
-    [StaFact]
+    [WpfFact]
     public void ReadThemeFile_OversizedFile_Throws()
     {
         Directory.CreateDirectory(_dir);
@@ -381,7 +381,7 @@ public class ThemeServiceTests : IDisposable
         Assert.Throws<ThemeFormatException>(() => ThemeStore.ReadThemeFile(path));
     }
 
-    [StaFact]
+    [WpfFact]
     public void LoadUserThemes_SkipsOversizedFile()
     {
         var themesFolder = Path.Combine(_dir, "themes");
@@ -393,7 +393,7 @@ public class ThemeServiceTests : IDisposable
         Assert.Empty(store.LoadUserThemes());
     }
 
-    [StaFact]
+    [WpfFact]
     public void SaveUserTheme_MaliciousIdWithSeparators_StaysInThemesFolder()
     {
         var store = new ThemeStore(new ProfileContext(_dir));
@@ -413,7 +413,7 @@ public class ThemeServiceTests : IDisposable
             Path.GetFullPath(Path.GetDirectoryName(written[0])!));
     }
 
-    [StaFact]
+    [WpfFact]
     public void DeleteUserTheme_WhenActive_FallsBackToSystem()
     {
         using var svc = NewService();
@@ -430,7 +430,7 @@ public class ThemeServiceTests : IDisposable
         Assert.DoesNotContain(svc.GetAvailableThemes(), t => t.Id == "my-theme");
     }
 
-    [StaFact]
+    [WpfFact]
     public void CorruptUserThemeFile_IsSkipped_AndDoesNotBlockLoading()
     {
         var themesDir = Path.Combine(_dir, "themes");

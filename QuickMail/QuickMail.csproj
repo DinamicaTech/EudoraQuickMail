@@ -19,9 +19,9 @@
          System.Windows(.Media) types this codebase uses unqualified (Point, Size, Color, Brush,
          Application, MessageBox, ...). -->
     <UseWindowsForms>true</UseWindowsForms>
-    <Version>0.8.62</Version>
-    <AssemblyVersion>0.8.62</AssemblyVersion>
-    <FileVersion>0.8.62</FileVersion>
+    <Version>0.8.71</Version>
+    <AssemblyVersion>0.8.71</AssemblyVersion>
+    <FileVersion>0.8.71</FileVersion>
     <!-- Velopack needs a hand-written Main that runs VelopackApp.Build().Run() before WPF
          initializes (install/update/uninstall hooks run and may exit the process). App.xaml
          therefore compiles as Page (no generated Main) and the entry point is declared here. -->
@@ -82,6 +82,11 @@
     <!-- HugeRTE is MIT-licensed and self-hosted: no CDN, API key, telemetry, or runtime fee. -->
     <Content Include="Assets\HugeRte\**\*" CopyToOutputDirectory="PreserveNewest"
              CopyToPublishDirectory="PreserveNewest" />
+    <!-- editor.html is also embedded because it is QuickMail's native/WebView bridge.  Keeping
+         the authoritative bridge inside the EXE prevents a newly copied executable from loading
+         an older loose Assets folder that still rejects PDF/Office/ZIP attachment drops. -->
+    <EmbeddedResource Include="Assets\HugeRte\editor.html"
+                      LogicalName="QuickMail.Assets.HugeRte.editor.html" />
     <!-- FullCalendar Standard is MIT-licensed and self-hosted so calendar views work offline. -->
     <Content Include="Assets\FullCalendar\**\*" CopyToOutputDirectory="PreserveNewest"
              CopyToPublishDirectory="PreserveNewest" />

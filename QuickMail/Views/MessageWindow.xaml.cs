@@ -383,10 +383,15 @@ public partial class MessageWindow : Window
     /// <summary>Raised for a standalone ICS publication that the user wants to add to a calendar.</summary>
     public event Action<MailMessageDetail>? CalendarAddRequested;
 
+    /// <summary>Raised for an internal link that belongs to the main mailbox window.</summary>
+    public event Action<string>? InternalLinkRequested;
+
     /// <summary>Handles quickmail: pseudo-URIs from this window's event card buttons.</summary>
     private void HandleQuickMailUri(string uri)
     {
-        if (uri.StartsWith("quickmail:ics-accept", StringComparison.OrdinalIgnoreCase))
+        if (SnoozeReminderBuilder.TryParseLink(uri, out _))
+            InternalLinkRequested?.Invoke(uri);
+        else if (uri.StartsWith("quickmail:ics-accept", StringComparison.OrdinalIgnoreCase))
             RespondToInvite(InviteResponse.Accept);
         else if (uri.StartsWith("quickmail:ics-tentative", StringComparison.OrdinalIgnoreCase))
             RespondToInvite(InviteResponse.Tentative);

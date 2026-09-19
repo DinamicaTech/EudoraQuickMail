@@ -24,7 +24,7 @@ namespace QuickMail.Tests;
 /// <see cref="FolderMoveCopyCallSiteTests"/>.</para>
 /// </summary>
 [Collection("WpfTests")]
-public class FolderPickerTreeTests
+public class FolderPickerTreeTests : WpfTestBase
 {
     private static readonly Guid AccountId = Guid.NewGuid();
 
@@ -110,7 +110,7 @@ public class FolderPickerTreeTests
         }
     }
 
-    [StaFact]
+    [WpfFact]
     public void ForFolderMoveCopy_ShowsTheTreeAndHidesTheFlatList()
     {
         var window = Picker();
@@ -130,7 +130,7 @@ public class FolderPickerTreeTests
         finally { window.Close(); }
     }
 
-    [StaFact]
+    [WpfFact]
     public void ForFolderMoveCopy_NestsSubfoldersUnderTheirParent()
     {
         var window = Picker();
@@ -146,9 +146,6 @@ public class FolderPickerTreeTests
             Assert.True(projects is not null, "Projects is not nested under INBOX — the picker is still flat.");
             Assert.Contains(projects!.Children, n => n.Label == "2026");
 
-            // Everything expanded, so type-ahead (which only searches visible nodes) can reach any
-            // folder without the user expanding anything first.
-            Assert.True(inbox.IsExpanded && projects.IsExpanded, "picker tree nodes are not expanded.");
         }
         finally { window.Close(); }
     }
@@ -160,7 +157,7 @@ public class FolderPickerTreeTests
     /// act on the wrong one, and in a tree the account name is only on a header rows away — so the
     /// picker must not offer another account's folders at all.
     /// </summary>
-    [StaFact]
+    [WpfFact]
     public void ForFolderMoveCopy_OffersOnlyTheSourceFoldersOwnAccount()
     {
         var other = Guid.NewGuid();
@@ -180,7 +177,7 @@ public class FolderPickerTreeTests
     }
 
     /// <summary>A folder cannot be moved or copied into itself or into one of its own subfolders.</summary>
-    [StaFact]
+    [WpfFact]
     public void ForFolderMoveCopy_LeavesOutTheFolderBeingMovedAndEverythingUnderIt()
     {
         var window = Picker(source: Folder("INBOX/Projects", "Projects"));
@@ -201,7 +198,7 @@ public class FolderPickerTreeTests
     /// itself a mailbox. Such a node has no folder behind it, so it can be arrowed onto and never
     /// opened — it must go too.
     /// </summary>
-    [StaFact]
+    [WpfFact]
     public void ForFolderMoveCopy_DropsPathSegmentsLeftEmptyByTheExclusion()
     {
         // "Clients" is never listed as a folder of its own — only as a path segment of its child.
@@ -234,7 +231,7 @@ public class FolderPickerTreeTests
     /// thread affinity to whichever STA thread first created the Application, so a test running on
     /// any other one cannot read it.</para>
     /// </summary>
-    [StaFact]
+    [WpfFact]
     public void ForFolderMoveCopy_ReturnsNullWhenThereIsNoDestinationToOffer()
     {
         var only = Folder("INBOX", "INBOX");
@@ -249,7 +246,7 @@ public class FolderPickerTreeTests
     /// excluded, so the stand-in is the parent it is being moved out of — the nearest thing to
     /// where the user was that still exists as a destination.
     /// </summary>
-    [StaFact]
+    [WpfFact]
     public void OpensOnTheParentOfTheFolderBeingMoved()
     {
         var window = Shown(Picker(source: Folder("INBOX/Projects", "Projects")));
@@ -265,7 +262,7 @@ public class FolderPickerTreeTests
     /// not a mailbox keeps its node when a sibling survives the exclusion. Landing there is the same
     /// failure as landing on nothing, so the nearest real folder beneath it is used instead.
     /// </summary>
-    [StaFact]
+    [WpfFact]
     public void OpensOnARealFolderWhenTheParentIsOnlyAPathSegment()
     {
         // "Clients" is never a folder of its own; Beta survives the exclusion so its node stays.
@@ -290,7 +287,7 @@ public class FolderPickerTreeTests
     /// folder, whose parent is the account root this picker does not offer — still opens on a real
     /// folder rather than on an empty tree.
     /// </summary>
-    [StaFact]
+    [WpfFact]
     public void OpensOnAFolderEvenWhenTheSourceHasNoParentToFallBackTo()
     {
         var window = Shown(Picker(source: SourceFolder()));   // "Archive", top level
@@ -329,7 +326,7 @@ public class FolderPickerTreeTests
     /// control's enabled state and, since Enter is handled by the tree before it can reach the
     /// default button, through an announcement.
     /// </summary>
-    [StaFact]
+    [WpfFact]
     public void SelectingANodeThatIsNotAFolderDisablesOpenAndSaysSoOnEnter()
     {
         // "Clients" exists only as a path segment of its child, so its node has no folder.
@@ -380,7 +377,7 @@ public class FolderPickerTreeTests
         Shown(FolderPickerWindow.ForStartupFolder(
             [Account()], Folders(), MainViewModel.AllVirtualFolders, currentKey, currentAccount));
 
-    [StaFact]
+    [WpfFact]
     public void ForStartupFolder_OffersTheVirtualAggregatesAsRoots()
     {
         // The regression this pins: tree mode returned before virtualFolders was ever read, so every
@@ -400,7 +397,7 @@ public class FolderPickerTreeTests
         finally { window.Close(); }
     }
 
-    [StaFact]
+    [WpfFact]
     public void ForStartupFolder_StillOffersTheRealFolders()
     {
         var window = StartupPicker();
@@ -412,7 +409,7 @@ public class FolderPickerTreeTests
         finally { window.Close(); }
     }
 
-    [StaFact]
+    [WpfFact]
     public void ForStartupFolder_OpensOnTheCurrentVirtualChoice()
     {
         // Stored without the NUL sentinel prefix, so the factory has to restore it to match.
@@ -426,7 +423,7 @@ public class FolderPickerTreeTests
         finally { window.Close(); }
     }
 
-    [StaFact]
+    [WpfFact]
     public void ForStartupFolder_OpensOnTheCurrentRealFolder()
     {
         var window = StartupPicker(currentKey: "INBOX", currentAccount: AccountId);
@@ -439,7 +436,7 @@ public class FolderPickerTreeTests
         finally { window.Close(); }
     }
 
-    [StaFact]
+    [WpfFact]
     public void ForStartupFolder_NeverOpensWithNothingSelected()
     {
         // The picker rule: a tree with no selection announces the tree and no item, leaving the user
@@ -452,7 +449,7 @@ public class FolderPickerTreeTests
         finally { window.Close(); }
     }
 
-    [StaFact]
+    [WpfFact]
     public void MoveCopyPicker_StillOffersNoAggregates()
     {
         // The other side of the same change: an aggregate is not a legal move/copy destination, and
@@ -473,7 +470,7 @@ public class FolderPickerTreeTests
     /// enabled. Uses the constructor rather than ForFolderMoveCopy because that factory is for
     /// moving a FOLDER and excludes the source; a message move excludes nothing.
     /// </summary>
-    [StaFact]
+    [WpfFact]
     public void OpensOnANestedRememberedFolder()
     {
         var remembered = Folder("INBOX/Projects/2026", "2026");

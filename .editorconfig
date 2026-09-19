@@ -27,3 +27,11 @@ dotnet_diagnostic.CA1805.severity = none
 dotnet_diagnostic.CA1711.severity = none
 # Locale-sensitive formatting — display strings intentionally use CurrentCulture
 dotnet_diagnostic.CA1305.severity = none
+# Interface-shaped APIs are deliberate seams for stores, services and tests.
+dotnet_diagnostic.CA1859.severity = none
+# Several instance members are consumed by WPF binding or preserve service APIs.
+dotnet_diagnostic.CA1822.severity = none
+# Existing async APIs retain their parameter order for source compatibility.
+dotnet_diagnostic.CA1068.severity = none
+# Explicit range exceptions keep parameter names and messages stable.
+dotnet_diagnostic.CA1512.severity = none

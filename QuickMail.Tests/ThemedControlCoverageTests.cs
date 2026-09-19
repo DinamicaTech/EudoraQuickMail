@@ -30,6 +30,7 @@ public class ThemedControlCoverageTests
         ["ScrollViewer"] = "Transparent host: its ScrollBar parts carry the themed chrome.",
         ["StatusBarItem"] = "Chromeless content holder inside the themed StatusBar.",
         ["ItemsControl"] = "Chromeless presenter; items carry their own themed styles.",
+        ["ContentControl"] = "Chromeless content host; its displayed view supplies the themed surface.",
         ["UserControl"] = "Chromeless container base for app controls.",
         ["Window"] = "Title bar is OS-drawn; every window binds its own Background "
                    + "to a Theme token (enforced by EveryWindow_BindsAThemedBackground).",

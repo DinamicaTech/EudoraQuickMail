@@ -248,6 +248,14 @@ public partial class FolderPickerWindow : Window
         if (target is not { IsHeader: false, Folder: not null })
             target = (target != null ? FirstSelectable(target.Children) : null) ?? FirstSelectable(roots);
 
+        // The unified-tree picker adds a logical-root header above the physical hierarchy. The
+        // requested target can therefore be several collapsed levels deep (for example
+        // Work/INBOX/Projects). Expand its complete ancestor chain before asking WPF for the item
+        // containers; otherwise the target exists in the model but SelectedItem stays null.
+        for (var ancestor = target?.Parent; ancestor != null; ancestor = ancestor.Parent)
+            ancestor.IsExpanded = true;
+        FolderTreeView.UpdateLayout();
+
         if (target == null || !TreeViewFocusHelper.SelectTreeViewNode(FolderTreeView, target))
             FolderTreeView.Focus();
     }
@@ -382,15 +390,6 @@ public partial class FolderPickerWindow : Window
             PruneEmptySyntheticNodes(nodes[i].Children);
             if (nodes[i] is { Folder: null, IsHeader: false, Children.Count: 0 })
                 nodes.RemoveAt(i);
-        }
-    }
-
-    private static void ExpandAll(IEnumerable<FolderTreeNode> nodes)
-    {
-        foreach (var node in nodes)
-        {
-            node.IsExpanded = true;
-            ExpandAll(node.Children);
         }
     }
 

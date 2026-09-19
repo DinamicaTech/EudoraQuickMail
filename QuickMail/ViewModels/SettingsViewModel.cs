@@ -205,6 +205,9 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty]
     private int _autoSaveIntervalSeconds;
 
+    [ObservableProperty]
+    private int _delaySendingMessagesSeconds = 30;
+
     [ObservableProperty] private bool _indexAttachmentContents;
     [ObservableProperty] private bool _indexCompressedAttachments;
     [ObservableProperty] private int _attachmentIndexMaxFileMb = 10;
@@ -519,6 +522,7 @@ public partial class SettingsViewModel : ObservableObject
         GoogleClientSecret               = cfg.GoogleClientSecret;
         AutoSaveDrafts                   = cfg.AutoSaveDrafts;
         AutoSaveIntervalSeconds          = cfg.AutoSaveIntervalSeconds;
+        DelaySendingMessagesSeconds      = cfg.DelaySendingMessagesSeconds;
         IndexAttachmentContents          = cfg.IndexAttachmentContents;
         IndexCompressedAttachments       = cfg.IndexCompressedAttachments;
         AttachmentIndexMaxFileMb         = cfg.AttachmentIndexMaxFileMb;
@@ -639,6 +643,7 @@ public partial class SettingsViewModel : ObservableObject
         }
         cfg.AutoSaveDrafts                   = AutoSaveDrafts;
         cfg.AutoSaveIntervalSeconds          = AutoSaveIntervalSeconds;
+        cfg.DelaySendingMessagesSeconds      = Math.Clamp(DelaySendingMessagesSeconds, 0, 600);
         cfg.IndexAttachmentContents          = IndexAttachmentContents;
         cfg.IndexCompressedAttachments       = IndexCompressedAttachments;
         cfg.AttachmentIndexMaxFileMb         = Math.Clamp(AttachmentIndexMaxFileMb, 1, 1024);

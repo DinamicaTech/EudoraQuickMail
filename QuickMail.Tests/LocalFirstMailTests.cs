@@ -215,6 +215,122 @@ public sealed class LocalFirstMailTests : IDisposable
     }
 
     [Fact]
+    public async Task CanonicalIn_KeepsBoundRootlessImapInbox_WhenAnotherRootIsAdded()
+    {
+        var localId = Guid.NewGuid();
+        var otherRootId = Guid.NewGuid();
+        var imapId = Guid.NewGuid();
+        var local = new AccountModel
+        {
+            Id = localId, AccountName = "Local", Username = "local@example.test",
+            BackendKind = BackendKind.Pop3Smtp, IsActive = true,
+            FolderTreeRootName = "Eudora",
+        };
+        var otherRoot = new AccountModel
+        {
+            Id = otherRootId, AccountName = "Other", Username = "other@example.test",
+            BackendKind = BackendKind.Pop3Smtp, IsActive = true,
+            FolderTreeRootName = "Other root",
+        };
+        var imap = new AccountModel
+        {
+            Id = imapId, AccountName = "Gmail", Username = "gmail@example.test",
+            BackendKind = BackendKind.ImapSmtp, IsActive = true,
+            // Old profiles can have no explicit assignment even though their durable canonical
+            // bindings prove that they belong to Eudora.
+        };
+        var store = CreateStore();
+        await store.SaveFoldersAsync(localId,
+        [
+            new MailFolderModel { AccountId = localId, FullName = "In", DisplayName = "In", Kind = SpecialFolderKind.Inbox },
+        ]);
+        await store.SaveFoldersAsync(otherRootId,
+        [
+            new MailFolderModel { AccountId = otherRootId, FullName = "In", DisplayName = "In", Kind = SpecialFolderKind.Inbox },
+        ]);
+        await store.SaveFoldersAsync(imapId,
+        [
+            new MailFolderModel { AccountId = imapId, FullName = "INBOX", DisplayName = "Inbox", Kind = SpecialFolderKind.Inbox },
+        ]);
+        new LocalFolderTreeMigrationService().BuildShadowTree(
+            Path.Combine(_directory, "mail.db"), [local, otherRoot]);
+        var canonical = (await store.LoadCanonicalLocalFolderTreeAsync())!.Folders.Single(folder =>
+            folder.RootId == localId && folder.CanonicalPath == "In");
+        await store.EnsureCanonicalFolderBindingAsync(canonical.FolderId, imapId);
+
+        var vm = new MainViewModel(
+            new StubImapMailService(), new StubAccountService(), new StubCredentialService(),
+            store, new StubOAuthService(), new StubSyncService(), new StubConfigService(),
+            new StubCommandRegistry(), new StubViewService(), new StubRuleService(), new StubSmtpService());
+        vm.LoadAccountList([local, otherRoot, imap]);
+        await vm.InitialLoadAsync();
+
+        var sources = vm.FolderScopedAggregateSources(
+            "\u0000LocalFolder:" + canonical.FolderId.ToString("D")).ToList();
+
+        Assert.Contains(sources, source => source.Account.Id == localId && source.Folder.FullName == "In");
+        Assert.Contains(sources, source => source.Account.Id == imapId && source.Folder.FullName == "INBOX");
+        Assert.DoesNotContain(sources, source => source.Account.Id == otherRootId);
+        vm.Dispose();
+    }
+
+    [Fact]
+    public async Task CanonicalFolder_UsesBindingCreatedAfterStartupBeforePhysicalCacheRefresh()
+    {
+        var ownerId = Guid.NewGuid();
+        var secondId = Guid.NewGuid();
+        var owner = new AccountModel
+        {
+            Id = ownerId, AccountName = "Owner", Username = "owner@example.test",
+            BackendKind = BackendKind.Pop3Smtp, IsActive = true,
+            FolderTreeRootId = ownerId, FolderTreeRootName = "Eudora",
+        };
+        var second = new AccountModel
+        {
+            Id = secondId, AccountName = "Second", Username = "second@example.test",
+            BackendKind = BackendKind.Pop3Smtp, IsActive = true,
+            FolderTreeRootId = ownerId, FolderTreeRootName = "Eudora",
+        };
+        var store = CreateStore();
+        await store.SaveFoldersAsync(ownerId,
+        [
+            Folder(ownerId, "Dinamica/Prov/Internet/OVH", container: false),
+        ]);
+        await store.SaveFoldersAsync(secondId,
+        [
+            Folder(secondId, "In", container: false),
+        ]);
+        new LocalFolderTreeMigrationService().BuildShadowTree(
+            Path.Combine(_directory, "mail.db"), [owner, second]);
+
+        var vm = new MainViewModel(
+            new StubImapMailService(), new StubAccountService(), new StubCredentialService(),
+            store, new StubOAuthService(), new StubSyncService(), new StubConfigService(),
+            new StubCommandRegistry(), new StubViewService(), new StubRuleService(), new StubSmtpService());
+        vm.LoadAccountList([owner, second]);
+        await vm.InitialLoadAsync();
+
+        var target = (await store.LoadCanonicalLocalFolderTreeAsync())!.Folders.Single(folder =>
+            folder.CanonicalPath == "Dinamica/Prov/Internet/OVH");
+        await store.EnsureCanonicalFolderBindingAsync(target.FolderId, secondId);
+        await store.SaveLocalMessageAsync(Message(secondId, target.CanonicalPath, "ovh", "body"));
+
+        // Refreshes the canonical map, deliberately not the physical-folder cache: this is the
+        // exact in-session state immediately after a rule moves mail for a second account.
+        await vm.RefreshCanonicalFolderCountsAsync();
+        var sources = vm.FolderScopedAggregateSources(
+            "\u0000LocalFolder:" + target.FolderId.ToString("D")).ToList();
+
+        Assert.Contains(sources, source => source.Account.Id == secondId &&
+            source.Folder.FullName == "Dinamica/Prov/Internet/OVH");
+        var visible = new List<MailMessageSummary>();
+        foreach (var source in sources)
+            visible.AddRange(await store.LoadFolderSummariesAsync(source.Account.Id, source.Folder.FullName));
+        Assert.Contains(visible, message => message.AccountId == secondId && message.MessageId == "ovh");
+        vm.Dispose();
+    }
+
+    [Fact]
     public async Task LocalSystemFolders_AreCreatedWithoutConnectingThePop3Account()
     {
         var accountId = Guid.NewGuid();
@@ -234,12 +350,13 @@ public sealed class LocalFirstMailTests : IDisposable
         await store.EnsureLocalSystemFoldersAsync([account]);
 
         var physical = (await store.LoadFoldersAsync())[accountId];
-        Assert.Equal(6, physical.Count);
+        Assert.Equal(7, physical.Count);
         Assert.Equal(
             new HashSet<SpecialFolderKind>
             {
                 SpecialFolderKind.Inbox, SpecialFolderKind.Drafts, SpecialFolderKind.Scheduled,
-                SpecialFolderKind.Sent, SpecialFolderKind.Trash, SpecialFolderKind.Junk,
+                SpecialFolderKind.Snoozed, SpecialFolderKind.Sent, SpecialFolderKind.Trash,
+                SpecialFolderKind.Junk,
             },
             physical.Select(folder => folder.Kind).ToHashSet());
         Assert.All(physical.Where(folder => folder.Kind is SpecialFolderKind.Drafts or SpecialFolderKind.Scheduled),
@@ -249,7 +366,7 @@ public sealed class LocalFirstMailTests : IDisposable
 
         var canonical = await store.LoadCanonicalLocalFolderTreeAsync();
         Assert.NotNull(canonical);
-        Assert.Equal(6, canonical!.Folders.Count(folder => folder.ParentFolderId != null));
+        Assert.Equal(7, canonical!.Folders.Count(folder => folder.ParentFolderId != null));
         Assert.All(canonical.Folders.Where(folder => folder.ParentFolderId != null),
             folder => Assert.Contains(folder.Bindings, binding => binding.AccountId == accountId));
     }
@@ -397,6 +514,150 @@ public sealed class LocalFirstMailTests : IDisposable
         var sent = await store.LoadLocalPageAsync(account.Id, "Sent", 10, 0);
         Assert.Equal(1, sent.TotalMatches);
         Assert.Equal(MessageDirection.Outgoing, Assert.Single(sent.Messages).Direction);
+    }
+
+    [Fact]
+    public async Task ImmediateQueue_WakesDispatcherWithoutWaitingForPeriodicTimer()
+    {
+        var account = new AccountModel
+        {
+            Id = Guid.NewGuid(), AccountName = "POP", Username = "sender@example.test",
+            BackendKind = BackendKind.Pop3Smtp, FolderTreeRootId = Guid.NewGuid(),
+            FolderTreeRootName = "Local mail", IsActive = true,
+        };
+        var store = CreateStore();
+        var profile = new ProfileContext(_directory);
+        var accounts = new AccountService(profile);
+        accounts.SaveAccounts([account]);
+        var localMail = new LocalMailService(store, accounts);
+        var sent = new TaskCompletionSource<Guid>(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var scheduled = new ScheduledSendService(
+            profile, new StubSmtpService(), accounts, new StubCredentialService(), store, localMail);
+        scheduled.SentMailChanged += id => sent.TrySetResult(id);
+
+        await scheduled.QueueImmediateAsync(new ComposeModel
+        {
+            AccountId = account.Id, To = "recipient@example.test", Subject = "send now",
+            Body = "body", Mode = ComposeMode.Html, HtmlBody = "<p>body</p>",
+        });
+
+        Assert.Equal(account.Id, await sent.Task.WaitAsync(TimeSpan.FromSeconds(3)));
+        Assert.Empty(await scheduled.GetSnapshotAsync());
+        Assert.Equal(0, (await store.LoadLocalPageAsync(account.Id, "Scheduled", 10, 0)).TotalMatches);
+        Assert.Equal(1, (await store.LoadLocalPageAsync(account.Id, "Sent", 10, 0)).TotalMatches);
+    }
+
+    [Fact]
+    public async Task DelayedImmediateQueue_CanBeUndoneIntoDraftBeforeSmtpStarts()
+    {
+        var account = new AccountModel
+        {
+            Id = Guid.NewGuid(), AccountName = "POP", Username = "sender@example.test",
+            BackendKind = BackendKind.Pop3Smtp, FolderTreeRootId = Guid.NewGuid(),
+            FolderTreeRootName = "Local mail", IsActive = true,
+        };
+        var store = CreateStore();
+        var profile = new ProfileContext(_directory);
+        var accounts = new AccountService(profile);
+        accounts.SaveAccounts([account]);
+        var smtp = new StubSmtpService();
+        using var scheduled = new ScheduledSendService(
+            profile, smtp, accounts, new StubCredentialService(), store,
+            new LocalMailService(store, accounts));
+        var id = await scheduled.QueueImmediateAsync(new ComposeModel
+        {
+            AccountId = account.Id, To = "recipient@example.test", Subject = "undo me",
+            Body = "latest body", Mode = ComposeMode.Html, HtmlBody = "<p>latest body</p>",
+        }, notBeforeUtc: DateTimeOffset.UtcNow.AddMinutes(5));
+
+        var restored = await scheduled.UndoSendAsync(id);
+
+        Assert.NotNull(restored);
+        Assert.Equal("undo me", restored!.Subject);
+        Assert.Empty(smtp.Sent);
+        Assert.Empty(await scheduled.GetSnapshotAsync());
+        Assert.Equal(0, (await store.LoadLocalPageAsync(account.Id, "Scheduled", 10, 0)).TotalMatches);
+        var drafts = await store.LoadLocalPageAsync(account.Id, "Draft", 10, 0);
+        Assert.Equal(1, drafts.TotalMatches);
+        Assert.Equal("undo me", Assert.Single(drafts.Messages).Subject);
+    }
+
+    [Fact]
+    public async Task ImmediateQueue_WhenNetworkFails_RemainsVisibleAndUsesBackoff()
+    {
+        var account = new AccountModel
+        {
+            Id = Guid.NewGuid(), AccountName = "POP", Username = "sender@example.test",
+            BackendKind = BackendKind.Pop3Smtp, FolderTreeRootId = Guid.NewGuid(),
+            FolderTreeRootName = "Local mail", IsActive = true,
+        };
+        var store = CreateStore();
+        var profile = new ProfileContext(_directory);
+        var accounts = new AccountService(profile);
+        accounts.SaveAccounts([account]);
+        var localMail = new LocalMailService(store, accounts);
+        var failureObserved = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var scheduled = new ScheduledSendService(profile,
+            new StubSmtpService { SendFailure = new IOException("network unavailable") }, accounts,
+            new StubCredentialService(), store, localMail);
+        scheduled.Failed += (_, _) => failureObserved.TrySetResult();
+
+        await scheduled.QueueImmediateAsync(new ComposeModel
+        {
+            AccountId = account.Id, To = "recipient@example.test", Subject = "offline now",
+            Body = "body", Mode = ComposeMode.Html, HtmlBody = "<p>body</p>",
+        });
+        await failureObserved.Task.WaitAsync(TimeSpan.FromSeconds(3));
+
+        var queued = Assert.Single(await scheduled.GetSnapshotAsync());
+        Assert.True(queued.IsImmediate);
+        Assert.Equal(1, queued.Attempts);
+        Assert.True(queued.AutomaticRetry);
+        Assert.True(queued.NextAttemptUtc > DateTimeOffset.UtcNow);
+        Assert.Contains("network unavailable", queued.LastError);
+        Assert.Equal(1, (await store.LoadLocalPageAsync(account.Id, "Scheduled", 10, 0)).TotalMatches);
+        Assert.Equal(0, (await store.LoadLocalPageAsync(account.Id, "Sent", 10, 0)).TotalMatches);
+    }
+
+    [Fact]
+    public async Task ImmediateQueue_AllowsAnotherMessageToBeQueuedWhileTransportIsBusy()
+    {
+        var account = new AccountModel
+        {
+            Id = Guid.NewGuid(), AccountName = "POP", Username = "sender@example.test",
+            BackendKind = BackendKind.Pop3Smtp, FolderTreeRootId = Guid.NewGuid(),
+            FolderTreeRootName = "Local mail", IsActive = true,
+        };
+        var store = CreateStore();
+        var profile = new ProfileContext(_directory);
+        var accounts = new AccountService(profile);
+        accounts.SaveAccounts([account]);
+        var sender = new BlockingSendMailService();
+        using var scheduled = new ScheduledSendService(profile, sender, accounts,
+            new StubCredentialService(), store, new LocalMailService(store, accounts));
+        var sentCount = 0;
+        var bothSent = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        scheduled.SentMailChanged += _ =>
+        {
+            if (Interlocked.Increment(ref sentCount) == 2) bothSent.TrySetResult();
+        };
+
+        await scheduled.QueueImmediateAsync(new ComposeModel
+        {
+            AccountId = account.Id, To = "first@example.test", Subject = "first", Body = "body",
+        });
+        await sender.FirstSendStarted.Task.WaitAsync(TimeSpan.FromSeconds(3));
+
+        // This must complete while the first SMTP call is still blocked. Holding the queue-file
+        // gate for the whole network operation used to make a second Send block behind the first.
+        await scheduled.QueueImmediateAsync(new ComposeModel
+        {
+            AccountId = account.Id, To = "second@example.test", Subject = "second", Body = "body",
+        }).WaitAsync(TimeSpan.FromSeconds(1));
+        Assert.Equal(2, (await scheduled.GetSnapshotAsync()).Count);
+
+        sender.AllowFirstSend.TrySetResult();
+        await bothSent.Task.WaitAsync(TimeSpan.FromSeconds(3));
     }
 
     [Fact]
@@ -927,6 +1188,73 @@ public sealed class LocalFirstMailTests : IDisposable
         Assert.Equal("↩", reloaded.ReplyIndicator);
     }
 
+    [Fact]
+    public async Task Pop3Attachments_UseOriginalNameOrdinalCollisionsAndContentReuse()
+    {
+        var accountId = Guid.NewGuid();
+        var store = CreateStore();
+        MailMessageDetail WithAttachment(string id, byte[] content)
+        {
+            var message = Message(accountId, "In", id, "body");
+            message.Date = new DateTimeOffset(2026, 9, 7, 10, 0, 0, TimeSpan.Zero);
+            message.Attachments =
+            [
+                new AttachmentModel { FileName = "Factura.pdf", Content = content },
+            ];
+            return message;
+        }
+
+        var first = WithAttachment("first", [1, 2, 3]);
+        var second = WithAttachment("second", [4, 5, 6]);
+        var duplicate = WithAttachment("duplicate", [1, 2, 3]);
+        await store.SavePop3MessageAsync("uid-first", first);
+        await store.SavePop3MessageAsync("uid-second", second);
+        await store.SavePop3MessageAsync("uid-duplicate", duplicate);
+
+        Assert.Equal("Factura.pdf", Path.GetFileName(first.Attachments[0].PartSpecifier));
+        Assert.Equal("Factura (2).pdf", Path.GetFileName(second.Attachments[0].PartSpecifier));
+        Assert.Equal(first.Attachments[0].PartSpecifier, duplicate.Attachments[0].PartSpecifier);
+        Assert.True(File.Exists(first.Attachments[0].PartSpecifier));
+        Assert.True(File.Exists(second.Attachments[0].PartSpecifier));
+    }
+
+    [Fact]
+    public async Task V8Migration_RemovesVerifiedHashPrefixAndUpdatesMessageReference()
+    {
+        var accountId = Guid.NewGuid();
+        var store = CreateStore();
+        var content = new byte[] { 10, 20, 30, 40 };
+        var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(content)).ToLowerInvariant();
+        var directory = Path.Combine(_directory, "Attachments", "Received", "2026");
+        Directory.CreateDirectory(directory);
+        var oldPath = Path.Combine(directory, $"{hash[..16]}-Factura.pdf");
+        await File.WriteAllBytesAsync(oldPath, content, TestContext.Current.CancellationToken);
+        var message = Message(accountId, "In", "legacy-attachment", "body");
+        message.Attachments =
+        [
+            new AttachmentModel
+            {
+                FileName = "Factura.pdf", PartSpecifier = oldPath, FileSize = content.Length,
+            },
+        ];
+        await store.SaveLocalMessageAsync(message, TestContext.Current.CancellationToken);
+        using (var connection = new SqliteConnection($"Data Source={Path.Combine(_directory, "mail.db")}"))
+        {
+            connection.Open();
+            using var downgrade = connection.CreateCommand();
+            downgrade.CommandText = "PRAGMA user_version=7;";
+            downgrade.ExecuteNonQuery();
+        }
+
+        store.Initialize();
+
+        var migrated = await store.LoadDetailAsync(accountId, "In", "legacy-attachment");
+        var newPath = Assert.Single(migrated!.Attachments).PartSpecifier;
+        Assert.Equal("Factura.pdf", Path.GetFileName(newPath));
+        Assert.True(File.Exists(newPath));
+        Assert.False(File.Exists(oldPath));
+    }
+
     private LocalStoreService CreateStore()
     {
         Directory.CreateDirectory(_directory);
@@ -970,6 +1298,29 @@ public sealed class LocalFirstMailTests : IDisposable
         public void SetSmtpPassword(AccountModel account, string password) { }
         public string? GetPop3Password(AccountModel account) => "password";
         public string? GetSmtpPassword(AccountModel account) => "password";
+    }
+
+    private sealed class BlockingSendMailService : ISendMailService
+    {
+        private int _calls;
+        public TaskCompletionSource FirstSendStarted { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource AllowFirstSend { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public async Task SendAsync(ComposeModel compose, AccountModel account, string? password,
+            CancellationToken ct = default)
+        {
+            if (Interlocked.Increment(ref _calls) != 1) return;
+            FirstSendStarted.TrySetResult();
+            await AllowFirstSend.Task.WaitAsync(ct);
+        }
+
+        public Task SendIcsReplyAsync(string icsReplyContent, AccountModel account, string? password,
+            string organizerEmail, CancellationToken ct = default) => Task.CompletedTask;
+
+        public Task VerifyAsync(AccountModel account, string? password, CancellationToken ct = default) =>
+            Task.CompletedTask;
     }
 
     private sealed class FakeTransportFactory(IPop3Transport transport) : IPop3TransportFactory

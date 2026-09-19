@@ -1,7 +1,10 @@
+using System.Diagnostics;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using MailKit.Net.Smtp;
 using MailKit.Security;
+using MimeKit;
 using QuickMail.Models;
 
 namespace QuickMail.Services;
@@ -26,58 +29,107 @@ public class SmtpService : ISendMailService
 
     public async Task SendAsync(ComposeModel compose, AccountModel account, string? password, CancellationToken ct = default)
     {
-        if (account.BackendKind == BackendKind.MicrosoftGraph)
-        {
-            await _graphSmtp.SendAsync(compose, account, password, ct);
-            return;
-        }
-
-        password ??= account.BackendKind == BackendKind.Pop3Smtp ? _accountSecrets?.GetSmtpPassword(account) : null;
-        var message = MimeMessageBuilder.Build(compose, account, MimeMessageBuilder.AppUserAgent);
-
-        using var client = new SmtpClient();
-
-        if (account.SmtpAcceptInvalidCert)
-        {
-#pragma warning disable CA5359 // callback intentionally accepts any cert when the user enables SmtpAcceptInvalidCert
-            client.ServerCertificateValidationCallback = (_, _, _, _) => true;
-#pragma warning restore CA5359
-        }
-
-        var ssl = MailSecurity.ForSmtp(account);
-
+        var details = BuildPerformanceDetails(compose, account);
+        var totalStarted = Stopwatch.GetTimestamp();
+        var stage = "dispatch";
+        var outcome = "failed";
+        PerformanceLogService.Marker("Send transport: START", details);
         try
         {
-            LogService.Log($"SmtpService: connecting to {account.SmtpHost}:{account.SmtpPort} ssl={ssl}");
-            await client.ConnectAsync(account.SmtpHost, account.SmtpPort, ssl, ct);
-            LogService.Log($"SmtpService: connected to {account.SmtpHost}:{account.SmtpPort}");
+            if (account.BackendKind == BackendKind.MicrosoftGraph)
+            {
+                stage = "Graph dispatch";
+                using (PerformanceLogService.Measure("Send transport: Graph dispatch", details))
+                    await _graphSmtp.SendAsync(compose, account, password, ct);
+                outcome = "accepted";
+                return;
+            }
 
-            if (account.AuthType is AuthType.OAuth2Microsoft or AuthType.OAuth2Google)
+            stage = "credential lookup";
+            using (PerformanceLogService.Measure("Send SMTP: credential lookup", details))
+                password ??= account.BackendKind == BackendKind.Pop3Smtp
+                    ? _accountSecrets?.GetSmtpPassword(account)
+                    : null;
+
+            stage = "MIME build";
+            MimeMessage message;
+            using (PerformanceLogService.Measure("Send SMTP: build MIME", details))
+                message = MimeMessageBuilder.Build(compose, account, MimeMessageBuilder.AppUserAgent);
+
+            using var client = new SmtpClient();
+
+            if (account.SmtpAcceptInvalidCert)
             {
-                LogService.Debug($"SmtpService: authenticating via XOAUTH2");
-                var token = await _oauth.GetAccessTokenAsync(account, ct);
-                await client.AuthenticateAsync(new SaslMechanismOAuth2(account.Username, token), ct);
+#pragma warning disable CA5359 // callback intentionally accepts any cert when the user enables SmtpAcceptInvalidCert
+                client.ServerCertificateValidationCallback = (_, _, _, _) => true;
+#pragma warning restore CA5359
             }
-            else
+
+            var ssl = MailSecurity.ForSmtp(account);
+            var connectionDetails = $"{details}; host={account.SmtpHost}; port={account.SmtpPort}; security={ssl}";
+
+            try
             {
-                await client.AuthenticateAsync(account.AuthUsername, password!, ct);
+                stage = "connect/TLS";
+                LogService.Log($"SmtpService: connecting to {account.SmtpHost}:{account.SmtpPort} ssl={ssl}");
+                using (PerformanceLogService.Measure("Send SMTP: connect and negotiate TLS", connectionDetails))
+                    await client.ConnectAsync(account.SmtpHost, account.SmtpPort, ssl, ct);
+                LogService.Log($"SmtpService: connected to {account.SmtpHost}:{account.SmtpPort}");
+
+                stage = "authenticate";
+                if (account.AuthType is AuthType.OAuth2Microsoft or AuthType.OAuth2Google)
+                {
+                    LogService.Debug($"SmtpService: authenticating via XOAUTH2");
+                    string token;
+                    stage = "OAuth token";
+                    using (PerformanceLogService.Measure("Send SMTP: acquire OAuth token", details))
+                        token = await _oauth.GetAccessTokenAsync(account, ct);
+                    stage = "authenticate";
+                    using (PerformanceLogService.Measure("Send SMTP: authenticate", details))
+                        await client.AuthenticateAsync(new SaslMechanismOAuth2(account.Username, token), ct);
+                }
+                else
+                {
+                    using (PerformanceLogService.Measure("Send SMTP: authenticate", details))
+                        await client.AuthenticateAsync(account.AuthUsername, password!, ct);
+                }
+                LogService.Log($"SmtpService: authenticated, sending.");
+                stage = "submit message";
+                using (PerformanceLogService.Measure("Send SMTP: submit message", details))
+                    await client.SendAsync(message, ct);
+                outcome = "accepted";
+                LogService.Log($"SmtpService: send complete");
             }
-            LogService.Log($"SmtpService: authenticated, sending.");
-            await client.SendAsync(message, ct);
-            LogService.Log($"SmtpService: send complete");
+            catch (Exception ex)
+            {
+                PerformanceLogService.Marker("Send SMTP: FAILED",
+                    $"{connectionDetails}; stage={stage}; error={ex.GetType().Name}");
+                LogService.Log($"SmtpService: send failed ({ex.GetType().Name})", ex);
+                throw;
+            }
+
+            // Outside the inner try, and swallowing its own failure: the message is ACCEPTED by the
+            // server at this point, so a QUIT that throws is not a send failure. Keep it separately
+            // timed: some servers delay their final QUIT response even though delivery is complete.
+            stage = "disconnect";
+            using (PerformanceLogService.Measure("Send SMTP: disconnect", details))
+                await DisconnectQuietlyAsync(client, ct);
+            outcome = "completed";
         }
-        catch (Exception ex)
+        finally
         {
-            LogService.Log($"SmtpService: send failed ({ex.GetType().Name})", ex);
-            throw;
+            PerformanceLogService.Record("Send transport: total", Stopwatch.GetElapsedTime(totalStarted),
+                $"{details}; outcome={outcome}; lastStage={stage}");
         }
+    }
 
-        // Outside the try, and swallowing its own failure: the message is ACCEPTED by the server at
-        // this point, so a QUIT that throws — a server that drops the connection the instant it
-        // takes the message, a network blip — is not a send failure. Reporting one told the user
-        // their message had failed while it was already on its way, which is worse than either
-        // truth. Disposing the client closes the socket regardless. (#396)
-        await DisconnectQuietlyAsync(client, ct);
+    private static string BuildPerformanceDetails(ComposeModel compose, AccountModel account)
+    {
+        var attachmentBytes = compose.Attachments.Sum(attachment =>
+            attachment.Content?.LongLength ?? Math.Max(0, attachment.FileSize));
+        return $"account={account.Username}; backend={account.BackendKind}; auth={account.AuthType}; " +
+               $"mode={compose.Mode}; bodyChars={compose.Body.Length}; htmlChars={compose.HtmlBody?.Length ?? 0}; " +
+               $"attachments={compose.Attachments.Count}; attachmentBytes={attachmentBytes}";
     }
 
     /// <summary>

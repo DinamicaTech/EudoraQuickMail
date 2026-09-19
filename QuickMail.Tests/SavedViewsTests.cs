@@ -103,6 +103,24 @@ public class SavedViewsManagerTests
         Assert.Null(vm.SelectedView.VirtualFolderKey);
     }
 
+    [Fact]
+    public void SaveAsNew_ActiveEverywhereSearch_CreatesSmartView()
+    {
+        var folder = RealFolder(AccountA, "INBOX", "In");
+        var account = MakeAccount(AccountA, "Work");
+        var vm = new ViewManagerViewModel(
+            new StubViewService(), new StubConfigService(), new StubCommandRegistry(), [],
+            folder, account, ViewMode.Messages, MessageFilter.All, MessageSort.DateDescending,
+            currentSearchQuery: "F:@example.com;N", currentSearchEverywhere: true);
+
+        vm.SaveAsNewCommand.Execute(null);
+
+        Assert.Equal("F:@example.com;N", vm.SelectedView!.SearchQuery);
+        Assert.True(vm.SelectedView.SearchEverywhere);
+        Assert.Equal("Everywhere: F:@example.com;N", vm.SelectedView.Name);
+        Assert.Equal("Everywhere", vm.SelectedFoldersSummary);
+    }
+
     // -- Sort round-trip ------------------------------------------------------
 
     [Theory]

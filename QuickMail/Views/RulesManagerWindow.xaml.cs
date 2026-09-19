@@ -53,6 +53,7 @@ public partial class RulesManagerWindow : Window
         vm.ConfirmDeleteRequested += OnConfirmDeleteRequested;
         vm.AnnouncementRequested += OnAnnouncementRequested;
         vm.PickFolderRequested += OnPickFolderRequested;
+        vm.PreviewReady += OnPreviewReady;
 
         // Focus the client rule list on open (#348).
         Loaded += (_, _) =>
@@ -60,6 +61,11 @@ public partial class RulesManagerWindow : Window
             Height = Math.Min(Height, SystemParameters.WorkArea.Height * 0.9);
             FocusFirstRule();
         };
+    }
+
+    private void OnPreviewReady(RulePreviewResult result)
+    {
+        new RulePreviewWindow(result) { Owner = this }.ShowDialog();
     }
 
     /// <summary>Moves keyboard focus to the next (or previous) window pane for F6 / Shift+F6.</summary>

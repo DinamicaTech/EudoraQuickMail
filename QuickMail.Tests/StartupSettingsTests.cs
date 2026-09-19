@@ -159,11 +159,11 @@ public class StartupSettingsTests
     [Fact]
     public void TheSettingsPickerIsBuiltThroughForStartupFolder()
     {
-        var body = MethodBody("Views/MainWindow.xaml.cs", "MenuSettings_Click");
+        var body = MethodBody("Views/MainWindow.xaml.cs", "OpenSettingsDialog");
 
         Assert.Contains("FolderPickerWindow.ForStartupFolder", body, StringComparison.Ordinal);
         Assert.False(Regex.IsMatch(body, @"new\s+FolderPickerWindow\s*\("),
-                     "MenuSettings_Click constructs a FolderPickerWindow directly — go through the factory.");
+                     "OpenSettingsDialog constructs a FolderPickerWindow directly — go through the factory.");
     }
 
     [Fact]
@@ -171,7 +171,7 @@ public class StartupSettingsTests
     {
         // "Open me in All Inboxes" is the single most-requested form of this setting, and the
         // aggregates reach the picker only by being passed in — nothing else would fail without it.
-        var body = MethodBody("Views/MainWindow.xaml.cs", "MenuSettings_Click");
+        var body = MethodBody("Views/MainWindow.xaml.cs", "OpenSettingsDialog");
 
         Assert.Contains("AllVirtualFolders", body, StringComparison.Ordinal);
     }
@@ -182,7 +182,7 @@ public class StartupSettingsTests
         // The opposite of the rule-target and move/copy pickers, deliberately: a startup folder is
         // one global choice stored with its owning account, so there is no name-collision hazard to
         // scope against, and scoping would hide most of the tree.
-        var body = MethodBody("Views/MainWindow.xaml.cs", "MenuSettings_Click");
+        var body = MethodBody("Views/MainWindow.xaml.cs", "OpenSettingsDialog");
         var call = Regex.Match(body, @"ForStartupFolder\s*\((?<args>[^;]*?)\)\s*;", RegexOptions.Singleline);
 
         Assert.True(call.Success, "could not find the ForStartupFolder call.");

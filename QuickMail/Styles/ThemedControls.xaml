@@ -1336,4 +1336,14 @@
         </Setter>
     </Style>
 
+    <Style TargetType="DataGrid">
+        <Setter Property="Background" Value="{DynamicResource Theme.SurfaceBackground}"/>
+        <Setter Property="Foreground" Value="{DynamicResource Theme.TextPrimary}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource Theme.Border}"/>
+        <Setter Property="HorizontalGridLinesBrush" Value="{DynamicResource Theme.BorderSubtle}"/>
+        <Setter Property="VerticalGridLinesBrush" Value="{DynamicResource Theme.BorderSubtle}"/>
+        <Setter Property="RowBackground" Value="{DynamicResource Theme.SurfaceBackground}"/>
+        <Setter Property="AlternatingRowBackground" Value="{DynamicResource Theme.WindowBackground}"/>
+    </Style>
+
 </ResourceDictionary>

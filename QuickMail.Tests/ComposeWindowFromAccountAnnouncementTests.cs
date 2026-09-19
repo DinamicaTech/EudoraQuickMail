@@ -18,7 +18,7 @@ using Xunit;
 namespace QuickMail.Tests;
 
 [Collection("WpfTests")]
-public class ComposeWindowFromAccountAnnouncementTests
+public class ComposeWindowFromAccountAnnouncementTests : WpfTestBase
 {
     private static readonly Guid IdeaPlaceId = Guid.NewGuid();
     private static readonly Guid SecondaryId = Guid.NewGuid();
@@ -76,7 +76,7 @@ public class ComposeWindowFromAccountAnnouncementTests
     private static void Drain() =>
         Dispatcher.CurrentDispatcher.Invoke(() => { }, DispatcherPriority.Background);
 
-    [StaFact]
+    [WpfFact]
     public void EnterOnTheClosedFromCombo_AnnouncesTheAccountAsAResult()
     {
         var window = NewShownComposeWindow(out var from);
@@ -97,7 +97,7 @@ public class ComposeWindowFromAccountAnnouncementTests
         }
     }
 
-    [StaFact]
+    [WpfFact]
     public void ArrowingThroughTheClosedFromCombo_DoesNotAnnounceOnEverySelectionChange()
     {
         var window = NewShownComposeWindow(out var from);
@@ -120,7 +120,7 @@ public class ComposeWindowFromAccountAnnouncementTests
         }
     }
 
-    [StaFact]
+    [WpfFact]
     public void LeavingTheFromCombo_AnnouncesOnlyWhenTheAccountChanged()
     {
         var window = NewShownComposeWindow(out var from);
@@ -154,7 +154,7 @@ public class ComposeWindowFromAccountAnnouncementTests
         }
     }
 
-    [StaFact]
+    [WpfFact]
     public void ASettledAccountIsNotAnnouncedTwice()
     {
         var window = NewShownComposeWindow(out var from);

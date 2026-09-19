@@ -73,7 +73,7 @@ public static class QuickSearchParser
         {
             if (!token.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) continue;
             var rest = token[prefix.Length..];
-            var op = rest.StartsWith(">=") || rest.StartsWith("<=") ? rest[..2]
+            var op = rest.StartsWith(">=", StringComparison.Ordinal) || rest.StartsWith("<=", StringComparison.Ordinal) ? rest[..2]
                 : rest.Length > 0 && rest[0] is ':' or '=' or '<' or '>' ? rest[..1] : string.Empty;
             if (op.Length == 0) continue; // ordinary text beginning with a prefix letter
             if (field is QuickSearchField.AttachmentCount or QuickSearchField.Date)

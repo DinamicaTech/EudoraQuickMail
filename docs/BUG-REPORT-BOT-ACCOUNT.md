@@ -20,7 +20,7 @@ collaborator grant on this repository — bought only the rename.
 [#501](https://github.com/kellylford/QuickMail/issues/501) removed the credential from the
 binary instead. A GitHub App's private key lives in a small Cloudflare Worker; the app posts
 reports there with a relay key whose entire authority is "file an issue on
-kellylford/QuickMail", rate-limited at the relay and rotatable without touching any GitHub
+DinamicaTech/QuickMail", rate-limited at the relay and rotatable without touching any GitHub
 account. Issues are authored by the App's bot identity, so the attribution problem #222
 raised is fixed as a side effect rather than as the goal.
 

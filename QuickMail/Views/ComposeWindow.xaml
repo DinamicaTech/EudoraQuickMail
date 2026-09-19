@@ -128,8 +128,8 @@
 
     <DockPanel Margin="10"
                AllowDrop="True"
-               DragOver="Window_DragOver"
-               Drop="Window_Drop">
+               PreviewDragOver="Window_DragOver"
+               PreviewDrop="Window_Drop">
 
         <!-- Formatting toolbar — visible in HTML mode only (managed in code-behind) -->
         <ToolBarTray DockPanel.Dock="Top" x:Name="FormattingToolbarTray" Visibility="Collapsed"
@@ -215,37 +215,39 @@
                 <ComboBoxItem Content="HTML"/>
             </ComboBox>
             <WrapPanel x:Name="NormalComposeButtons" DockPanel.Dock="Right" HorizontalAlignment="Right">
-                <Button Content="Send later" Command="{Binding ScheduleSendCommand}"
-                        AutomationProperties.Name="Schedule message" MinWidth="90" Margin="6,2,0,0"/>
-                <Button x:Name="SendButton"
-                        Content="Send"
-                        Command="{Binding SendCommand}"
-                        AutomationProperties.Name="Send message"
-                        AutomationProperties.AcceleratorKey="Alt+S"
-                        MinWidth="80" Margin="6,2,0,0"
-                        TabIndex="7"/>
-                <Button Content="Insert Template…"
-                        Command="{Binding InsertTemplateCommand}"
-                        AutomationProperties.Name="Insert a saved template"
-                        MinWidth="120" Margin="6,2,0,0"
-                        TabIndex="8"/>
-                <Button Content="Save as Template"
-                        Command="{Binding SaveAsTemplateCommand}"
-                        AutomationProperties.Name="Save current message as template"
-                        MinWidth="120" Margin="6,2,0,0"
-                        TabIndex="9"/>
-                <Button Content="Save Draft"
-                        Command="{Binding SaveDraftCommand}"
-                        AutomationProperties.Name="Save as draft"
-                        AutomationProperties.AcceleratorKey="Ctrl+S"
-                        MinWidth="100" Margin="6,2,0,0"
-                        TabIndex="10"/>
+                <!-- Split Send control: the large half keeps the habitual one-click Send action;
+                     the arrow exposes the less common variants without consuming four buttons. -->
+                <StackPanel Orientation="Horizontal" Margin="6,2,0,0">
+                    <Button x:Name="SendButton"
+                            Content="Send"
+                            Command="{Binding SendCommand}"
+                            AutomationProperties.Name="Send message"
+                            AutomationProperties.AcceleratorKey="Alt+S"
+                            MinWidth="72" Margin="0"
+                            TabIndex="7"/>
+                    <Button x:Name="SendOptionsButton"
+                            Content="▼"
+                            Click="SendOptionsButton_Click"
+                            AutomationProperties.Name="More sending options"
+                            ToolTip="Send later, save draft, or send immediately"
+                            MinWidth="26" Padding="3,0" Margin="-1,0,0,0"
+                            TabIndex="8">
+                        <Button.ContextMenu>
+                            <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
+                                <MenuItem Header="Send _later…" Command="{Binding ScheduleSendCommand}"/>
+                                <MenuItem Header="Save as _Draft" Command="{Binding SaveDraftCommand}"/>
+                                <Separator/>
+                                <MenuItem Header="Send _immediately" Command="{Binding SendImmediatelyCommand}"/>
+                            </ContextMenu>
+                        </Button.ContextMenu>
+                    </Button>
+                </StackPanel>
                 <Button Content="_Cancel"
                         Command="{Binding CancelCommand}"
                         AutomationProperties.Name="Cancel and close compose window"
                         IsCancel="True"
                         MinWidth="80" Margin="6,2,0,0"
-                        TabIndex="11"/>
+                        TabIndex="9"/>
             </WrapPanel>
             <WrapPanel x:Name="StoredMessageEditButtons" DockPanel.Dock="Right"
                        HorizontalAlignment="Right" Visibility="Collapsed">
@@ -423,13 +425,23 @@
             <Separator Grid.Row="6" Grid.ColumnSpan="2" Margin="0,4"/>
 
             <!-- Attachments -->
-            <Button Grid.Row="7" Grid.Column="0" Grid.ColumnSpan="2" x:Name="AddFilesButton"
-                    Content="Add Files…"
-                    Command="{Binding AddAttachmentsCommand}"
-                    AutomationProperties.Name="Add file attachments"
-                    AutomationProperties.AcceleratorKey="Ctrl+H"
-                    HorizontalAlignment="Left"
-                    Margin="0,2" TabIndex="7"/>
+            <StackPanel Grid.Row="7" Grid.Column="0" Grid.ColumnSpan="2"
+                        Orientation="Horizontal" HorizontalAlignment="Left" Margin="0,2">
+                <Button x:Name="AddFilesButton"
+                        Content="Add Files…"
+                        Command="{Binding AddAttachmentsCommand}"
+                        AutomationProperties.Name="Add file attachments"
+                        AutomationProperties.AcceleratorKey="Ctrl+H"
+                        Margin="0,0,6,0" TabIndex="7"/>
+                <Button Content="Insert Template…"
+                        Command="{Binding InsertTemplateCommand}"
+                        AutomationProperties.Name="Insert a saved template"
+                        Margin="0,0,6,0" TabIndex="8"/>
+                <Button Content="Save as Template"
+                        Command="{Binding SaveAsTemplateCommand}"
+                        AutomationProperties.Name="Save current message as template"
+                        TabIndex="9"/>
+            </StackPanel>
             <ListBox Grid.Row="8" Grid.Column="0" Grid.ColumnSpan="2"
                      x:Name="AttachmentList"
                      ItemsSource="{Binding Attachments}"

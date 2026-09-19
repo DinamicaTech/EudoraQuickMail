@@ -29,6 +29,8 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
     private readonly ILocalStoreService? _localStore;
     private readonly ITemplateService _templateService;
     private readonly IMarkdownService _markdown;
+    private readonly IOutgoingMailQueue? _outgoingQueue;
+    private readonly IConfigService? _configService;
 
     [ObservableProperty] private string _to = string.Empty;
     [ObservableProperty] private string _cc = string.Empty;
@@ -184,6 +186,8 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
 
     public event Action? CloseRequested;
     public event Action<Guid, string, string>? OriginalMessageReplied;
+    /// <summary>Raised after a delayed ordinary Send is durably queued and can still be cancelled.</summary>
+    public event Action<Guid, string, DateTimeOffset>? UndoSendAvailable;
     public Func<ComposeModel, Task>? SaveStoredMessageRequested { get; set; }
 
     /// <summary>
@@ -204,7 +208,8 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
 
     public ComposeViewModel(ISendMailService smtp, IAccountService accountService, ICredentialService credentials,
         IMailService imap, ITemplateService templateService, IMarkdownService? markdown = null,
-        ILocalStoreService? localStore = null)
+        ILocalStoreService? localStore = null, IOutgoingMailQueue? outgoingQueue = null,
+        IConfigService? configService = null)
     {
         _smtp = smtp;
         _accountService = accountService;
@@ -213,6 +218,8 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
         _templateService = templateService;
         _markdown = markdown ?? new MarkdownService();
         _localStore = localStore;
+        _outgoingQueue = outgoingQueue;
+        _configService = configService;
         _attachments.CollectionChanged += (_, _) =>
         {
             _isDirty = true;
@@ -516,7 +523,16 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
     }
 
     [RelayCommand]
-    private async Task SendAsync()
+    private Task SendAsync() => SendCoreAsync(bypassConfiguredDelay: false);
+
+    /// <summary>
+    /// Explicit split-button action that bypasses the configured Undo Send delay. This is distinct
+    /// from ordinary Send, whose default remains governed by DelaySendingMessagesSeconds.
+    /// </summary>
+    [RelayCommand]
+    private Task SendImmediatelyAsync() => SendCoreAsync(bypassConfiguredDelay: true);
+
+    private async Task SendCoreAsync(bool bypassConfiguredDelay)
     {
         if (string.IsNullOrWhiteSpace(To))
         {
@@ -531,6 +547,7 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
             return;
         }
 
+        if (!ConfirmForgottenAttachment()) return;
         WarnIfAttachmentsExceedRecommendedSize();
 
         // The From header is built from this address, so an account whose "email address" is not one
@@ -558,17 +575,86 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
 
         IsBusy = true;
         SetProgress("Sending…");
+        var totalStarted = Stopwatch.GetTimestamp();
+        var outcome = "failed";
+        var sendDetails = $"account={account.Username}; backend={account.BackendKind}; mode={CurrentMode}; " +
+                          $"attachments={Attachments.Count}; attachmentBytes={Attachments.Sum(attachment => attachment.Content?.LongLength ?? Math.Max(0, attachment.FileSize))}; " +
+                          $"reply={_replySourceMessageId != null}; draft={_draftMessageId != null}; scheduled={_scheduledId != null}";
+        PerformanceLogService.Marker("Send compose: START", sendDetails);
         try
         {
-            var compose = BuildComposeModel(account.Id);
+            ComposeModel compose;
+            var stageStarted = Stopwatch.GetTimestamp();
+            compose = BuildComposeModel(account.Id);
+            PerformanceLogService.Record("Send compose: build model",
+                Stopwatch.GetElapsedTime(stageStarted), sendDetails);
 
+            var outgoingQueue = ResolveOutgoingQueue();
+            // A missing config service means an isolated/legacy host: preserve the established
+            // queue-first behaviour. Production always injects ConfigService, where zero now has
+            // the explicit meaning requested by the user: bypass Scheduled and send directly.
+            var configuredDelay = bypassConfiguredDelay
+                ? 0
+                : _configService is null
+                ? (int?)null
+                : Math.Clamp(_configService.Load().DelaySendingMessagesSeconds, 0, 600);
+            var activity = (System.Windows.Application.Current as App)?.MailActivityPolicy;
+            if (activity is { CanSend: false }) configuredDelay = null;
+            if (outgoingQueue is not null && configuredDelay != 0)
+            {
+                SetProgress("Queueing message…");
+                stageStarted = Stopwatch.GetTimestamp();
+                var notBeforeUtc = configuredDelay is > 0
+                    ? DateTimeOffset.UtcNow.AddSeconds(configuredDelay.Value)
+                    : (DateTimeOffset?)null;
+                var queueId = await outgoingQueue.QueueImmediateAsync(
+                    compose, _scheduledId, notBeforeUtc);
+                PerformanceLogService.Record("Send compose: persist outgoing queue",
+                    Stopwatch.GetElapsedTime(stageStarted), sendDetails);
+
+                // From this point the durable queue owns the complete lifecycle: SMTP transport,
+                // Sent-copy persistence, replied marker, and source-draft cleanup.  The editor can
+                // close without waiting for the network and without risking a lost message.
+                LocalFolderChanged?.Invoke(account.Id);
+                if (notBeforeUtc is { } undoUntil)
+                {
+                    UndoSendAvailable?.Invoke(queueId, compose.Subject, undoUntil);
+                    SetStatusOutcome($"Message queued for sending in {configuredDelay} seconds.");
+                }
+                else
+                {
+                    SetStatusOutcome(activity is { CanSend: false }
+                        ? "Message queued. It will be sent when Offline mode is disabled."
+                        : "Message queued for sending.");
+                }
+                _isSent = true;
+                outcome = "queued";
+                CloseRequested?.Invoke();
+                return;
+            }
+
+            // Compatibility path for isolated tests/hosts that do not provide the application
+            // queue. The production MainWindow always injects it.
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            stageStarted = Stopwatch.GetTimestamp();
             await _smtp.SendAsync(compose, account, password, cts.Token);
+            PerformanceLogService.Record("Send compose: transport dispatch",
+                Stopwatch.GetElapsedTime(stageStarted), sendDetails);
+
+            stageStarted = Stopwatch.GetTimestamp();
             await MarkOriginalMessageRepliedBestEffortAsync(compose);
+            PerformanceLogService.Record("Send compose: persist replied marker",
+                Stopwatch.GetElapsedTime(stageStarted), sendDetails);
             if (_scheduledId is { } scheduledId && System.Windows.Application.Current is App { ScheduledSender: { } scheduler })
+            {
+                stageStarted = Stopwatch.GetTimestamp();
                 await scheduler.RemoveAsync(scheduledId, deleteLocalCopy: true);
+                PerformanceLogService.Record("Send compose: remove scheduled source",
+                    Stopwatch.GetElapsedTime(stageStarted), sendDetails);
+            }
             SetStatusOutcome("Message sent.");
             _isSent = true;
+            outcome = "accepted";
 
             // Append to Sent folder (best-effort — fire and forget so it doesn't block the UI),
             // then tell the main mailbox to synchronize/refresh its canonical Out aggregate.
@@ -576,10 +662,13 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
             // leaving Gmail with hundreds of server Sent messages and zero local rows.
             _ = Task.Run(async () =>
             {
+                var sentCopyStarted = Stopwatch.GetTimestamp();
+                var sentCopyOutcome = "failed";
                 try
                 {
                     using var sentCts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
                     await _imap.AppendToSentAsync(account.Id, compose, sentCts.Token);
+                    sentCopyOutcome = "completed";
                 }
                 catch (Exception ex)
                 {
@@ -587,6 +676,9 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
                 }
                 finally
                 {
+                    PerformanceLogService.Record("Send background: append Sent copy",
+                        Stopwatch.GetElapsedTime(sentCopyStarted),
+                        $"{sendDetails}; outcome={sentCopyOutcome}");
                     SentMailChanged?.Invoke(account.Id);
                 }
             });
@@ -597,7 +689,10 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
                 try
                 {
                     using var delCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+                    stageStarted = Stopwatch.GetTimestamp();
                     await _imap.MoveToTrashAsync(account.Id, _draftFolderName, _draftMessageId, delCts.Token);
+                    PerformanceLogService.Record("Send compose: move source draft to Trash",
+                        Stopwatch.GetElapsedTime(stageStarted), sendDetails);
                 }
                 catch (Exception ex)
                 {
@@ -605,7 +700,11 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
                 }
             }
 
+            stageStarted = Stopwatch.GetTimestamp();
             CloseRequested?.Invoke();
+            PerformanceLogService.Record("Send compose: close editor",
+                Stopwatch.GetElapsedTime(stageStarted), sendDetails);
+            outcome = "completed";
         }
         catch (Exception ex)
         {
@@ -615,6 +714,8 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
         }
         finally
         {
+            PerformanceLogService.Record("Send compose: foreground total",
+                Stopwatch.GetElapsedTime(totalStarted), $"{sendDetails}; outcome={outcome}");
             IsBusy = false;
         }
     }
@@ -624,11 +725,20 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
     {
         if (string.IsNullOrWhiteSpace(To)) { SetStatusOutcome("Please enter at least one recipient."); return; }
         if (SenderAccount is not { } account) { SetStatusOutcome("Please select a sender account."); return; }
+        if (!ConfirmForgottenAttachment()) return;
         WarnIfAttachmentsExceedRecommendedSize();
         var requested = PromptScheduleTimeRequested?.Invoke(_scheduledAt?.LocalDateTime ?? DateTime.Now.AddMinutes(10));
         if (requested is not { } local) return;
+        if (local.Date < DateTime.Today)
+        {
+            const string timeMachineMessage = "I know you had to send this message yesterday, but I just can't do it " +
+                                              "until my time machine gets back from the shop.";
+            WarningDialogRequested?.Invoke(timeMachineMessage, "Send Later");
+            SetStatusOutcome(timeMachineMessage);
+            return;
+        }
         if (local <= DateTime.Now) { SetStatusOutcome("Enter a future local date and time for scheduled sending."); return; }
-        if (System.Windows.Application.Current is not App { ScheduledSender: { } scheduler })
+        if (ResolveOutgoingQueue() is not { } scheduler)
         { SetStatusOutcome("Scheduled sending is unavailable."); return; }
         var compose = BuildComposeModel(account.Id);
         if (_scheduledId is { } scheduledId)
@@ -639,6 +749,21 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
         _isSent = true;
         SetStatusOutcome($"Message scheduled for {local:g}.");
         CloseRequested?.Invoke();
+    }
+
+    private IOutgoingMailQueue? ResolveOutgoingQueue() => _outgoingQueue
+        ?? (System.Windows.Application.Current as App)?.ScheduledSender;
+
+    private bool ConfirmForgottenAttachment()
+    {
+        if (Attachments.Count > 0) return true;
+        var snapshot = CurrentMode == ComposeMode.Html
+            ? RichBodyProvider?.Invoke() ?? RichBodySnapshot.Empty
+            : RichBodySnapshot.Empty;
+        if (!ForgottenAttachmentDetector.MentionsAttachment(Body, snapshot.Html)) return true;
+        return ConfirmationRequested?.Invoke(
+            "The message mentions an attachment, but no file is attached. Send it anyway?",
+            "Attachment may be missing") ?? true;
     }
 
     private async Task MarkOriginalMessageRepliedBestEffortAsync(ComposeModel compose)
@@ -1034,7 +1159,10 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
                         HtmlBody = snapshot.Html,
                         PlainTextBody = snapshot.PlainText,
                     });
-                    body     = MessageBodyHtmlBuilder.HtmlToText(htmlBody);
+                    // The editor already provides the authoritative text/plain part.
+                    // Re-extracting it from the wrapped HTML also reads the injected
+                    // <style> block and leaks QuickMail's CSS into the message body.
+                    body = snapshot.PlainText;
                     // The WebView editor supplies a complete HTML document so do not
                     // wrap it again and discard its original head/CSS.
                 }

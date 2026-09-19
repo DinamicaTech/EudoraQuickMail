@@ -98,6 +98,6 @@ public class ForwardAttachmentDialogViewModelTests
         var vm = new ForwardAttachmentDialogViewModel(new List<AttachmentModel> { att });
 
         Assert.Contains("report.pdf", vm.Items[0].AutomationLabel);
-        Assert.Contains("1.0 MB", vm.Items[0].AutomationLabel);
+        Assert.Contains(att.FileSizeDisplay, vm.Items[0].AutomationLabel);
     }
 }

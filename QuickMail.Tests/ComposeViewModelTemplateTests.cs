@@ -305,6 +305,7 @@ public class ComposeViewModelTemplateTests
         var (vm, templates) = MakeVm();
         vm.Subject = "My Response";
         vm.Body = "Thank you for your email.";
+        vm.PromptTemplateNameRequested = suggested => suggested;
 
         await InvokeSaveAsTemplateAsync(vm);
 
@@ -316,29 +317,31 @@ public class ComposeViewModelTemplateTests
     }
 
     [Fact]
-    public async Task SaveAsTemplate_UsesUntitledWhenSubjectEmpty()
+    public async Task SaveAsTemplate_UsesFirstBodyLineWhenSubjectEmpty()
     {
         var (vm, templates) = MakeVm();
         vm.Subject = "";
         vm.Body = "Some body text";
+        vm.PromptTemplateNameRequested = suggested => suggested;
 
         await InvokeSaveAsTemplateAsync(vm);
 
-        Assert.Equal("Template saved as 'Untitled'.", vm.StatusText);
+        Assert.Equal("Template saved as 'Some body text'.", vm.StatusText);
         Assert.Single(templates.AddedTemplates);
-        Assert.Equal("Untitled", templates.AddedTemplates[0].Title);
+        Assert.Equal("Some body text", templates.AddedTemplates[0].Title);
     }
 
     [Fact]
-    public async Task SaveAsTemplate_UsesUntitledWhenSubjectWhitespace()
+    public async Task SaveAsTemplate_UsesFirstBodyLineWhenSubjectWhitespace()
     {
         var (vm, templates) = MakeVm();
         vm.Subject = "   ";
         vm.Body = "Body";
+        vm.PromptTemplateNameRequested = suggested => suggested;
 
         await InvokeSaveAsTemplateAsync(vm);
 
-        Assert.Equal("Untitled", templates.AddedTemplates[0].Title);
+        Assert.Equal("Body", templates.AddedTemplates[0].Title);
     }
 
     [Fact]

@@ -16,6 +16,7 @@ public class SyncService : ISyncService
     private readonly IConfigService _config;
     private readonly IRuleService _rules;
     private readonly IUiDispatcher _ui;
+    private readonly MailActivityPolicyService? _activity;
 
     // In --ui-probe mode the mail backend is a no-op stub that lists zero server messages, while the
     // store is seeded with fixture mail. Reconcile would read that empty listing as "everything was
@@ -24,13 +25,14 @@ public class SyncService : ISyncService
     private readonly bool _probeMode;
 
     public SyncService(IMailService imap, ILocalStoreService store, IConfigService config, IRuleService rules,
-        IUiDispatcher? ui = null, bool probeMode = false)
+        IUiDispatcher? ui = null, bool probeMode = false, MailActivityPolicyService? activity = null)
     {
         _imap   = imap;
         _store  = store;
         _config = config;
         _rules  = rules;
         _probeMode = probeMode;
+        _activity = activity;
         // WpfUiDispatcher marshals only when the real QuickMail App is present, and runs inline
         // otherwise — a plain Application.Current null-check is NOT enough (tests create a pumpless
         // Application, so InvokeAsync would park forever).
@@ -136,6 +138,7 @@ public class SyncService : ISyncService
         IReadOnlyDictionary<Guid, List<MailFolderModel>> cachedFolders,
         CancellationToken ct)
     {
+        if (_activity is { CanReceive: false }) return;
         var previewJobs = new ConcurrentBag<(AccountModel Account, MailFolderModel Folder, List<MailMessageSummary> Incoming)>();
         var accountList = accounts.ToList();
 
@@ -433,6 +436,7 @@ public class SyncService : ISyncService
 
     public async Task<IReadOnlyList<MailMessageSummary>> SyncOneFolderAsync(AccountModel account, MailFolderModel folder, CancellationToken ct)
     {
+        if (_activity is { CanReceive: false }) return [];
         // IDLE-triggered sync in non-online (SQLite cache) mode.
         //
         // We intentionally mirror SyncOneFolderOnlineAsync rather than calling
@@ -460,6 +464,7 @@ public class SyncService : ISyncService
 
     public async Task<IReadOnlyList<MailMessageSummary>> SyncOneFolderOnlineAsync(AccountModel account, MailFolderModel folder, CancellationToken ct)
     {
+        if (_activity is { CanReceive: false }) return [];
         // Fetch the last 50 messages. OnFolderSynced deduplicates by UID so already-visible
         // messages are harmlessly skipped; only truly new arrivals are inserted.
         LogService.Log($"IDLE targeted sync: fetching {account.AccountLabel}/{folder.FullName}");
@@ -484,7 +489,7 @@ public class SyncService : ISyncService
     /// Returns the genuinely-new arrivals (empty when none).
     /// </summary>
     public async Task<IReadOnlyList<MailMessageSummary>> SyncFolderFullAsync(AccountModel account, MailFolderModel folder, CancellationToken ct)
-        => await SyncFolderAsync(account, folder, ct);
+        => _activity is { CanReceive: false } ? [] : await SyncFolderAsync(account, folder, ct);
 
     private async Task<List<MailMessageSummary>> SyncFolderAsync(AccountModel account, MailFolderModel folder, CancellationToken ct)
     {
@@ -694,6 +699,7 @@ public class SyncService : ISyncService
     /// </summary>
     public async Task<int> ReconcileFolderAsync(AccountModel account, MailFolderModel folder, CancellationToken ct)
     {
+        if (_activity is { CanReceive: false }) return 0;
         // Never reconcile against the probe stub: its empty server listing would delete the seeded
         // fixture mail and blank the visual-QA captures (see _probeMode).
         if (_probeMode) return 0;

@@ -9,7 +9,8 @@ namespace QuickMail.Tests;
 /// Tests for the quoted/forwarded-original boundary detection that keeps spell check inside the
 /// user's own text on reply/forward (issue #228).
 /// </summary>
-public class SpellCheckBoundaryTests
+[Collection("WpfTests")]
+public class SpellCheckBoundaryTests : WpfTestBase
 {
     [Fact]
     public void QuoteBoundaryIndex_FindsReplyAttribution()
@@ -54,7 +55,7 @@ public class SpellCheckBoundaryTests
         Assert.StartsWith("On Tue, Alice wrote:", body[idx..]);
     }
 
-    [StaFact]
+    [WpfFact]
     public void QuoteBoundaryPointer_FindsForwardHeaderParagraph_AboveBlockquote()
     {
         // Mirrors the real forward structure: an nbsp spacer, the header paragraph, then the quoted
@@ -71,7 +72,7 @@ public class SpellCheckBoundaryTests
         Assert.Equal(0, ptr!.CompareTo(header.ContentStart));
     }
 
-    [StaFact]
+    [WpfFact]
     public void QuoteBoundaryPointer_IgnoresLoneUserBlockquote()
     {
         // A blockquote the user inserts themselves (no reply/forward marker) must NOT be treated as
@@ -84,7 +85,7 @@ public class SpellCheckBoundaryTests
         Assert.Null(SpellScan.QuoteBoundaryPointer(doc));
     }
 
-    [StaFact]
+    [WpfFact]
     public void QuoteBoundaryPointer_FindsAttributionParagraph()
     {
         var doc = new FlowDocument();
@@ -98,7 +99,7 @@ public class SpellCheckBoundaryTests
         Assert.Equal(0, ptr!.CompareTo(attribution.ContentStart));
     }
 
-    [StaFact]
+    [WpfFact]
     public void QuoteBoundaryPointer_ReturnsNull_WhenNoQuote()
     {
         var doc = new FlowDocument();

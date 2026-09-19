@@ -127,7 +127,7 @@ echo Packing Velopack release v%VERSION%...
 :: --framework webview2 restores the old installer's WebView2 install-on-demand.
 copy /y LICENSE installer\velopack\license.txt >nul
 vpk pack --packId EudoraQuickMail --packVersion %VERSION% --packDir publish ^
-  --mainExe QuickMail.exe --packTitle "Eudora QuickMail" --packAuthors "Kelly Ford" ^
+  --mainExe QuickMail.exe --packTitle "Eudora QuickMail" --packAuthors "DinamicaTech and QuickMail contributors" ^
   --shortcuts StartMenuRoot --outputDir installer\Output\Releases ^
   --framework webview2 ^
   --msi --instLocation PerUser ^

@@ -3,7 +3,11 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Welcome to Eudora QuickMail" Height="850" Width="760"
         MinHeight="620" MinWidth="700" WindowStartupLocation="CenterScreen"
-        ResizeMode="CanResizeWithGrip" ShowInTaskbar="True">
+        ResizeMode="CanResizeWithGrip" ShowInTaskbar="True"
+        Background="{DynamicResource Theme.WindowBackground}"
+        Foreground="{DynamicResource Theme.TextPrimary}"
+        FontFamily="{DynamicResource Theme.FontFamily}"
+        FontSize="{DynamicResource Theme.FontSizeBase}">
     <Grid Margin="28">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
@@ -15,7 +19,7 @@
         </Grid.RowDefinitions>
 
         <StackPanel Grid.Row="0" Margin="0,0,0,20">
-            <TextBlock x:Name="HeadingText" Text="Welcome to Eudora QuickMail" FontSize="25" FontWeight="SemiBold"/>
+            <TextBlock x:Name="HeadingText" Text="Welcome to Eudora QuickMail" FontSize="{DynamicResource Theme.FontSizeHeader}" FontWeight="SemiBold"/>
             <TextBlock x:Name="IntroductionText" Margin="0,8,0,0" TextWrapping="Wrap"
                        Text="Eudora QuickMail can migrate your Eudora accounts, folders, messages, filters and referenced attachments now. Eudora should be closed during the import."/>
         </StackPanel>
@@ -64,7 +68,7 @@
                 <RadioButton x:Name="CopyAttachments" Margin="0,3" Content="Copy referenced attachments to the Eudora QuickMail data folder"/>
                 <TextBlock Margin="24,0,0,7" Opacity="0.75" TextWrapping="Wrap" Text="Only files linked by an imported message are copied; orphan files are ignored. Additional disk space is required."/>
                 <RadioButton x:Name="MoveAttachments" Margin="0,3" Content="Move referenced attachments to the Eudora QuickMail data folder"/>
-                <TextBlock Margin="24,0,0,0" Foreground="#B3261E" TextWrapping="Wrap" Text="Advanced option: Eudora will lose access to those attachments. Files are removed from Eudora only after a verified copy and a successful message import."/>
+                <TextBlock Margin="24,0,0,0" Foreground="{DynamicResource Theme.Error}" TextWrapping="Wrap" Text="Advanced option: Eudora will lose access to those attachments. Files are removed from Eudora only after a verified copy and a successful message import."/>
             </StackPanel>
             </ScrollViewer>
         </GroupBox>

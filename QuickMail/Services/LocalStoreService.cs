@@ -969,6 +969,25 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
             CREATE INDEX IF NOT EXISTS idx_summary_account_folder_date
                 ON MessageSummary(account_id, folder_name, date_ticks DESC);
 
+            CREATE TABLE IF NOT EXISTS SnoozedMessage (
+                account_id  TEXT    NOT NULL,
+                folder_name TEXT    NOT NULL,
+                unique_id   TEXT    NOT NULL,
+                wake_ticks  INTEGER NOT NULL,
+                PRIMARY KEY(account_id, folder_name, unique_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_snoozed_wake ON SnoozedMessage(wake_ticks);
+            CREATE TRIGGER IF NOT EXISTS trg_summary_delete_snooze
+            AFTER DELETE ON MessageSummary BEGIN
+                DELETE FROM SnoozedMessage
+                 WHERE account_id=OLD.account_id AND folder_name=OLD.folder_name AND unique_id=OLD.unique_id;
+            END;
+            CREATE TRIGGER IF NOT EXISTS trg_summary_move_snooze
+            AFTER UPDATE OF folder_name ON MessageSummary BEGIN
+                UPDATE OR REPLACE SnoozedMessage SET folder_name=NEW.folder_name
+                 WHERE account_id=OLD.account_id AND folder_name=OLD.folder_name AND unique_id=OLD.unique_id;
+            END;
+
             CREATE TABLE IF NOT EXISTS MessageDetail (
                 unique_id   TEXT    NOT NULL,
                 account_id  TEXT    NOT NULL,
@@ -1284,10 +1303,12 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
     //   6 → 7   add FTS rows for cached IMAP/Graph summaries. Those backends cache headers and
     //           preview text before a body is opened; older builds only indexed authoritative
     //           POP3/local messages, so textual searches silently omitted remote Inbox mail.
-    // Add new migrations as: if (version < 8) { ...; }
-    private const int CurrentSchemaVersion = 7;
+    //   7 → 8   replace the visible SHA prefix on locally received attachments with Explorer-style
+    //           ordinal suffixes while retaining hashes for embedded-resource deduplication.
+    // Add new migrations as: if (version < 9) { ...; }
+    private const int CurrentSchemaVersion = 8;
 
-    private static void RunDataMigrations(SqliteConnection conn)
+    private void RunDataMigrations(SqliteConnection conn)
     {
         var version = GetUserVersion(conn);
         if (version >= CurrentSchemaVersion) return;
@@ -1472,6 +1493,9 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
             tx.Commit();
         }
 
+        if (version < 8)
+            MigrateLegacyReceivedAttachmentNames(conn);
+
         SetUserVersion(conn, CurrentSchemaVersion);
     }
 
@@ -1636,10 +1660,14 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
         await using var cmd = conn.CreateCommand();
         cmd.CommandText =
             "SELECT unique_id, account_id, folder_name, from_disp, to_addr, subject, date_ticks, is_read, preview_text, is_replied, is_forwarded, has_attachments, is_mailing_list, flag_id, internet_message_id, message_direction " +
-            "FROM MessageSummary WHERE account_id=$aid AND folder_name=$fn ORDER BY date_ticks DESC" +
+            "FROM MessageSummary WHERE account_id=$aid AND folder_name=$fn " +
+            "AND NOT EXISTS(SELECT 1 FROM SnoozedMessage z WHERE z.account_id=MessageSummary.account_id " +
+            "AND z.folder_name=MessageSummary.folder_name AND z.unique_id=MessageSummary.unique_id AND z.wake_ticks>$now) " +
+            "ORDER BY date_ticks DESC" +
             (limit.HasValue ? " LIMIT $limit;" : ";");
         cmd.Parameters.AddWithValue("$aid", accountId.ToString());
         cmd.Parameters.AddWithValue("$fn",  folderName);
+        cmd.Parameters.AddWithValue("$now", DateTimeOffset.UtcNow.UtcTicks);
         if (limit.HasValue)
             cmd.Parameters.AddWithValue("$limit", Math.Max(0, limit.Value));
         return await ReadSummariesAsync(cmd);
@@ -1742,8 +1770,11 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
 
         await using (var del = conn.CreateCommand())
         {
-            del.CommandText = "DELETE FROM Folder WHERE account_id = $aid;";
+            // Snooze is application-local even for IMAP/Graph accounts. Preserve its synthetic
+            // row while replacing the server-authoritative folder list.
+            del.CommandText = "DELETE FROM Folder WHERE account_id = $aid AND kind <> $snoozed;";
             del.Parameters.AddWithValue("$aid", accountId.ToString());
+            del.Parameters.AddWithValue("$snoozed", (int)SpecialFolderKind.Snoozed);
             await del.ExecuteNonQueryAsync();
         }
 
@@ -2209,10 +2240,11 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
 
     public async Task EnsureLocalSystemFoldersAsync(IReadOnlyCollection<AccountModel> accounts)
     {
-        var localAccounts = accounts
+        var eligibleAccounts = accounts.Where(account => account.IsActive).ToList();
+        var localAccounts = eligibleAccounts
             .Where(account => account.BackendKind is BackendKind.Pop3Smtp or BackendKind.LocalArchive)
             .ToList();
-        if (localAccounts.Count == 0) return;
+        if (eligibleAccounts.Count == 0) return;
 
         await using var connection = await OpenAsync();
         await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync();
@@ -2236,6 +2268,30 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
             await schema.ExecuteNonQueryAsync();
         }
 
+        // Remote accounts also need a durable local Snooze counter, but adding an IMAP-only node
+        // to the canonical tree would manufacture a new visible root for old unassigned accounts.
+        // Keep the synthetic row out of the canonical binding table; the unified Snooze aggregate
+        // discovers it from the ordinary Folder cache.
+        foreach (var account in eligibleAccounts.Except(localAccounts))
+        {
+            await using var snooze = connection.CreateCommand();
+            snooze.Transaction = transaction;
+            snooze.CommandText = """
+                INSERT INTO Folder(account_id,full_name,display_name,parent_id,kind,
+                    exclude_from_all_mail,unread_count,message_count,sort_order,is_container)
+                VALUES($account,'__QuickMail/Snooze','Snooze',NULL,$kind,0,0,
+                    (SELECT COUNT(*) FROM SnoozedMessage z JOIN MessageSummary s
+                       ON s.account_id=z.account_id AND s.folder_name=z.folder_name AND s.unique_id=z.unique_id
+                     WHERE z.account_id=$account AND z.wake_ticks>$now),0,0)
+                ON CONFLICT(account_id,full_name) DO UPDATE SET
+                    display_name='Snooze',kind=excluded.kind,exclude_from_all_mail=0;
+                """;
+            snooze.Parameters.AddWithValue("$account", account.Id.ToString("D"));
+            snooze.Parameters.AddWithValue("$kind", (int)SpecialFolderKind.Snoozed);
+            snooze.Parameters.AddWithValue("$now", DateTimeOffset.UtcNow.UtcTicks);
+            await snooze.ExecuteNonQueryAsync();
+        }
+
         foreach (var rootGroup in localAccounts.GroupBy(account => account.FolderTreeRootId ?? account.Id))
         {
             var rootId = rootGroup.Key;
@@ -2250,6 +2306,7 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
                 {
                     (SpecialFolderKind.Drafts, "Draft"),
                     (SpecialFolderKind.Scheduled, "Scheduled"),
+                    (SpecialFolderKind.Snoozed, "Snooze"),
                     (SpecialFolderKind.Trash, "Trash"),
                     (SpecialFolderKind.Junk, "Junk"),
                 };

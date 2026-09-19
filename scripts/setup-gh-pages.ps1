@@ -1,7 +1,7 @@
 # Setup GitHub Pages for publishing the user guide
 param()
 
-$owner = "kellylford"
+$owner = "DinamicaTech"
 $repo = "QuickMail"
 
 Write-Host "Setting up GitHub Pages for $owner/$repo..." -ForegroundColor Green

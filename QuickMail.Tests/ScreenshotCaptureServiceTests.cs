@@ -23,7 +23,7 @@ namespace QuickMail.Tests;
 /// process with a cross-thread InvalidOperationException (#433).
 /// </summary>
 [Collection("WpfTests")]
-public class ScreenshotCaptureServiceTests : IDisposable
+public class ScreenshotCaptureServiceTests : WpfTestBase, IDisposable
 {
     private readonly string _profileDir =
         Path.Combine(Path.GetTempPath(), $"QM-ShotTests-{Guid.NewGuid():N}");
@@ -80,7 +80,7 @@ public class ScreenshotCaptureServiceTests : IDisposable
             s => Path.GetInvalidFileNameChars().Contains(s));
     }
 
-    [StaFact]
+    [WpfFact]
     public void Capture_WhenDisabled_NeverGrabsPixels()
     {
         using var svc = NewService();
@@ -93,7 +93,7 @@ public class ScreenshotCaptureServiceTests : IDisposable
         Assert.False(Directory.Exists(Path.Combine(_profileDir, "debug-screenshots")));
     }
 
-    [StaFact]
+    [WpfFact]
     public void Capture_WritesOneLabeledPng()
     {
         var svc = NewService();
@@ -108,7 +108,7 @@ public class ScreenshotCaptureServiceTests : IDisposable
         Assert.Equal("0001-ComposeWindow.png", Path.GetFileName(file));
     }
 
-    [StaFact]
+    [WpfFact]
     public void Capture_DebouncesRepeatsOfTheSameLabel_ButNotOtherLabels()
     {
         using var svc = NewService();
@@ -124,7 +124,7 @@ public class ScreenshotCaptureServiceTests : IDisposable
         Assert.Equal(2, grabs);
     }
 
-    [StaFact]
+    [WpfFact]
     public void Capture_StopsAtTheSessionCap()
     {
         using var svc = NewService();
@@ -139,7 +139,7 @@ public class ScreenshotCaptureServiceTests : IDisposable
         Assert.Equal(500, grabs);
     }
 
-    [StaFact]
+    [WpfFact]
     public void Capture_FailedGrabs_DoNotConsumeTheCapOrNumbering()
     {
         var svc = NewService();
@@ -157,7 +157,7 @@ public class ScreenshotCaptureServiceTests : IDisposable
         Assert.Equal("0001-Second.png", Path.GetFileName(file));
     }
 
-    [StaFact]
+    [WpfFact]
     public void Capture_AfterDispose_IsANoOp()
     {
         var svc = NewService();
@@ -184,7 +184,7 @@ public class ScreenshotCaptureServiceTests : IDisposable
 
     // ── Title suffix ──────────────────────────────────────────────────────────
 
-    [StaFact]
+    [WpfFact]
     public void TitleSuffix_AppliedAndRemoved_OnStaticTitles()
     {
         using var svc = NewService();
@@ -201,7 +201,7 @@ public class ScreenshotCaptureServiceTests : IDisposable
         Assert.Equal("Address Book", window.Title);
     }
 
-    [StaFact]
+    [WpfFact]
     public void TitleSuffix_OverlaysBoundTitles_WithoutDetachingTheBinding()
     {
         // Compose, MessageWindow, and friends bind Title to a VM property. The
@@ -225,7 +225,7 @@ public class ScreenshotCaptureServiceTests : IDisposable
         Assert.NotNull(BindingOperations.GetBindingExpression(window, Window.TitleProperty));
     }
 
-    [StaFact]
+    [WpfFact]
     public void OnWindowLoaded_AppliesSuffix_AndCapturesAtIdle()
     {
         using var svc = NewService();
@@ -335,7 +335,7 @@ public class ScreenshotCaptureServiceTests : IDisposable
 
     // ── Delete-with-logs (#436) ───────────────────────────────────────────────
 
-    [StaFact]
+    [WpfFact]
     public void DeleteAllCaptures_RemovesEverySession_AndCaptureAfterwardsStillWorks()
     {
         var svc = NewService();

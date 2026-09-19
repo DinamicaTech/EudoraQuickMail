@@ -4,9 +4,10 @@ using QuickMail.Helpers;
 
 namespace QuickMail.Tests;
 
-public class AttachmentFileDragDropTests
+[Collection("WpfTests")]
+public class AttachmentFileDragDropTests : WpfTestBase
 {
-    [StaFact]
+    [WpfFact]
     public void CreateDataObject_PublishesTheRealFileAsFileDrop()
     {
         var path = Path.Combine(Path.GetTempPath(), $"quickmail-drag-{Guid.NewGuid():N}.txt");
@@ -26,7 +27,7 @@ public class AttachmentFileDragDropTests
         }
     }
 
-    [StaFact]
+    [WpfFact]
     public void CreateDataObject_MissingFile_IsRejectedBeforeStartingShellDrag()
     {
         var path = Path.Combine(Path.GetTempPath(), $"missing-{Guid.NewGuid():N}.txt");
