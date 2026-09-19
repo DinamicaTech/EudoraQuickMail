@@ -1,7 +1,7 @@
 # .NET 8 End of Support — Plan
 
 **Issue:** [#472 — Migrate to .NET 10 before .NET 8 end of support](https://github.com/kellylford/QuickMail/issues/472)
-**Status:** planning. No code changed yet.
+**Status:** implemented on branch `claude/issue-472-build-8fa673` (2026-09-19); awaiting the manual verification pass. See *Pre-implementation review* below.
 **Date:** 2026-08-01
 **Deadline:** 2026-11-10 (about 14 weeks from this date)
 
@@ -256,3 +256,64 @@ regression that only real-world use exposes, there needs to be room for a fix re
 3. **Do the GitHub Actions `windows-latest` images still preinstall .NET 8** at migration
    time? Not blocking either way, since `actions/setup-dotnet` pins explicitly, but it affects
    how long CI takes and whether a fallback is needed if a job is ever run without setup-dotnet.
+
+## Pre-implementation review (2026-09-19)
+
+The plan was re-checked against the tree immediately before the migration. ARM64 (#18) had
+shipped in 0.8.46, so the sequencing precondition held. What the review found, and what was
+done about each:
+
+**Gaps in the plan's inventory**
+
+- **Two more CI pins.** `flaky-hunt.yml` and `winget-install-matrix.yml` also pinned `8.0.x`;
+  both workflows postdate the plan. All seven pins now read `10.0.x`.
+- **The release-notes Download footer.** `docs/download-footer.md` said "All downloads include
+  the .NET 8 runtime", and every release note copies it — including the 0.8.47 draft. Both
+  updated, plus a comment in `quickmail.yml` and `docs/CLAUDE-MENTIONS.md`.
+- **`System.Drawing.Common` was pinned to the 8.0.x band** "to match the net8.0 runtime". On
+  .NET 10 the SDK prunes packages the shared framework already supplies, the WindowsDesktop
+  framework supplies this one, and the explicit reference drew `NU1510`. The pin is removed;
+  `dotnet list package --vulnerable --include-transitive` reports nothing, so the vulnerable
+  4.7.0 transitive from the toast library is gone from the graph without it.
+
+**.NET 9 breaking changes.** The plan listed only .NET 10's, but a jump from 8 to 10 takes
+both. Checked: `BinaryFormatter` removal also breaks WPF clipboard / drag-drop of custom types
+— none here (no `SetData`/`DataObject`/`DoDragDrop`). Obsoletions (SYSLIB0057 etc.) — the
+build raised none.
+
+**C# 14 (the default language version on .NET 10).** `field` is now a keyword inside property
+accessors — no accessor refers to a member named `field`. First-class span conversions can
+rebind `array.Reverse()` to the in-place `MemoryExtensions.Reverse` — the three `Reverse()`
+calls are on `List<T>` or `IEnumerable<T>`, so none rebind.
+
+**`ThemeService` comment.** Corrected rather than just re-versioned: `Application.ThemeMode`
+applies WPF's Fluent theme; it does not report the OS light/dark setting to a custom theme
+system, so the registry read remains the right design, not a .NET 8 workaround.
+
+**Open questions, resolved**
+
+1. *Does the toolchain need .NET 8?* No. `vpk` 1.2.0 ships `net8.0`, `net9.0` and `net10.0`
+   builds, so it runs where .NET 10 is the only runtime.
+2. *A .NET 8 support branch?* Not needed as a standing branch. The `v0.8.46` tag is the last
+   .NET 8 commit, and a branch can be cut from it at any time; a .NET 8 hotfix would only need
+   a version number above the current release, which Velopack accepts from either runtime.
+3. *Do runner images still carry .NET 8?* Moot: every job installs its SDK through
+   `setup-dotnet`, and `global.json` pins the 10.0 band.
+
+**Verification done so far (automated)**
+
+- Solution builds with 0 errors; no new warning categories beyond analyzer style rules.
+- Full unit suite on .NET 10: 4235 passed, 0 failed, run with `--blame-hang`; the three opt-in
+  synthesized-input tests also pass (`QUICKMAIL_RUN_INPUT_TESTS=1`).
+- `ui-probe` baseline captured on .NET 8 **before** the change and re-run on .NET 10 (36
+  entries each). Every difference was traced: mouse-hover highlights, title-bar focus, and
+  the Settings probe landing on General instead of Appearance, which happens on .NET 8 as
+  well. A controlled A/B (alternating .NET 8 / .NET 10 runs, pointer parked) showed compose,
+  address book and reading pane **pixel-identical** across runtimes.
+- Crash sweep of every surface in the Ember, Fjord and Heather themes on .NET 10 (the plan
+  only covers Parchment and Parchment Dark), for the new `DynamicResource` crash behaviour.
+- Published single-file exes (x64 and ARM64) launched against the fixture profile, for the
+  native-library search change: SQLite and WebView2 both load.
+
+Items 5–10 of *Verification* (the screen reader walkthrough, toasts, the Velopack update from
+a .NET 8 install) remain manual and are Kelly's.
