@@ -24,4 +24,10 @@ This build is temporarily unsigned while the project completes onboarding to Sig
 Windows may display an "Unknown publisher" warning. Back up important mail data before installing
 or migrating an existing profile.
 
+## Code signing policy
+
+Free code signing provided by [SignPath.io](https://signpath.io/), certificate by
+[SignPath Foundation](https://signpath.org/). See the project's
+[release-signing policy](SIGNING.md) for its build provenance, approval roles and privacy policy.
+
 For setup, migration and usage instructions, see [USERGUIDE.md](../USERGUIDE.md).

@@ -1,14 +1,35 @@
 # Release signing
 
-Eudora QuickMail releases must be signed with an identity controlled by DinamicaTech. The
-upstream project's certificate, Azure account and signing metadata are deliberately not part of
-this fork.
+Free code signing provided by [SignPath.io](https://signpath.io/), certificate by
+[SignPath Foundation](https://signpath.org/).
+
+Eudora QuickMail releases are intended to be signed through the SignPath Foundation open-source
+program. The certificate is issued in SignPath Foundation's name; it is not owned by DinamicaTech.
+The upstream project's certificate, Azure account and signing metadata are deliberately not part
+of this fork.
+
+## Team roles
+
+- **Committers and reviewers:** members authorized to maintain the
+  [`DinamicaTech/QuickMail`](https://github.com/DinamicaTech/QuickMail) repository.
+- **Approvers:** [owners of the DinamicaTech GitHub organization](https://github.com/orgs/DinamicaTech/people?query=role%3Aowner).
+
+All maintainers must use multi-factor authentication for GitHub and SignPath. Contributions from
+people without direct commit access must be reviewed before they are merged. Every signing request
+requires manual approval by an approver.
+
+## Privacy policy
+
+QuickMail's data-handling and network behavior are described in the
+[Dinámica Ingeniería privacy policy](https://www.dinamica.tech/privacy). QuickMail connects only
+to mail, calendar, contact, update and support services selected or invoked by the user; it does
+not require a Dinámica Ingeniería cloud account.
 
 ## Current state
 
-Version 0.8.71 is intended to be published as a GitHub **pre-release** without a signature. It is
-a bootstrap build for public review and for completing the SignPath Foundation application. Do
-not promote it to a stable/latest release while it remains unsigned.
+Version 0.8.72 is published as a GitHub **pre-release** without a signature. It is a bootstrap
+build for public review and for completing the SignPath Foundation application. Do not promote it
+to a stable/latest release while it remains unsigned.
 
 ## SignPath Foundation onboarding
 

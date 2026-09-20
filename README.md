@@ -75,6 +75,13 @@ are also provided.
 > "Unknown publisher" warning. It will not be promoted to a stable release until project-owned
 > signing is in place.
 
+## Code signing policy
+
+Free code signing provided by [SignPath.io](https://signpath.io/), certificate by
+[SignPath Foundation](https://signpath.org/). Release signing requires a reproducible GitHub
+Actions build and manual approval by a project approver. The complete policy, including team
+roles and privacy information, is documented in [`docs/SIGNING.md`](docs/SIGNING.md).
+
 ## Requirements
 
 - Windows 10/11 x64
