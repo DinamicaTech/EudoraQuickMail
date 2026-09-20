@@ -977,6 +977,15 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
                 PRIMARY KEY(account_id, folder_name, unique_id)
             );
             CREATE INDEX IF NOT EXISTS idx_snoozed_wake ON SnoozedMessage(wake_ticks);
+            CREATE TABLE IF NOT EXISTS RecoveryDeletedState (
+                account_id      TEXT    NOT NULL,
+                folder_name     TEXT    NOT NULL,
+                unique_id       TEXT    NOT NULL,
+                first_seen_ticks INTEGER NOT NULL,
+                PRIMARY KEY(account_id, folder_name, unique_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_recovery_deleted_first_seen
+                ON RecoveryDeletedState(first_seen_ticks);
             CREATE TRIGGER IF NOT EXISTS trg_summary_delete_snooze
             AFTER DELETE ON MessageSummary BEGIN
                 DELETE FROM SnoozedMessage
@@ -985,6 +994,11 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
             CREATE TRIGGER IF NOT EXISTS trg_summary_move_snooze
             AFTER UPDATE OF folder_name ON MessageSummary BEGIN
                 UPDATE OR REPLACE SnoozedMessage SET folder_name=NEW.folder_name
+                 WHERE account_id=OLD.account_id AND folder_name=OLD.folder_name AND unique_id=OLD.unique_id;
+            END;
+            CREATE TRIGGER IF NOT EXISTS trg_summary_delete_recovery
+            AFTER DELETE ON MessageSummary BEGIN
+                DELETE FROM RecoveryDeletedState
                  WHERE account_id=OLD.account_id AND folder_name=OLD.folder_name AND unique_id=OLD.unique_id;
             END;
 
@@ -2309,6 +2323,7 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
                     (SpecialFolderKind.Snoozed, "Snooze"),
                     (SpecialFolderKind.Trash, "Trash"),
                     (SpecialFolderKind.Junk, "Junk"),
+                    (SpecialFolderKind.RecoveryDeleted, "RecoveryDeleted"),
                 };
                 if (account.BackendKind == BackendKind.Pop3Smtp)
                 {
@@ -2320,7 +2335,8 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
                 {
                     var physicalPath = await FindPhysicalPathAsync(account.Id, definition.Kind)
                         ?? definition.Name;
-                    var excluded = definition.Kind is SpecialFolderKind.Drafts or SpecialFolderKind.Scheduled;
+                    var excluded = definition.Kind is SpecialFolderKind.Drafts or SpecialFolderKind.Scheduled
+                        or SpecialFolderKind.RecoveryDeleted;
 
                     await using (var folder = connection.CreateCommand())
                     {

@@ -2,12 +2,17 @@
 
 ![Eudora QuickMail — Email that stays out of your way](quickmail-og.png)
 
+<p align="center">
+  <img src="QuickMail/Assets/App/QuickMail.png" width="112" alt="Eudora QuickMail paper-plane icon">
+</p>
+
 **A free, open-source, local-first desktop email client for Windows.** Eudora QuickMail
 brings multiple accounts, large mail archives, calendars and contacts into one fast,
 keyboard-driven workspace.
 
 [Product website](https://www.dinamica.tech/eudoraquickmail) ·
-[Download the latest release](https://github.com/DinamicaTech/QuickMail/releases/latest) ·
+[Download for Windows](https://github.com/DinamicaTech/QuickMail/releases/download/v0.8.72/EudoraQM-Setup.exe) ·
+[All release files](https://github.com/DinamicaTech/QuickMail/releases/latest) ·
 [User guide](USERGUIDE.md) ·
 [Report a problem](https://github.com/DinamicaTech/QuickMail/issues)
 
@@ -20,6 +25,8 @@ keyboard-driven workspace.
 QuickMail is designed for people who live in email and want their client to help them work,
 not compete for their attention. It combines the speed and filing-oriented workflow that made
 classic Eudora distinctive with current Windows integration and modern mail services.
+
+![Eudora QuickMail inbox with folder tree, message list and preview](docs/screenshots/eudora-quickmail-inbox-sanitized-final-travel.png)
 
 | | Capability |
 |---|---|
@@ -57,7 +64,9 @@ built and describes its goal—making serious email work remarkably fast.
 ## Download and install
 
 Release installers are published on the
-[GitHub Releases page](https://github.com/DinamicaTech/QuickMail/releases). Choose the Windows
+[GitHub Releases page](https://github.com/DinamicaTech/QuickMail/releases). For most PCs, use the
+[direct Windows installer](https://github.com/DinamicaTech/QuickMail/releases/download/v0.8.72/EudoraQM-Setup.exe).
+Choose the Windows
 x64 package for most PCs or the ARM64 package for native Windows on ARM. Portable executables
 are also provided.
 
@@ -167,7 +176,7 @@ QuickMail/
 
 ## CI and releases
 
-Every push to `main` and every pull request builds and uploads `QuickMail.exe` as an artifact via GitHub Actions.
+Every push to `main` and every pull request builds and uploads `EudoraQM.exe` as an artifact via GitHub Actions.
 
 To publish a release, push a version tag:
 

@@ -298,6 +298,10 @@ public class ConfigService : IConfigService
                         break;
                     case "announceformattingwhilenavigating": config.AnnounceFormattingWhileNavigating = ParseBool(value); break;
                     case "confirmemptytrash":    config.ConfirmEmptyTrash    = ParseBool(value); break;
+                    case "recoverydeletedretentiondays":
+                        if (int.TryParse(value, out var recoveryDays))
+                            config.RecoveryDeletedRetentionDays = Math.Clamp(recoveryDays, 0, 3650);
+                        break;
                     case "notifyonnewmail":      config.NotifyOnNewMail      = ParseBool(value); break;
                     case "notifytrayicononnewmail": config.NotifyTrayIconOnNewMail = ParseBool(value); break;
                 case "notifyonwatchedconversation": config.NotifyOnWatchedConversation = ParseBool(value); break;
@@ -768,6 +772,10 @@ public class ConfigService : IConfigService
 
         sb.AppendLine($"AutoSaveIntervalSeconds = {Math.Clamp(config.AutoSaveIntervalSeconds, 30, 600)}");
         sb.AppendLine("# Seconds between automatic draft saves. Values: 30-600.");
+        sb.AppendLine();
+
+        sb.AppendLine($"RecoveryDeletedRetentionDays = {Math.Clamp(config.RecoveryDeletedRetentionDays, 0, 3650)}");
+        sb.AppendLine("# Days Shift+Delete messages remain recoverable. Zero disables automatic deletion.");
         sb.AppendLine();
 
         sb.AppendLine($"DelaySendingMessagesSeconds = {Math.Clamp(config.DelaySendingMessagesSeconds, 0, 600)}");

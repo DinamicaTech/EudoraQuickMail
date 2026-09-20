@@ -20,7 +20,7 @@ public static class EudoraImportLauncher
         var importer = Path.Combine(AppContext.BaseDirectory, "EudoraImporter.exe");
         if (!File.Exists(importer))
         {
-            error = "EudoraImporter.exe was not found beside QuickMail.exe.";
+            error = "EudoraImporter.exe was not found beside EudoraQM.exe.";
             return false;
         }
 

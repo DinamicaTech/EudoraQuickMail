@@ -344,6 +344,12 @@ public class ConfigModel
     /// <summary>Show a confirmation dialog before emptying trash. Default on.</summary>
     public bool ConfirmEmptyTrash { get; set; } = true;
 
+    /// <summary>
+    /// Days messages remain in RecoveryDeleted before permanent deletion. Zero disables automatic
+    /// purging. The default is one day so an accidental Shift+Delete remains recoverable.
+    /// </summary>
+    public int RecoveryDeletedRetentionDays { get; set; } = 1;
+
     // ── Notifications ─────────────────────────────────────────────────────────────
 
     /// <summary>Show a Windows toast notification when new mail arrives in an inbox. Default off —

@@ -9,7 +9,7 @@
     1. Build (unless -NoBuild) the app and the fixture generator.
     2. Generate a deterministic fixture profile into a temp dir (or -ProfileDir).
     3. For each (surface, theme, scale) in the plan, run
-         QuickMail.exe --ui-probe <surface> --theme <theme> --text-scale <scale>
+         EudoraQM.exe --ui-probe <surface> --theme <theme> --text-scale <scale>
                        --profileDir <fixture> --capture-dir <run>
        with a bounded timeout. A hang or non-zero exit fails that entry, not the run.
     4. Print a summary and exit non-zero if any entry failed or produced no PNG.
@@ -39,7 +39,7 @@ param(
 $ErrorActionPreference = 'Stop'
 if (-not $Plan) { $Plan = Join-Path $PSScriptRoot 'ui-probe-plan.json' }
 $repoRoot = Split-Path $PSScriptRoot -Parent
-$exe      = Join-Path $repoRoot 'QuickMail\bin\Debug\QuickMail.exe'
+$exe      = Join-Path $repoRoot 'QuickMail\bin\Debug\EudoraQM.exe'
 $fixtures = Join-Path $repoRoot 'Tools\QuickMail.Fixtures\QuickMail.Fixtures.csproj'
 
 if (-not $RunDir) {

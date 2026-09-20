@@ -52,7 +52,7 @@ if errorlevel 1 exit /b 1
 copy /y publish-importer\EudoraImporter.exe publish\EudoraImporter.exe >nul
 rmdir /s /q publish-importer\
 echo.
-echo Output: publish\QuickMail.exe
+echo Output: publish\EudoraQM.exe
 goto end
 
 :publish-arm64
@@ -75,7 +75,7 @@ if errorlevel 1 (
     exit /b 1
 )
 echo.
-echo Output: publish-arm64\QuickMail.exe
+echo Output: publish-arm64\EudoraQM.exe
 echo Note: bin\Release now contains ARM64 output; rebuild to restore x64.
 goto end
 
@@ -127,7 +127,7 @@ echo Packing Velopack release v%VERSION%...
 :: --framework webview2 restores the old installer's WebView2 install-on-demand.
 copy /y LICENSE installer\velopack\license.txt >nul
 vpk pack --packId EudoraQuickMail --packVersion %VERSION% --packDir publish ^
-  --mainExe QuickMail.exe --packTitle "Eudora QuickMail" --packAuthors "DinamicaTech and QuickMail contributors" ^
+  --mainExe EudoraQM.exe --packTitle "Eudora QuickMail" --packAuthors "DinamicaTech and QuickMail contributors" ^
   --shortcuts StartMenuRoot --outputDir installer\Output\Releases ^
   --framework webview2 ^
   --msi --instLocation PerUser ^

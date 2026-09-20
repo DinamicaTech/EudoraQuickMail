@@ -48,8 +48,7 @@ public class SelectorItemAccessibilityTests : WpfTestBase
         var app = Application.Current!;
         foreach (var style in new[] { "AccessibleStyles", "ThemedControls" })
         {
-            var uri = new Uri($"pack://application:,,,/QuickMail;component/Styles/{style}.xaml",
-                UriKind.Absolute);
+            var uri = WpfTestApplication.ResourceUri($"Styles/{style}.xaml");
             if (app.Resources.MergedDictionaries.All(d => d.Source != uri))
                 app.Resources.MergedDictionaries.Add(new ResourceDictionary { Source = uri });
         }

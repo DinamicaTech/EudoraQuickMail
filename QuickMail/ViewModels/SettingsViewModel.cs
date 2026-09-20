@@ -113,6 +113,9 @@ public partial class SettingsViewModel : ObservableObject
     private bool _confirmEmptyTrash;
 
     [ObservableProperty]
+    private int _recoveryDeletedRetentionDays = 1;
+
+    [ObservableProperty]
     private bool _notifyOnNewMail;
 
     [ObservableProperty]
@@ -510,6 +513,7 @@ public partial class SettingsViewModel : ObservableObject
         CalendarReminders                = cfg.CalendarReminders;
         CalendarReminderMinutes          = cfg.CalendarReminderMinutes;
         ConfirmEmptyTrash                = cfg.ConfirmEmptyTrash;
+        RecoveryDeletedRetentionDays     = cfg.RecoveryDeletedRetentionDays;
         NotifyOnNewMail                  = cfg.NotifyOnNewMail;
         NotifyTrayIconOnNewMail          = cfg.NotifyTrayIconOnNewMail;
         NotifyOnWatchedConversation      = cfg.NotifyOnWatchedConversation;
@@ -608,6 +612,7 @@ public partial class SettingsViewModel : ObservableObject
         cfg.CalendarReminders                = CalendarReminders;
         cfg.CalendarReminderMinutes          = Math.Clamp(CalendarReminderMinutes, 1, 1440);
         cfg.ConfirmEmptyTrash                = ConfirmEmptyTrash;
+        cfg.RecoveryDeletedRetentionDays     = Math.Clamp(RecoveryDeletedRetentionDays, 0, 3650);
         cfg.NotifyOnNewMail                  = NotifyOnNewMail;
         cfg.NotifyTrayIconOnNewMail          = NotifyTrayIconOnNewMail;
         cfg.NotifyOnWatchedConversation      = NotifyOnWatchedConversation;

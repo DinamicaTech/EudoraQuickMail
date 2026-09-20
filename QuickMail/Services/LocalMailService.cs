@@ -39,6 +39,7 @@ public sealed class LocalMailService : IMailService
                     "out" or "sent" => SpecialFolderKind.Sent,
                     "trash" => SpecialFolderKind.Trash,
                     "junk" or "spam" => SpecialFolderKind.Junk,
+                    "recoverydeleted" => SpecialFolderKind.RecoveryDeleted,
                     _ => folder.Kind,
                 };
             }
@@ -53,6 +54,7 @@ public sealed class LocalMailService : IMailService
             if (account.BackendKind == BackendKind.Pop3Smtp) AddSpecial(SpecialFolderKind.Sent, "Sent");
             AddSpecial(SpecialFolderKind.Trash, "Trash");
             AddSpecial(SpecialFolderKind.Junk, "Junk");
+            AddSpecial(SpecialFolderKind.RecoveryDeleted, "RecoveryDeleted");
             await _store.SaveFoldersAsync(account.Id, folders);
 
             void AddSpecial(SpecialFolderKind kind, string name)
@@ -60,7 +62,8 @@ public sealed class LocalMailService : IMailService
                 if (folders.Any(f => f.Kind == kind)) return;
                 folders.Add(new() { AccountId = account.Id, FullName = name, DisplayName = name,
                     ParentId = root, Kind = kind,
-                    ExcludeFromAllMail = kind is SpecialFolderKind.Drafts or SpecialFolderKind.Scheduled });
+                    ExcludeFromAllMail = kind is SpecialFolderKind.Drafts or SpecialFolderKind.Scheduled
+                        or SpecialFolderKind.RecoveryDeleted });
             }
         }
     }

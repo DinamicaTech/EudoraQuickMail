@@ -195,7 +195,14 @@ public class RuleService : IRuleService
         PerformanceLogService.Marker("Rules: apply batch BEGIN", perf);
         var rules = LoadRules();
         var enabledRules = rules.Where(r => r.IsEnabled && (!automaticOnly || r.ApplyAutomatically)).ToList();
-        LogService.Debug($"ApplyRulesAsync: {enabledRules.Count} enabled rules, {incoming.Count} incoming messages for account {accountId}");
+        // Automatic rules are an incoming-mail pipeline. Keep this guard here as well as at the
+        // sync callers so a future caller cannot accidentally apply an automatic move/delete rule
+        // to an outgoing message (for example, a freshly materialized Sent copy).
+        var candidates = automaticOnly
+            ? incoming.Where(message => message.Direction != MessageDirection.Outgoing).ToList()
+            : incoming;
+        var excludedOutgoing = incoming.Count - candidates.Count;
+        LogService.Debug($"ApplyRulesAsync: {enabledRules.Count} enabled rules, {candidates.Count} candidate messages for account {accountId} (automatic={automaticOnly}, outgoing excluded={excludedOutgoing})");
         if (enabledRules.Count == 0)
         {
             PerformanceLogService.Record("Rules: apply batch END",
@@ -228,7 +235,7 @@ public class RuleService : IRuleService
                 continue;
             }
 
-            var matched = incoming.Where(m =>
+            var matched = candidates.Where(m =>
             {
                 matchData.TryGetValue((m.AccountId, m.FolderName, m.MessageId), out var data);
                 return MatchesRule(rule, m, data?.Body, data?.Cc, data?.Bcc);

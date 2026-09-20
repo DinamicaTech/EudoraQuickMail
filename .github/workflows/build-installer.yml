@@ -107,7 +107,7 @@ jobs:
       - name: Verify published architecture
         shell: pwsh
         run: |
-          $fs = [System.IO.File]::OpenRead('publish/QuickMail.exe')
+          $fs = [System.IO.File]::OpenRead('publish/EudoraQM.exe')
           try {
             $br = New-Object System.IO.BinaryReader($fs)
             $fs.Position = 0x3c
@@ -116,9 +116,9 @@ jobs:
           } finally { $fs.Dispose() }
           $want = if ('${{ matrix.arch }}' -eq 'arm64') { 0xAA64 } else { 0x8664 }
           if ($machine -ne $want) {
-            throw "publish/QuickMail.exe has PE machine 0x$('{0:X4}' -f $machine); expected 0x$('{0:X4}' -f $want) for ${{ matrix.arch }}."
+            throw "publish/EudoraQM.exe has PE machine 0x$('{0:X4}' -f $machine); expected 0x$('{0:X4}' -f $want) for ${{ matrix.arch }}."
           }
-          Write-Host "publish/QuickMail.exe -> 0x$('{0:X4}' -f $machine) OK for ${{ matrix.arch }}"
+          Write-Host "publish/EudoraQM.exe -> 0x$('{0:X4}' -f $machine) OK for ${{ matrix.arch }}"
 
       - name: Install vpk
         run: dotnet tool install -g vpk
@@ -191,7 +191,7 @@ jobs:
           # Fork builds are unsigned until DinamicaTech provisions SignPath Foundation.
           # See docs/SIGNING.md for the post-pack insertion point and promotion checklist.
           vpk pack --packId QuickMail --packVersion $version --packDir publish `
-            --mainExe QuickMail.exe --packTitle QuickMail --packAuthors "DinamicaTech and QuickMail contributors" `
+            --mainExe EudoraQM.exe --packTitle QuickMail --packAuthors "DinamicaTech and QuickMail contributors" `
             --shortcuts StartMenuRoot --outputDir installer/Output/Releases `
             --framework webview2 `
             --instLocation PerUser `
@@ -221,6 +221,6 @@ jobs:
           # Setup.exe is the full installer; the portable exe is bundled for convenience.
           path: |
             installer/Output/Releases/QuickMail-*-Setup.exe
-            publish/QuickMail.exe
+            publish/EudoraQM.exe
           if-no-files-found: error
           retention-days: 14

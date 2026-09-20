@@ -824,6 +824,15 @@ public partial class MainWindow : Window
 
     private void OnNewMailArrived(string accountLabel, int count)
     {
+        // Every NotifyIcon mutation must occur on the window's UI thread. The current POP3,
+        // IMAP-IDLE and background-sweep paths normally marshal before raising the event, but this
+        // guard also covers future receivers (and closes a race where a provider callback arrives
+        // directly on a worker thread and WinForms silently fails to repaint the tray icon).
+        if (!Dispatcher.CheckAccess())
+        {
+            Dispatcher.BeginInvoke(() => OnNewMailArrived(accountLabel, count));
+            return;
+        }
         EnsureTrayIcon();
         _trayIcon?.SignalNewMail(accountLabel, count);
     }
@@ -1983,6 +1992,13 @@ public partial class MainWindow : Window
         if (isCtrlAlt && (e.KeyboardDevice.IsKeyDown(Key.RightAlt) || IsTextEntryContext()))
             return;
 
+        if (key == Key.F4 && modifiers == ModifierKeys.Control && _vm.ActiveTab is ComposeTabViewModel composeTab)
+        {
+            e.Handled = true;
+            _vm.CloseTab(composeTab);
+            return;
+        }
+
         // ── Tutorial interception (must run before all other handling) ────────────
         if (_tutorialVm?.IsActive == true)
         {
@@ -2022,14 +2038,14 @@ public partial class MainWindow : Window
         {
             e.Handled = true;
             var selected = MessageList.SelectedItems.OfType<MailMessageSummary>().ToList();
-            if (!ConfirmPermanentDelete(selected.Count)) return;
+            if (!ConfirmRecoveryDelete(selected.Count)) return;
             _vm.IsBusy = true;
             _vm.IsStatusHighlighted = true;
             _vm.StatusText = $"Deleting message 1/{selected.Count:N0}…";
             MainStatusBar.UpdateLayout();
             await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ContextIdle);
             await Task.Delay(75);
-            await _vm.DeleteMessagesAsync(selected, permanently: true);
+            await _vm.DeleteMessagesAsync(selected, toRecoveryDeleted: true);
             FocusMessageListFirstItem();
             return;
         }
@@ -3794,7 +3810,7 @@ public partial class MainWindow : Window
             LogService.Debug($"Delete key: SelectedItems.Count={MessageList.SelectedItems.Count} toDelete={toDelete.Count}");
             if ((Keyboard.Modifiers & ModifierKeys.Shift) != 0)
             {
-                if (!ConfirmPermanentDelete(toDelete.Count)) return;
+                if (!ConfirmRecoveryDelete(toDelete.Count)) return;
                 _vm.IsBusy = true;
                 _vm.IsStatusHighlighted = true;
                 _vm.StatusText = $"Deleting message 1/{toDelete.Count:N0}…";
@@ -3803,7 +3819,7 @@ public partial class MainWindow : Window
                 await Task.Delay(75);
             }
             await _vm.DeleteMessagesAsync(toDelete,
-                permanently: (Keyboard.Modifiers & ModifierKeys.Shift) != 0);
+                toRecoveryDeleted: (Keyboard.Modifiers & ModifierKeys.Shift) != 0);
             FocusMessageListFirstItem();
         }
         else if (IsArchiveGesture(e) && MessageList.SelectedItems.Count > 0)
@@ -5067,18 +5083,17 @@ public partial class MainWindow : Window
         OpenRulesManager(template);
     }
 
-    private bool ConfirmPermanentDelete(int messageCount)
+    private bool ConfirmRecoveryDelete(int messageCount)
     {
         if (!PermanentDeleteConfirmationPolicy.RequiresConfirmation(messageCount)) return true;
-
-        return MessageBox.Show(
-                   this,
-                   PermanentDeleteConfirmationPolicy.BuildPrompt(messageCount),
-                   "Permanently Delete Messages",
-                   MessageBoxButton.YesNo,
-                   MessageBoxImage.Warning,
-                   MessageBoxResult.No)
-               == MessageBoxResult.Yes;
+        var days = Math.Clamp(_configService.Load().RecoveryDeletedRetentionDays, 0, 3650);
+        var retention = days == 0
+            ? "They will remain there until you empty the folder manually."
+            : $"They will be permanently deleted automatically after {days:N0} day{(days == 1 ? "" : "s")}.";
+        return MessageBox.Show(this,
+                   $"You selected {messageCount:N0} messages. They will be moved to RecoveryDeleted.\n\n{retention}",
+                   "Move Messages to RecoveryDeleted", MessageBoxButton.YesNo,
+                   MessageBoxImage.Warning, MessageBoxResult.No) == MessageBoxResult.Yes;
     }
 
     private MailRule CreateRuleTemplateFromMessage(MailMessageSummary message)
@@ -8543,9 +8558,70 @@ public partial class MainWindow : Window
             return;
         }
 
-        await _vm.ShowContactMailAsync(contact.Address,
-            MainViewModel.ContactMailDirection.Both,
-            string.IsNullOrWhiteSpace(contact.Name) ? null : contact.Name);
+        var domainHistory = string.Equals((sender as MenuItem)?.Tag as string, "domain", StringComparison.Ordinal);
+        var value = domainHistory && contact.Address.LastIndexOf('@') is var at && at >= 0
+            ? contact.Address[(at + 1)..] : contact.Address;
+        await RunWithDelayedIndicatorAsync("Searching message history…", () =>
+            _vm.ShowContactMailAsync(value,
+                domainHistory ? MainViewModel.ContactMailDirection.Domain : MainViewModel.ContactMailDirection.Both,
+                domainHistory ? null : string.IsNullOrWhiteSpace(contact.Name) ? null : contact.Name));
+    }
+
+    private async void MessageContextMenu_GoToMessage_Click(object sender, RoutedEventArgs e)
+    {
+        var source = GetSelectedMessages().FirstOrDefault();
+        if (source == null) return;
+        var target = await _vm.GoToMessageAsync(source);
+        if (target == null) return;
+        MessageList.SelectedItem = target;
+        MessageList.ScrollIntoView(target);
+        MessageList.Focus();
+    }
+
+    /// <summary>
+    /// Shows a compact non-modal progress window only when an explicitly opted-in operation takes
+    /// longer than two seconds. Keeping this manual avoids flashing progress UI for ordinary work.
+    /// </summary>
+    private async Task RunWithDelayedIndicatorAsync(string title, Func<Task> operation)
+    {
+        var work = operation();
+        var delay = Task.Delay(TimeSpan.FromSeconds(2));
+        if (await Task.WhenAny(work, delay) == work)
+        {
+            await work;
+            return;
+        }
+
+        var indicator = new SlowOperationWindow(title, () => _vm.StatusText) { Owner = this };
+        indicator.Show();
+        try { await work; }
+        finally { indicator.Close(); }
+    }
+
+    private void FolderContextMenu_Opened(object sender, RoutedEventArgs e)
+    {
+        var menu = (ContextMenu)sender;
+        var node = (menu.PlacementTarget as TreeViewItem)?.DataContext as FolderTreeNode;
+        var kind = node?.Folder?.Kind ?? SpecialFolderKind.None;
+        foreach (var item in menu.Items.OfType<MenuItem>().Where(item => item.Tag is string tag &&
+                     tag.StartsWith("empty-", StringComparison.Ordinal)))
+            item.Visibility = (item.Tag as string, kind) switch
+            {
+                ("empty-trash", SpecialFolderKind.Trash) => Visibility.Visible,
+                ("empty-junk", SpecialFolderKind.Junk) => Visibility.Visible,
+                ("empty-recovery", SpecialFolderKind.RecoveryDeleted) => Visibility.Visible,
+                _ => Visibility.Collapsed,
+            };
+    }
+
+    private async void FolderContextMenu_EmptySystemFolder_Click(object sender, RoutedEventArgs e)
+    {
+        var folder = GetContextMenuFolderNode(sender)?.Folder;
+        if (folder == null) return;
+        var kind = (sender as MenuItem)?.Tag as string == "empty-trash" ? SpecialFolderKind.Trash
+            : (sender as MenuItem)?.Tag as string == "empty-junk" ? SpecialFolderKind.Junk
+            : SpecialFolderKind.RecoveryDeleted;
+        await _vm.EmptySystemFolderAsync(folder, kind);
     }
 
     private async void MessageContextMenu_Snooze_Click(object sender, RoutedEventArgs e)

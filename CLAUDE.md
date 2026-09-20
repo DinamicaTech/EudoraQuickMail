@@ -12,8 +12,8 @@ WPF desktop email client (.NET 8, C#). Multi-account IMAP/SMTP with unified inbo
 build.bat            # debug build
 build.bat release    # release build
 build.bat run        # debug build + launch
-build.bat publish    # self-contained single-file win-x64 -> publish/QuickMail.exe
-build.bat publish-arm64  # same, native win-arm64 -> publish-arm64/QuickMail.exe (cross-compiles on x64)
+build.bat publish    # self-contained single-file win-x64 -> publish/EudoraQM.exe
+build.bat publish-arm64  # same, native win-arm64 -> publish-arm64/EudoraQM.exe (cross-compiles on x64)
 build.bat installer  # publish + Velopack pack -> installer/Output/Releases/ (setup exe + update packages)
 build.bat smoke      # build + launch for 6s
 build.bat clean

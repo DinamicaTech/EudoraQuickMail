@@ -2,7 +2,7 @@
 ; Copyright (c) 2026 Kelly Ford.
 ;
 ; QuickMail ships as a self-contained, single-file win-x64 executable: the .NET 8
-; runtime is bundled inside QuickMail.exe, so no .NET runtime needs to be installed.
+; runtime is bundled inside EudoraQM.exe, so no .NET runtime needs to be installed.
 ; The only external prerequisite is the Microsoft Edge WebView2 Runtime, which the
 ; installer detects and installs on demand (see [Code] below).
 
@@ -11,7 +11,7 @@
 #define MyAppPublisher "Kelly Ford"
 #define MyAppURL "https://github.com/DinamicaTech/QuickMail"
 #define MyAppSupportURL MyAppURL + "/issues"
-#define MyAppExeName "QuickMail.exe"
+#define MyAppExeName "EudoraQM.exe"
 #define MyAppDescription "Keyboard-first, accessible desktop email client for Windows"
 #define MailtoProgId "EudoraQuickMail.Url.Mailto"
 

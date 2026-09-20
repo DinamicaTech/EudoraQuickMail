@@ -298,6 +298,34 @@ public class RuleServiceTests
     }
 
     [Fact]
+    public async Task AutomaticRule_NeverActsOnOutgoingMessage()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
+        try
+        {
+            var svc = CreateService(dir);
+            svc.SaveRules([new MailRule
+            {
+                Name = "Automatic sender rule",
+                IsEnabled = true,
+                ApplyAutomatically = true,
+                UseFromCondition = true,
+                FromContains = "customer.test",
+                Action = RuleAction.MarkAsRead,
+            }]);
+            var message = MakeMsg(from: "me@example.test", to: "buyer@customer.test", isRead: false);
+            message.Direction = MessageDirection.Outgoing;
+
+            var result = await svc.ApplyAutomaticRulesAsync(
+                [message], message.AccountId, CancellationToken.None);
+
+            Assert.Equal(0, result.MatchedCount);
+            Assert.False(message.IsRead);
+        }
+        finally { if (Directory.Exists(dir)) Directory.Delete(dir, true); }
+    }
+
+    [Fact]
     public void RewriteFolderTargets_UpdatesExactAndDescendantReferences()
     {
         var dir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());

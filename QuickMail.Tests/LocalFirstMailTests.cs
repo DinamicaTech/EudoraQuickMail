@@ -350,23 +350,25 @@ public sealed class LocalFirstMailTests : IDisposable
         await store.EnsureLocalSystemFoldersAsync([account]);
 
         var physical = (await store.LoadFoldersAsync())[accountId];
-        Assert.Equal(7, physical.Count);
+        Assert.Equal(8, physical.Count);
         Assert.Equal(
             new HashSet<SpecialFolderKind>
             {
                 SpecialFolderKind.Inbox, SpecialFolderKind.Drafts, SpecialFolderKind.Scheduled,
                 SpecialFolderKind.Snoozed, SpecialFolderKind.Sent, SpecialFolderKind.Trash,
                 SpecialFolderKind.Junk,
+                SpecialFolderKind.RecoveryDeleted,
             },
             physical.Select(folder => folder.Kind).ToHashSet());
-        Assert.All(physical.Where(folder => folder.Kind is SpecialFolderKind.Drafts or SpecialFolderKind.Scheduled),
+        Assert.All(physical.Where(folder => folder.Kind is SpecialFolderKind.Drafts or SpecialFolderKind.Scheduled
+                                               or SpecialFolderKind.RecoveryDeleted),
             folder => Assert.True(folder.ExcludeFromAllMail));
         Assert.All(physical.Where(folder => folder.Kind is SpecialFolderKind.Trash or SpecialFolderKind.Junk),
             folder => Assert.False(folder.ExcludeFromAllMail));
 
         var canonical = await store.LoadCanonicalLocalFolderTreeAsync();
         Assert.NotNull(canonical);
-        Assert.Equal(7, canonical!.Folders.Count(folder => folder.ParentFolderId != null));
+        Assert.Equal(8, canonical!.Folders.Count(folder => folder.ParentFolderId != null));
         Assert.All(canonical.Folders.Where(folder => folder.ParentFolderId != null),
             folder => Assert.Contains(folder.Bindings, binding => binding.AccountId == accountId));
     }
@@ -407,6 +409,33 @@ public sealed class LocalFirstMailTests : IDisposable
             folder.Bindings.Any(binding => binding.AccountId == account.Id));
         Assert.Contains(canonical.Folders, folder => folder.Kind == SpecialFolderKind.Scheduled &&
             folder.Bindings.Any(binding => binding.AccountId == account.Id));
+    }
+
+    [Fact]
+    public async Task RecoveryDeletedRetention_UsesFirstObservationInsteadOfMessageDate()
+    {
+        var accountId = Guid.NewGuid();
+        var store = CreateStore();
+        await store.SaveFoldersAsync(accountId,
+        [
+            new MailFolderModel
+            {
+                AccountId = accountId, FullName = "RecoveryDeleted", DisplayName = "RecoveryDeleted",
+                Kind = SpecialFolderKind.RecoveryDeleted, ExcludeFromAllMail = true,
+            },
+        ]);
+        var oldMessage = Message(accountId, "RecoveryDeleted", "recover-me", "old mail");
+        oldMessage.Date = DateTimeOffset.UtcNow.AddYears(-5);
+        await store.SaveLocalMessageAsync(oldMessage);
+
+        var firstSeen = DateTimeOffset.UtcNow;
+        var notExpired = await store.TrackAndGetExpiredRecoveryDeletedAsync(
+            accountId, "RecoveryDeleted", ["recover-me"], firstSeen, firstSeen.AddDays(-1));
+        var expiredLater = await store.TrackAndGetExpiredRecoveryDeletedAsync(
+            accountId, "RecoveryDeleted", ["recover-me"], firstSeen.AddDays(2), firstSeen.AddDays(1));
+
+        Assert.Empty(notExpired);
+        Assert.Equal(["recover-me"], expiredLater);
     }
 
     [Fact]
@@ -514,6 +543,41 @@ public sealed class LocalFirstMailTests : IDisposable
         var sent = await store.LoadLocalPageAsync(account.Id, "Sent", 10, 0);
         Assert.Equal(1, sent.TotalMatches);
         Assert.Equal(MessageDirection.Outgoing, Assert.Single(sent.Messages).Direction);
+    }
+
+    [Fact]
+    public async Task ScheduledSend_FromDraft_ConsumesDraftWithoutLeavingCopyInTrash()
+    {
+        var account = new AccountModel
+        {
+            Id = Guid.NewGuid(), AccountName = "POP", Username = "sender@example.test",
+            BackendKind = BackendKind.Pop3Smtp, FolderTreeRootId = Guid.NewGuid(),
+            FolderTreeRootName = "Local mail", IsActive = true,
+        };
+        var store = CreateStore();
+        var profile = new ProfileContext(_directory);
+        var accounts = new AccountService(profile);
+        accounts.SaveAccounts([account]);
+        var localMail = new LocalMailService(store, accounts);
+        var compose = new ComposeModel
+        {
+            AccountId = account.Id, To = "recipient@example.test", Subject = "draft source",
+            Body = "body", Mode = ComposeMode.Html, HtmlBody = "<p>body</p>",
+        };
+        var draftId = await localMail.AppendDraftAsync(account.Id, compose, null);
+        compose.DraftMessageId = draftId;
+        compose.DraftFolderName = "Draft";
+        using var scheduled = new ScheduledSendService(
+            profile, new StubSmtpService(), accounts, new StubCredentialService(), store, localMail);
+
+        await scheduled.ScheduleAsync(compose, DateTimeOffset.Now.AddMilliseconds(25));
+        await Task.Delay(75);
+        var failures = await scheduled.DispatchDueAsync(manual: true);
+
+        Assert.Empty(failures);
+        Assert.Equal(0, (await store.LoadLocalPageAsync(account.Id, "Draft", 10, 0)).TotalMatches);
+        Assert.Equal(0, (await store.LoadLocalPageAsync(account.Id, "Trash", 10, 0)).TotalMatches);
+        Assert.Equal(1, (await store.LoadLocalPageAsync(account.Id, "Sent", 10, 0)).TotalMatches);
     }
 
     [Fact]

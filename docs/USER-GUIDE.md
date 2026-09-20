@@ -113,7 +113,7 @@ Two settings in **Settings → Advanced**, under **Updates**, put the whole mech
 
 ### The portable version
 
-`QuickMail.exe` on the same releases page — or `QuickMail-arm64.exe` for a Snapdragon PC — is a single-file version that runs from anywhere with no installation — nothing is written to Program Files or the registry, and it never updates itself. The Help menu tells you when a new version is available; updating is a manual download of the new exe, replacing the old one. Your data is shared with an installed copy, so you can move between the two freely.
+`EudoraQM.exe` on the same releases page — or `EudoraQM-arm64.exe` for a Snapdragon PC — is a single-file version that runs from anywhere with no installation — nothing is written to Program Files or the registry, and it never updates itself. The Help menu tells you when a new version is available; updating is a manual download of the new exe, replacing the old one. Your data is shared with an installed copy, so you can move between the two freely.
 
 ### Uninstalling
 
@@ -542,7 +542,7 @@ QuickMail checks for a newer release in the background each time it starts. The 
 
 Installed copies download and install updates automatically, and both that behavior and its notifications are configurable — see [Installing and Updating QuickMail](#installing-and-updating-quickmail) for the full walkthrough.
 
-**The portable exe does not update itself.** If you run the standalone `QuickMail.exe`, the Help menu entry still tells you when a new version exists; activating it opens the releases page, and updating remains a manual download of the new exe.
+**The portable exe does not update itself.** If you run the standalone `EudoraQM.exe`, the Help menu entry still tells you when a new version exists; activating it opens the releases page, and updating remains a manual download of the new exe.
 
 The **Help** menu also has a **Keyboard Tutorial** entry, a short interactive walkthrough of core navigation (F6 pane cycling, Ctrl+1/2/3, the command palette, and Escape) for anyone new to the app.
 
@@ -630,7 +630,12 @@ Press `Ctrl+Q` to mark the selected message or messages as read. Messages are al
 
 ### Deleting Messages
 
-Press **Delete**. Deleted messages go to Trash. Press `Ctrl+Shift+E` to empty the Trash for the selected account.
+Press **Delete** to move messages to Trash. Press **Shift+Delete** to move them to the
+**RecoveryDeleted** system folder instead. RecoveryDeleted is a safety net for accidental
+permanent deletion and is purged after the number of days configured in **Settings → Mail Actions**
+(one day by default; zero means never automatically). The context menus for Trash, Junk, and
+RecoveryDeleted each provide a permanent **Empty…** command with confirmation. `Ctrl+Shift+E`
+continues to empty Trash for the selected account.
 
 ### Archiving Messages
 
@@ -850,6 +855,12 @@ Both actions are also in the address book's Command Palette (**Ctrl+Shift+P**) a
 Press **Escape** with focus in the message list to close the results and go back to the folder you started from; the folder name and its message count are announced. A **Close** button at the top of the results does the same, and **Close Contact Mail Results** is in the Command Palette. Selecting any folder in the folder tree also leaves the results.
 
 The search covers every account and folder QuickMail has cached — not just the folder you were in. Mail older than your sync range is not stored locally, so it is not included. **Find mail to this contact** matches the To line, so a message where the person was only in Cc does not appear.
+
+The message-list context menu also has a **History** submenu. **Email history** finds messages
+exchanged with that exact address; **Domain history** finds messages exchanged with any address at
+the same domain. From history, search, or an aggregate view, **Go to message** opens the message's
+physical folder and selects it. If a history lookup lasts more than two seconds, QuickMail displays a
+small progress window while the indexed local search finishes.
 
 ### Syncing Contacts from Your Accounts
 
@@ -1775,6 +1786,9 @@ Every announcement is optional and controlled by the settings above. No custom s
 | `Shift+,` | First message in group |
 | `Shift+.` | Last message in group |
 | `Escape` | Close contact mail results (message list focus) |
+
+While composing, `Ctrl+F4` closes the compose tab or window and uses the normal unsaved-message
+confirmation.
 
 **Move to Folder…** and **Copy to Folder…** are available from the context menu (Shift+F10) or the command palette; they have no default keyboard shortcut. **Manage Themes**, **Next Theme**, **Previous Theme**, **Message List Fields…**, **Density: Comfortable**, **Density: Compact**, **Manage Flags…**, and **Report a Bug** likewise have no default key — reach them from the menus or the command palette, or assign a shortcut yourself in File → Settings → Keyboard Shortcuts.
 

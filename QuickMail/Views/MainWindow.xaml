@@ -9,6 +9,7 @@
         xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
         mc:Ignorable="d"
         Title="{Binding WindowTitle}"
+        Icon="pack://application:,,,/EudoraQM;component/Assets/App/QuickMail.png"
         Height="650" Width="1000"
         MinHeight="400" MinWidth="700"
         Background="{DynamicResource Theme.WindowBackground}"
@@ -203,9 +204,17 @@
             <MenuItem Header="Send _Again"
                       AutomationProperties.Name="Send again"
                       Command="{Binding SendAgainCommand}"/>
-            <MenuItem Header="_History"
-                      AutomationProperties.Name="Show message history with this contact"
-                      Click="MessageContextMenu_History_Click"/>
+            <MenuItem Header="_History" AutomationProperties.Name="Message history">
+                <MenuItem Header="_Email history" Tag="email"
+                          AutomationProperties.Name="Show email history with this contact"
+                          Click="MessageContextMenu_History_Click"/>
+                <MenuItem Header="_Domain history" Tag="domain"
+                          AutomationProperties.Name="Show history with this domain"
+                          Click="MessageContextMenu_History_Click"/>
+            </MenuItem>
+            <MenuItem Header="_Go to Message"
+                      AutomationProperties.Name="Go to message in its folder"
+                      Click="MessageContextMenu_GoToMessage_Click"/>
             <Separator/>
             <MenuItem Header="Mark as _Read" Click="MessageContextMenu_MarkRead_Click"/>
             <MenuItem Header="Mark as _Unread" Click="MessageContextMenu_MarkUnread_Click"/>
@@ -264,7 +273,8 @@
              The WPF XAML compiler generates incorrect type casts for Click handlers inside
              Style setters (it emits GridSplitter instead of MenuItem), causing an APPCRASH. -->
         <ContextMenu x:Key="FolderContextMenu"
-                     AutomationProperties.Name="Folder actions">
+                     AutomationProperties.Name="Folder actions"
+                     Opened="FolderContextMenu_Opened">
             <MenuItem Header="_New Folder…"
                       AutomationProperties.Name="New Folder"
                       Click="FolderContextMenu_NewFolder_Click"/>
@@ -304,6 +314,12 @@
                       AutomationProperties.Name="Clear Startup Folder"
                       Click="FolderContextMenu_ClearStartupFolder_Click"/>
             <Separator/>
+            <MenuItem Header="Empty _Trash" Tag="empty-trash"
+                      Visibility="Collapsed" Click="FolderContextMenu_EmptySystemFolder_Click"/>
+            <MenuItem Header="Empty _Junk" Tag="empty-junk"
+                      Visibility="Collapsed" Click="FolderContextMenu_EmptySystemFolder_Click"/>
+            <MenuItem Header="Empty _RecoveryDeleted" Tag="empty-recovery"
+                      Visibility="Collapsed" Click="FolderContextMenu_EmptySystemFolder_Click"/>
             <MenuItem Header="_Delete Folder"
                       AutomationProperties.Name="Delete Folder"
                       Click="FolderContextMenu_DeleteFolder_Click"/>

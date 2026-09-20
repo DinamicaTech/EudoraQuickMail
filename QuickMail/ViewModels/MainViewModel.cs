@@ -100,6 +100,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
     // then every 15 minutes. Callback marshals to the UI thread via _ui.Post (like the harvest
     // timer above). Disposed in Dispose; in-flight HTTP is cancelled via _graphCalSyncCts.
     private System.Threading.Timer? _graphCalendarSyncTimer;
+    private System.Threading.Timer? _recoveryDeletedPurgeTimer;
+    private int _recoveryDeletedPurgeRunning;
     private CancellationTokenSource? _graphCalSyncCts;
     private int _disposeState;
     private bool _graphCalendarSyncRunning; // UI-thread-owned re-entrancy guard (timer vs. F5)
@@ -170,6 +172,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _calendarHarvestTimer = null;
         _graphCalendarSyncTimer?.Dispose();
         _graphCalendarSyncTimer = null;
+        _recoveryDeletedPurgeTimer?.Dispose();
+        _recoveryDeletedPurgeTimer = null;
         DrainCts(ref _graphCalSyncCts);
         _reminderTimer?.Dispose();
         _reminderTimer = null;
@@ -787,6 +791,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
         To,
         /// <summary>All mail exchanged with the contact (matches From or To).</summary>
         Both,
+        /// <summary>All mail exchanged with any address at the same domain.</summary>
+        Domain,
     }
 
     /// <summary>
@@ -802,14 +808,18 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             ContactMailDirection.From => "from",
             ContactMailDirection.To   => "to",
+            ContactMailDirection.Domain => "domain",
             _                         => "with",
         };
         return new MailFolderModel
         {
             FullName    = $"{ContactMailPrefix}{kind}|{Uri.EscapeDataString(address)}",
-            DisplayName = direction == ContactMailDirection.Both
-                ? $"History with {who}"
-                : $"Mail {kind} {who}",
+            DisplayName = direction switch
+            {
+                ContactMailDirection.Both => $"History with {who}",
+                ContactMailDirection.Domain => $"Domain history with @{address.TrimStart('@')}",
+                _ => $"Mail {kind} {who}",
+            },
         };
     }
 
@@ -833,6 +843,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             "to"   => ContactMailDirection.To,
             "with" => ContactMailDirection.Both,
+            "domain" => ContactMailDirection.Domain,
             _      => ContactMailDirection.From,
         };
         address = Uri.UnescapeDataString(tail[(sep + 1)..]);
@@ -849,8 +860,24 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             ContactMailDirection.From => HeaderNamesAddress(msg.From, address),
             ContactMailDirection.To   => HeaderNamesAddress(msg.To, address),
+            ContactMailDirection.Domain => HeaderNamesDomain(msg.From, address) || HeaderNamesDomain(msg.To, address),
             _ => HeaderNamesAddress(msg.From, address) || HeaderNamesAddress(msg.To, address),
         };
+
+    internal static bool HeaderNamesDomain(string header, string domain)
+    {
+        if (string.IsNullOrWhiteSpace(header) || string.IsNullOrWhiteSpace(domain)) return false;
+        domain = domain.Trim().TrimStart('@');
+        var needle = "@" + domain;
+        var index = header.IndexOf(needle, StringComparison.OrdinalIgnoreCase);
+        while (index >= 0)
+        {
+            var end = index + needle.Length;
+            if (end >= header.Length || !IsAddressChar(header[end])) return true;
+            index = header.IndexOf(needle, index + 1, StringComparison.OrdinalIgnoreCase);
+        }
+        return false;
+    }
 
     /// <summary>
     /// True when <paramref name="header"/> contains <paramref name="address"/> as a whole address
@@ -2408,6 +2435,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
         RegisterCommands(commandRegistry);
         RegisterThemeCommands();
         UpdateRulesStatusText();
+        if (!OnlineMode)
+            _recoveryDeletedPurgeTimer = new System.Threading.Timer(
+                _ => _ui.Post(() => PurgeExpiredRecoveryDeletedAsync().LogFaults("RecoveryDeleted purge")),
+                null, TimeSpan.FromSeconds(30), TimeSpan.FromHours(1));
     }
 
     /// <summary>
@@ -3652,6 +3683,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 "out" or "sent" => SpecialFolderKind.Sent,
                 "trash" => SpecialFolderKind.Trash,
                 "junk" or "spam" => SpecialFolderKind.Junk,
+                "recoverydeleted" => SpecialFolderKind.RecoveryDeleted,
                 _ => folder.Kind,
             };
         }
@@ -4534,7 +4566,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
             if (_trayMessageKeys.Count > 10_000) _trayMessageKeys.Clear();
             var trayFresh = Helpers.NewMailFilter.SelectNew(incoming, threshold, _trayMessageKeys);
             if (trayFresh.Count > 0)
+            {
+                LogService.Log($"New-mail tray event [{account.AccountLabel}]: " +
+                    $"fresh={trayFresh.Count}, subscriber={(NewMailArrived is null ? "missing" : "ready")}.");
                 NewMailArrived?.Invoke(account.AccountLabel, trayFresh.Count);
+            }
         }
 
         if (_notifications is not { IsSupported: true }) return;
@@ -5544,7 +5580,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 {
                     foreach (var node in FolderTreeBuilder.Build(folders.Where(f => f.Kind is not (
                                  SpecialFolderKind.Inbox or SpecialFolderKind.Drafts or SpecialFolderKind.Scheduled
-                                 or SpecialFolderKind.Snoozed or SpecialFolderKind.Sent or SpecialFolderKind.Trash or SpecialFolderKind.Junk))))
+                                 or SpecialFolderKind.Snoozed or SpecialFolderKind.Sent or SpecialFolderKind.Trash or SpecialFolderKind.Junk
+                                 or SpecialFolderKind.RecoveryDeleted))))
                         accountRootNodes.Add((account, node));
                 }
             }
@@ -5553,6 +5590,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             {
                 SpecialFolderKind.Inbox, SpecialFolderKind.Drafts, SpecialFolderKind.Scheduled,
                 SpecialFolderKind.Snoozed, SpecialFolderKind.Sent, SpecialFolderKind.Trash, SpecialFolderKind.Junk,
+                SpecialFolderKind.RecoveryDeleted,
             };
             foreach (var kind in systemKinds)
             {
@@ -5571,6 +5609,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                     SpecialFolderKind.Scheduled => "Scheduled", SpecialFolderKind.Sent => "Sent",
                     SpecialFolderKind.Snoozed => "Snooze",
                     SpecialFolderKind.Trash => "Trash", SpecialFolderKind.Junk => "Junk",
+                    SpecialFolderKind.RecoveryDeleted => "RecoveryDeleted",
                     _ => kind.ToString(),
                 };
                 var aggregateFolder = CreateRootAggregateFolder(rootGroup.Key, kind, label);
@@ -5969,6 +6008,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             SpecialFolderKind.Sent => 4,
             SpecialFolderKind.Trash => 5,
             SpecialFolderKind.Junk => 6,
+            SpecialFolderKind.RecoveryDeleted => 7,
             _ when node.Label.Equals("In", StringComparison.OrdinalIgnoreCase) => 0,
             _ when node.Label.Equals("Draft", StringComparison.OrdinalIgnoreCase) ||
                    node.Label.Equals("Drafts", StringComparison.OrdinalIgnoreCase) => 1,
@@ -5979,7 +6019,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
             _ when node.Label.Equals("Trash", StringComparison.OrdinalIgnoreCase) => 5,
             _ when node.Label.Equals("Junk", StringComparison.OrdinalIgnoreCase) ||
                    node.Label.Equals("Spam", StringComparison.OrdinalIgnoreCase) => 6,
-            _ => 7,
+            _ when node.Label.Equals("RecoveryDeleted", StringComparison.OrdinalIgnoreCase) => 7,
+            _ => 8,
         };
 
         var ordered = parent.Children
@@ -7091,6 +7132,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             ContactMailDirection.From => "from",
             ContactMailDirection.To   => "to",
+            ContactMailDirection.Domain => "at domain",
             _                         => "with",
         };
         Messages.Clear();
@@ -7135,7 +7177,29 @@ public partial class MainViewModel : ObservableObject, IDisposable
             }
             else
             {
-                all = ExcludeSharedMail(await _localStore.LoadAllSummariesAsync()); // #31: aggregate excludes shared
+                if (_localStore is not ILocalMailboxStore mailboxStore)
+                {
+                    all = ExcludeSharedMail(await _localStore.LoadAllSummariesAsync());
+                }
+                else
+                {
+                    var accountIds = Accounts.Where(account => !account.IsShared).Select(account => account.Id).ToList();
+                    var searchValue = direction == ContactMailDirection.Domain
+                        ? address.Trim().TrimStart('@') : address;
+                    var queries = direction switch
+                    {
+                        ContactMailDirection.From => new[] { $"f:{searchValue}" },
+                        ContactMailDirection.To => new[] { $"t:{searchValue}" },
+                        _ => new[] { $"f:{searchValue}", $"t:{searchValue}" },
+                    };
+                    var searches = queries.Select(text => mailboxStore.SearchLocalMessagesAsync(
+                        new LocalSearchQuery(text, AccountIds: accountIds,
+                            Limit: LocalMailConstants.MaxRenderedMessages), ct));
+                    var pages = await Task.WhenAll(searches);
+                    all = pages.SelectMany(page => page.Messages)
+                        .GroupBy(message => (message.AccountId, message.FolderName, message.MessageId))
+                        .Select(group => group.First()).ToList();
+                }
             }
             if (!IsCurrentFolderLoad(loadVersion, expectedFolder)) return;
 
@@ -7827,6 +7891,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 || leaf.Equals("Deleted Items", StringComparison.OrdinalIgnoreCase),
             SpecialFolderKind.Junk => leaf.Equals("Junk", StringComparison.OrdinalIgnoreCase)
                 || leaf.Equals("Spam", StringComparison.OrdinalIgnoreCase),
+            SpecialFolderKind.RecoveryDeleted => leaf.Equals("RecoveryDeleted", StringComparison.OrdinalIgnoreCase),
             _ => false,
         };
     }
@@ -7846,6 +7911,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             SpecialFolderKind.Scheduled => "Scheduled", SpecialFolderKind.Sent => "Sent",
             SpecialFolderKind.Snoozed => "Snooze",
             SpecialFolderKind.Trash => "Trash", SpecialFolderKind.Junk => "Junk",
+            SpecialFolderKind.RecoveryDeleted => "RecoveryDeleted",
             _ => rootKind.ToString(),
         }
         : string.Equals(fullName, AllInboxesFolder.FullName, StringComparison.Ordinal) ? AllInboxesFolder.DisplayName
@@ -8071,6 +8137,32 @@ public partial class MainViewModel : ObservableObject, IDisposable
         return failures;
     }
 
+    /// <summary>Opens a result message's physical folder and selects that exact row.</summary>
+    public async Task<MailMessageSummary?> GoToMessageAsync(MailMessageSummary message)
+    {
+        var folder = _cachedFolders.GetValueOrDefault(message.AccountId)?.FirstOrDefault(candidate =>
+            candidate.FullName.Equals(message.FolderName, StringComparison.OrdinalIgnoreCase));
+        if (folder == null)
+        {
+            StatusText = "The message folder is no longer available.";
+            return null;
+        }
+
+        await SelectFolderAsync(folder);
+        var target = Messages.FirstOrDefault(candidate =>
+            candidate.AccountId == message.AccountId &&
+            candidate.MessageId == message.MessageId &&
+            candidate.FolderName.Equals(message.FolderName, StringComparison.OrdinalIgnoreCase));
+        if (target == null)
+        {
+            StatusText = "The folder opened, but the message is not available in the current cache.";
+            return null;
+        }
+        SelectedMessage = target;
+        MessageListFocusRequested?.Invoke();
+        return target;
+    }
+
     /// <summary>Refreshes Snooze counts and the current page without dropping an active search.
     /// Snoozed mail is intentionally searchable even while hidden from its original folder.</summary>
     public async Task RefreshAfterSnoozeAsync()
@@ -8203,6 +8295,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 IEnumerable<MailMessageSummary> localScope = localAggregateKind is SpecialFolderKind.Drafts
                                 or SpecialFolderKind.Scheduled
                                 or SpecialFolderKind.Trash
+                                or SpecialFolderKind.RecoveryDeleted
                     ? all
                     : MessageDeduplicator.CollapseForAggregate(all, ResolveFolderKind);
                 // Sort the complete aggregate before taking the rendered page. Sorting only the
@@ -8714,7 +8807,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
         await DeleteMessagesAsync([SelectedMessage]);
     }
 
-    public async Task DeleteMessagesAsync(IReadOnlyList<MailMessageSummary> toDelete, bool permanently = false)
+    public async Task DeleteMessagesAsync(IReadOnlyList<MailMessageSummary> toDelete, bool permanently = false,
+        bool toRecoveryDeleted = false)
     {
         if (toDelete.Count == 0) return;
 
@@ -8726,7 +8820,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
         var label  = toDelete.Count == 1 ? "message" : $"{toDelete.Count} messages";
         // Delete/archive progress + outcome go through the MessageAction category (issue #317) so users
         // can silence this frequent chatter — it can interrupt the screen reader reading the next message.
-        SetStatus($"Deleting {label}…", AnnouncementCategory.MessageAction);
+        SetStatus(toRecoveryDeleted ? $"Moving {label} to RecoveryDeleted…" : $"Deleting {label}…",
+            AnnouncementCategory.MessageAction);
         IsBusy        = true;
         MessageDetail = null;
         IsMessageOpen = false;
@@ -8787,7 +8882,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             foreach (var group in groups)
             {
                 var uids = group.Select(m => m.MessageId).ToList();
-                SetStatus($"Deleting message {processed + 1:N0}/{toDelete.Count:N0}…",
+                SetStatus($"{(toRecoveryDeleted ? "Moving" : "Deleting")} message {processed + 1:N0}/{toDelete.Count:N0}…",
                     AnnouncementCategory.MessageAction);
 
                 // Messages already in Trash must be permanently deleted (expunge);
@@ -8802,7 +8897,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 if (sourceFolder != null)
                     affectedFolders.Add((group.Key.AccountId, sourceFolder));
 
-                if (permanently || sourceKind == SpecialFolderKind.Trash)
+                if (toRecoveryDeleted && sourceKind is not SpecialFolderKind.RecoveryDeleted)
+                {
+                    var recovery = await EnsureRecoveryDeletedFolderAsync(group.Key.AccountId, ct);
+                    await _imap.MoveMessagesAsync(
+                        group.Key.AccountId, group.Key.FolderName, uids, recovery.FullName, ct);
+                }
+                else if (permanently || sourceKind is SpecialFolderKind.Trash or SpecialFolderKind.RecoveryDeleted)
                     await _imap.PermanentlyDeleteBatchAsync(
                         group.Key.AccountId, group.Key.FolderName, uids, ct);
                 else
@@ -8825,9 +8926,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
             // Draft/Trash/Scheduled badges represent total rows, not unread rows. Reload their
             // authoritative folder metadata and current aggregate immediately after a mutation;
             // this also invalidates any older in-flight folder load that could restore a stale list.
-            if (toDelete.Any(m => ResolveFolderKind(m) is SpecialFolderKind.Drafts
+            if (toRecoveryDeleted || toDelete.Any(m => ResolveFolderKind(m) is SpecialFolderKind.Drafts
                                                or SpecialFolderKind.Scheduled
-                                               or SpecialFolderKind.Trash))
+                                               or SpecialFolderKind.Trash
+                                               or SpecialFolderKind.RecoveryDeleted))
             {
                 foreach (var acctId in toDelete.Select(m => m.AccountId).Distinct())
                     await RefreshFolderListAsync(acctId);
@@ -8839,9 +8941,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
             }
 
             var count = toDelete.Count;
+            var outcome = toRecoveryDeleted ? "moved to RecoveryDeleted" : "deleted";
             SetStatus(Messages.Count > 0
-                ? $"{count} {(count == 1 ? "message" : "messages")} deleted."
-                : $"{count} {(count == 1 ? "message" : "messages")} deleted. Folder is now empty.",
+                ? $"{count} {(count == 1 ? "message" : "messages")} {outcome}."
+                : $"{count} {(count == 1 ? "message" : "messages")} {outcome}. Folder is now empty.",
                 AnnouncementCategory.MessageAction);
         }
         catch (OperationCanceledException)
@@ -8886,6 +8989,83 @@ public partial class MainViewModel : ObservableObject, IDisposable
     }
 
     public event Action<IReadOnlyList<MailMessageSummary>>? MessagesDeleting;
+
+    private async Task<MailFolderModel> EnsureRecoveryDeletedFolderAsync(Guid accountId, CancellationToken ct)
+    {
+        if (_cachedFolders.TryGetValue(accountId, out var cached))
+        {
+            var existing = cached.FirstOrDefault(folder =>
+                FolderMatchesSpecialKind(folder, SpecialFolderKind.RecoveryDeleted));
+            if (existing != null) return existing;
+        }
+
+        // The server may already have the folder even when the local tree is stale. Refresh first
+        // so a repeated Shift+Delete never fails merely because CREATE reports "already exists".
+        var refreshed = await _imap.GetFoldersAsync(accountId, ct);
+        var recovery = refreshed.FirstOrDefault(folder =>
+            FolderMatchesSpecialKind(folder, SpecialFolderKind.RecoveryDeleted));
+        if (recovery == null)
+        {
+            await _imap.CreateFolderAsync(accountId, null, "RecoveryDeleted", ct);
+            refreshed = await _imap.GetFoldersAsync(accountId, ct);
+            recovery = refreshed.FirstOrDefault(folder =>
+                FolderMatchesSpecialKind(folder, SpecialFolderKind.RecoveryDeleted));
+        }
+        NormalizePersistedLocalFolderKinds(accountId, refreshed);
+        recovery ??= refreshed.FirstOrDefault(folder =>
+            FolderMatchesSpecialKind(folder, SpecialFolderKind.RecoveryDeleted));
+        if (recovery == null)
+            throw new InvalidOperationException(
+                "RecoveryDeleted could not be created for this account.");
+        SetCachedFolders(accountId, refreshed);
+        BuildFolderTree();
+        return recovery;
+    }
+
+    private async Task PurgeExpiredRecoveryDeletedAsync()
+    {
+        if (Interlocked.Exchange(ref _recoveryDeletedPurgeRunning, 1) != 0 ||
+            Volatile.Read(ref _disposeState) != 0) return;
+        try
+        {
+            var days = Math.Clamp(_configService.Load().RecoveryDeletedRetentionDays, 0, 3650);
+            if (days == 0) return;
+            var observed = DateTimeOffset.UtcNow;
+            var cutoff = observed.AddDays(-days);
+            var total = 0;
+            foreach (var account in Accounts.Where(account => account.IsActive))
+            {
+                if (!_cachedFolders.TryGetValue(account.Id, out var folders)) continue;
+                var recovery = folders.FirstOrDefault(folder =>
+                    FolderMatchesSpecialKind(folder, SpecialFolderKind.RecoveryDeleted));
+                if (recovery == null) continue;
+                try
+                {
+                    var ids = (await _imap.GetFolderMessageIdsAsync(
+                        account.Id, recovery.FullName, _messageActionShutdownCts.Token)).ToList();
+                    var expired = await _localStore.TrackAndGetExpiredRecoveryDeletedAsync(
+                        account.Id, recovery.FullName, ids, observed, cutoff, _messageActionShutdownCts.Token);
+                    if (expired.Count == 0) continue;
+                    await _imap.PermanentlyDeleteBatchAsync(
+                        account.Id, recovery.FullName, expired.ToList(), _messageActionShutdownCts.Token);
+                    await _localStore.DeleteSummariesAsync(account.Id, recovery.FullName, expired);
+                    await _localStore.ForgetRecoveryDeletedAsync(
+                        account.Id, recovery.FullName, expired, _messageActionShutdownCts.Token);
+                    total += expired.Count;
+                    await RefreshFolderListAsync(account.Id);
+                }
+                catch (OperationCanceledException) when (Volatile.Read(ref _disposeState) != 0) { return; }
+                catch (Exception ex) { LogService.Log($"RecoveryDeleted purge failed for {account.AccountLabel}", ex); }
+            }
+            if (total > 0)
+            {
+                StatusText = $"Removed {total:N0} expired RecoveryDeleted message{(total == 1 ? "" : "s")}.";
+                if (SelectedFolder?.Kind == SpecialFolderKind.RecoveryDeleted)
+                    await FetchVirtualAsync(SelectedFolder);
+            }
+        }
+        finally { Interlocked.Exchange(ref _recoveryDeletedPurgeRunning, 0); }
+    }
 
     // ── Archive (issue #318) ──────────────────────────────────────────────────────
 
@@ -11430,6 +11610,68 @@ public partial class MainViewModel : ObservableObject, IDisposable
             return;
         }
         CalendarVm.AddCalendarItem(item);
+    }
+
+    public async Task EmptySystemFolderAsync(MailFolderModel target, SpecialFolderKind kind)
+    {
+        var label = kind == SpecialFolderKind.RecoveryDeleted ? "RecoveryDeleted" : kind.ToString();
+        var sources = FolderScopedAggregateSources(target.FullName)
+            .Where(source => FolderMatchesSpecialKind(source.Folder, kind)).ToList();
+        if (sources.Count == 0 && target.AccountId != Guid.Empty)
+        {
+            var account = Accounts.FirstOrDefault(candidate => candidate.Id == target.AccountId);
+            if (account != null) sources.Add((account, target));
+        }
+        if (sources.Count == 0) return;
+
+        var batches = new List<(AccountModel Account, MailFolderModel Folder, List<string> Ids)>();
+        foreach (var source in sources)
+        {
+            var ids = (await _imap.GetFolderMessageIdsAsync(
+                source.Account.Id, source.Folder.FullName, _messageActionShutdownCts.Token)).ToList();
+            batches.Add((source.Account, source.Folder, ids));
+        }
+        var total = batches.Sum(batch => batch.Ids.Count);
+        if (total == 0)
+        {
+            StatusText = $"{label} is already empty.";
+            Announce(StatusText, AnnouncementCategory.Result);
+            return;
+        }
+        if (ConfirmationRequested != null && !ConfirmationRequested(
+                $"Permanently delete {total:N0} message{(total == 1 ? "" : "s")} from {label}? This cannot be undone.",
+                $"Empty {label}")) return;
+
+        IsBusy = true;
+        StatusText = $"Emptying {label}…";
+        try
+        {
+            foreach (var batch in batches.Where(batch => batch.Ids.Count > 0))
+            {
+                await _imap.PermanentlyDeleteBatchAsync(
+                    batch.Account.Id, batch.Folder.FullName, batch.Ids, _messageActionShutdownCts.Token);
+                if (!OnlineMode)
+                {
+                    await _localStore.DeleteSummariesAsync(
+                        batch.Account.Id, batch.Folder.FullName, batch.Ids);
+                    if (kind == SpecialFolderKind.RecoveryDeleted)
+                        await _localStore.ForgetRecoveryDeletedAsync(
+                            batch.Account.Id, batch.Folder.FullName, batch.Ids, _messageActionShutdownCts.Token);
+                }
+                await RefreshFolderListAsync(batch.Account.Id);
+            }
+            StatusText = $"Deleted {total:N0} message{(total == 1 ? "" : "s")} from {label}.";
+            Announce(StatusText, AnnouncementCategory.Result);
+            if (ReferenceEquals(SelectedFolder, target) || SelectedFolder?.FullName == target.FullName)
+                await SelectFolderAsync(target);
+        }
+        catch (Exception ex)
+        {
+            LogService.Log($"Empty {label}", ex);
+            StatusText = $"Empty {label} failed: {ex.Message}";
+            Announce(StatusText, AnnouncementCategory.Result);
+        }
+        finally { IsBusy = false; }
     }
 
     [RelayCommand]

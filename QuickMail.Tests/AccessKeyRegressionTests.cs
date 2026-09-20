@@ -349,8 +349,7 @@ public class AccessKeyRegressionTests : WpfTestBase
         {
             if (Application.Current == null)
                 WpfTestApplication.EnsureStarted();
-            const string stylesUri = "pack://application:,,,/QuickMail;component/Styles/AccessibleStyles.xaml";
-            var uri = new Uri(stylesUri, UriKind.Absolute);
+            var uri = WpfTestApplication.ResourceUri("Styles/AccessibleStyles.xaml");
             if (Application.Current!.Resources.MergedDictionaries.All(d => d.Source != uri))
                 Application.Current.Resources.MergedDictionaries.Add(new ResourceDictionary { Source = uri });
         }

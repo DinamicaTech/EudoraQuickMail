@@ -349,6 +349,23 @@ public class ConfigServiceSaveTests
         Assert.Equal(expected, new ConfigService(profile).Load().DelaySendingMessagesSeconds);
     }
 
+    [Theory]
+    [InlineData(0, 0)]
+    [InlineData(1, 1)]
+    [InlineData(30, 30)]
+    [InlineData(-1, 0)]
+    [InlineData(9999, 3650)]
+    public void RecoveryDeletedRetentionDays_RoundTripsAndIsClamped(int written, int expected)
+    {
+        var profile = MakeTempProfile();
+        var service = new ConfigService(profile);
+        var config = service.Load();
+        config.RecoveryDeletedRetentionDays = written;
+        service.Save(config);
+
+        Assert.Equal(expected, new ConfigService(profile).Load().RecoveryDeletedRetentionDays);
+    }
+
 
     [Fact]
     public void SaveThenLoad_RoundTripsReadAsPlainText()

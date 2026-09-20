@@ -18,7 +18,7 @@
             <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
                 <Image Width="128" Height="128" Margin="0,0,0,8" Stretch="Uniform"
                        RenderOptions.BitmapScalingMode="HighQuality"
-                       Source="pack://application:,,,/QuickMail;component/Assets/App/QuickMail.ico"
+                       Source="pack://application:,,,/EudoraQM;component/Assets/App/QuickMail.png"
                        AutomationProperties.Name="Eudora QuickMail logo"/>
                 <TextBlock Text="Eudora QuickMail" FontSize="{DynamicResource Theme.FontSizeHeader}"
                            FontWeight="SemiBold" HorizontalAlignment="Center"/>

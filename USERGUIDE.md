@@ -45,7 +45,7 @@ Two download options are available from the [Releases page](https://github.com/D
 | Download | When to use |
 |----------|-------------|
 | **`quickmail-vX.X.X-setup.exe`** — Windows installer | Recommended for most users. Installs per-user with no elevation required and registers an uninstaller in Windows Settings. |
-| **`QuickMail.exe`** — standalone portable executable | No installation required. Copy it anywhere and run it directly. |
+| **`EudoraQM.exe`** — standalone portable executable | No installation required. Copy it anywhere and run it directly. |
 
 Both downloads include the .NET 8 runtime — you do not need to install .NET separately.
 
@@ -910,6 +910,10 @@ Common actions available through context menus:
 - Delete
 - Mark as Read / Mark as Unread
 - Move to Folder
+- **History → Email history** shows mail exchanged with the selected address across all cached folders.
+- **History → Domain history** shows mail exchanged with every address at that domain.
+- **Go to message** leaves a search, history, or aggregate view, opens the message's physical folder,
+  and selects the message there.
 
 ---
 
@@ -1284,8 +1288,13 @@ Account properties show the authentication method ("OAuth2" or "Password, stored
 ## Deleting messages
 
 - Select one or more messages and press **Delete**. Use **Shift+Up/Down** to select multiple.
-- Messages are moved to the **Trash** folder. They are not permanently deleted.
+- `Delete` moves messages to **Trash**. `Shift+Delete` moves them to the separate
+  **RecoveryDeleted** system folder, where accidental bulk deletion can be recovered.
+- RecoveryDeleted is automatically emptied after the retention period configured in
+  **Settings → Mail Actions** (one day by default; choose Never to disable automatic purging).
 - To permanently delete everything in Trash, activate **Empty Trash** in the toolbar or press `Ctrl+Shift+E`. A confirmation dialog shows how many messages will be deleted before anything is removed.
+- The folder context menu offers **Empty Trash**, **Empty Junk**, and **Empty RecoveryDeleted**
+  on their corresponding system folders. These operations are permanent and always ask for confirmation.
 
 To skip the confirmation, open **File → Settings**, select the **General** tab, and turn off **Confirm before emptying trash** in the **Mail Actions** group.
 
@@ -1418,6 +1427,7 @@ To skip the confirmation, open **File → Settings**, select the **General** tab
 | Delete (in attachment list) | Remove selected attachment |
 | Ctrl+Shift+P | Open compose command palette |
 | Tab | Move between fields |
+| Ctrl+F4 | Close the compose window or compose tab |
 | Escape | Close window (prompts if there are unsaved changes) |
 
 ---
@@ -1493,13 +1503,13 @@ The `--profileDir` option lets you run QuickMail with a completely separate set 
 **Example — store data on OneDrive:**
 
 ```
-QuickMail.exe --profileDir "C:\Users\YourName\OneDrive\QuickMail"
+EudoraQM.exe --profileDir "C:\Users\YourName\OneDrive\QuickMail"
 ```
 
 **Example — run a second profile:**
 
 ```
-QuickMail.exe --profileDir "C:\Users\YourName\AppData\Roaming\QuickMail-Work"
+EudoraQM.exe --profileDir "C:\Users\YourName\AppData\Roaming\QuickMail-Work"
 ```
 
 Each profile is fully independent. Passwords are stored in Windows Credential Manager (system-wide) and are shared across profiles — you do not need to re-enter them when switching.

@@ -233,12 +233,14 @@ public sealed class ScheduledSendService : IOutgoingMailQueue, IDisposable
                         ProgressChanged?.Invoke($"Completing sent message from {account.AccountLabel}…");
                         PerformanceLogService.Marker("Outgoing queue: resume accepted item", details);
                     }
+                    var sentCopySaved = false;
                     try
                     {
                         // SMTP acceptance is authoritative. Saving/synchronizing the Sent copy is
                         // best effort: if it fails we must still dequeue the item, otherwise the
                         // next timer pass sends a duplicate to the recipient.
                         await _mail.AppendToSentAsync(account.Id, item.Message, CancellationToken.None);
+                        sentCopySaved = true;
                     }
                     catch (Exception ex)
                     {
@@ -276,17 +278,23 @@ public sealed class ScheduledSendService : IOutgoingMailQueue, IDisposable
                             LogService.Log($"Scheduled send {item.Id}: failed to remove Scheduled copy", ex);
                         }
                     }
-                    if (!string.IsNullOrWhiteSpace(item.Message.DraftMessageId)
+                    if (sentCopySaved
+                        && !string.IsNullOrWhiteSpace(item.Message.DraftMessageId)
                         && !string.IsNullOrWhiteSpace(item.Message.DraftFolderName))
                     {
                         try
                         {
-                            await _mail.MoveToTrashAsync(item.Message.AccountId, item.Message.DraftFolderName,
-                                item.Message.DraftMessageId, CancellationToken.None);
+                            // The draft is only a source copy of the message that is now safely in
+                            // Sent. Moving it to Trash leaves a second, outgoing-looking message
+                            // there and makes it appear as if a rule filed the sent message in
+                            // Trash. Consume the draft permanently once the Sent copy exists.
+                            await _mail.PermanentlyDeleteBatchAsync(item.Message.AccountId,
+                                item.Message.DraftFolderName, [item.Message.DraftMessageId],
+                                CancellationToken.None);
                         }
                         catch (Exception ex)
                         {
-                            LogService.Log($"Scheduled send {item.Id}: failed to move source draft to Trash", ex);
+                            LogService.Log($"Scheduled send {item.Id}: failed to remove source draft", ex);
                         }
                     }
                     await RemoveQueuedItemAsync(item.Id);

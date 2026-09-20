@@ -1,5 +1,5 @@
 {
-  "comment": "Default probe plan for scripts/ui-probe.ps1 (#180). Each entry launches QuickMail.exe --ui-probe <surface> --theme <theme> --text-scale <scale> once. Surfaces are the names UiProbeDriver understands. Per spec \u00a713.2: all surfaces x {parchment, dark} at 100%, plus the full set at 150% in Parchment. folder-picker is EXCLUDED offline: the folder cache only exists after an IMAP connect, so the picker's open path early-returns (documented #180 v1 limitation).",
+  "comment": "Default probe plan for scripts/ui-probe.ps1 (#180). Each entry launches EudoraQM.exe --ui-probe <surface> --theme <theme> --text-scale <scale> once. Surfaces are the names UiProbeDriver understands. Per spec \u00a713.2: all surfaces x {parchment, dark} at 100%, plus the full set at 150% in Parchment. folder-picker is EXCLUDED offline: the folder cache only exists after an IMAP connect, so the picker's open path early-returns (documented #180 v1 limitation).",
   "entries": [
     {
       "surface": "inbox",

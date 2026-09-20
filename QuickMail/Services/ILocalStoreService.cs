@@ -55,6 +55,20 @@ public interface ILocalStoreService
     /// when the account cannot connect (for example, before its password has been entered).</summary>
     Task EnsureLocalSystemFoldersAsync(IReadOnlyCollection<AccountModel> accounts) => Task.CompletedTask;
 
+    /// <summary>
+    /// Registers messages currently present in RecoveryDeleted and returns those whose recovery
+    /// retention has expired. The first observation time is independent of the message's original
+    /// date, so old mail is never purged immediately after an accidental deletion.
+    /// </summary>
+    Task<IReadOnlyList<string>> TrackAndGetExpiredRecoveryDeletedAsync(
+        Guid accountId, string folderName, IReadOnlyCollection<string> currentMessageIds,
+        DateTimeOffset observedUtc, DateTimeOffset cutoffUtc, CancellationToken ct = default) =>
+        Task.FromResult<IReadOnlyList<string>>([]);
+
+    /// <summary>Removes recovery-retention rows after the corresponding messages are deleted.</summary>
+    Task ForgetRecoveryDeletedAsync(Guid accountId, string folderName,
+        IReadOnlyCollection<string> messageIds, CancellationToken ct = default) => Task.CompletedTask;
+
     /// <summary>Returns the validated account-independent local tree when its shadow migration is
     /// present. Null keeps older/unmigrated profiles on the legacy per-account tree.</summary>
     Task<CanonicalLocalFolderTree?> LoadCanonicalLocalFolderTreeAsync() => Task.FromResult<CanonicalLocalFolderTree?>(null);

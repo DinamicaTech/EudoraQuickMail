@@ -25,7 +25,7 @@ set OUTFILE=logs\quickmail-perf-%TS%.csv
 
 echo Waiting for QuickMail process...
 :wait
-tasklist /fi "imagename eq QuickMail.exe" 2>nul | find /i "QuickMail.exe" >nul
+tasklist /fi "imagename eq EudoraQM.exe" 2>nul | find /i "EudoraQM.exe" >nul
 if errorlevel 1 (
     timeout /t 2 /nobreak >nul
     goto wait

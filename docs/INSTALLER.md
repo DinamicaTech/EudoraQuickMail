@@ -8,13 +8,14 @@ containing:
   (WiX 5) with welcome, license acceptance, and conclusion pages fed from
   `installer/velopack/*.txt` and the repo `LICENSE`
 - `QuickMail-win-Setup.exe` — Velopack's one-click installer (no wizard, no license page);
-  produced by `vpk pack` but **not shipped** — the MSI is the installer users download
+  renamed to the stable asset name `EudoraQM-Setup.exe` and shipped for the website's direct
+  download link (versioned while releases remain pre-release; `/latest/download/` once stable)
 - `QuickMail-<version>-full.nupkg` — the full update package consumed by the in-app updater
 - `QuickMail-<version>-delta.nupkg` — binary delta from the previous release (generated only
   when the previous release's packages are present; CI fetches them with `vpk download github`
   before packing, local builds produce full packages only)
 - `RELEASES`, `releases.win.json`, `assets.win.json` — release feed metadata read by the updater
-- `QuickMail-win-Portable.zip` — **not shipped**; the raw single-file `publish/QuickMail.exe`
+- `QuickMail-win-Portable.zip` — **not shipped**; the raw single-file `publish/EudoraQM.exe`
   remains the portable download
 
 The `vpk` CLI is a .NET global tool: `dotnet tool install -g vpk`.
@@ -35,7 +36,7 @@ two architectures would offer each build's update to the wrong machine.
 | Channel | `win` (Velopack's default) | `win-arm64` |
 | Pack arguments | none extra | `--runtime win-arm64 --channel win-arm64` |
 | Installer | `QuickMail-<version>-win.msi` | `QuickMail-<version>-win-arm64.msi` |
-| Portable | `QuickMail.exe` | `QuickMail-arm64.exe` |
+| Portable | `EudoraQM.exe` | `EudoraQM-arm64.exe` |
 | Feed metadata | `RELEASES`, `releases.win.json`, `assets.win.json` | `RELEASES-win-arm64`, `releases.win-arm64.json`, `assets.win-arm64.json` |
 | Package | `QuickMail-<version>-full.nupkg` | `QuickMail-<version>-win-arm64-full.nupkg` |
 
@@ -52,7 +53,7 @@ overwrite the x64 feed and strand every existing install.
 
 The only genuine collision is the portable executable, which is uploaded straight from the
 publish folder rather than through vpk: both architectures produce a file named
-`QuickMail.exe`, so the ARM64 copy is renamed to `QuickMail-arm64.exe` before upload.
+`EudoraQM.exe`, so the ARM64 copy is renamed to `EudoraQM-arm64.exe` before upload.
 
 **No cross-architecture migration exists.** An installed x64 copy running on an ARM64 device
 is never offered the ARM64 build, and vice versa — the installed copy records its channel and
@@ -82,7 +83,7 @@ leaves ARM64 output in `bin/Release` until the next ordinary build.
   creates only the Start Menu entry. On first launch of an installed copy, QuickMail offers
   to add a desktop shortcut (accessible in-app dialog, default No, asked once — recorded as
   `DesktopShortcutPrompted` in config.ini); the choice stays editable in Settings → General.
-  The shortcut targets `%LocalAppData%\QuickMail\current\QuickMail.exe`, which is stable
+  The shortcut targets `%LocalAppData%\QuickMail\current\EudoraQM.exe`, which is stable
   across updates. See `Helpers/DesktopShortcut.cs`.
 - **Uninstall offers to remove user data.** Velopack's `OnBeforeUninstallFastCallback` (wired
   in `App.xaml.cs Main`) launches a detached PowerShell prompt — detached because Update.exe
@@ -117,7 +118,7 @@ On a `v*` tag, `.github/workflows/quickmail.yml`:
    Allowed to fail (the first Velopack release has no prior packages).
 4. `vpk pack` — builds setup exe, full/delta packages, and feed metadata; then deletes the
    downloaded previous-version `.nupkg` so only current-version assets upload.
-5. `softprops/action-gh-release` uploads the portable `QuickMail.exe`, the MSI installer, the
+5. `softprops/action-gh-release` uploads the portable `EudoraQM.exe`, the MSI installer, the
    `.nupkg` packages, and the feed metadata files. The in-app updater reads these from the
    latest GitHub release.
 
@@ -137,7 +138,7 @@ download, apply on relaunch, delta packaging — can be verified offline:
    previous full package is still there, this also exercises delta generation
    (`QuickMail-0.8.2-delta.nupkg` appears).
 4. Launch the **installed** copy with the feed override:
-   `%LocalAppData%\QuickMail\current\QuickMail.exe --updateFeed <repo>\installer\Output\Releases`
+   `%LocalAppData%\QuickMail\current\EudoraQM.exe --updateFeed <repo>\installer\Output\Releases`
    The startup check finds 0.8.2, announces it, and downloads it in the background
    (`quickmail.log` records "Update 0.8.2 downloaded; it will be applied when QuickMail
    exits").
@@ -186,7 +187,7 @@ Run it on your own machine before trusting it broadly:
    creates the release.
 2. **Verify the release assets by eye.** On the GitHub release page, confirm all four updater
    files are attached: `QuickMail-0.8.0-full.nupkg`, `RELEASES`, `releases.win.json`,
-   `assets.win.json` (plus the `QuickMail-win.msi` and portable `QuickMail.exe`). A missing or
+   `assets.win.json` (plus the `QuickMail-win.msi` and portable `EudoraQM.exe`). A missing or
    malformed feed is the most likely failure and the one that strands clients *silently*.
 3. **Install the baseline from the real release.** Download and run `QuickMail-win.msi` from
    the release page (not a local build) so the installed copy is exactly what users get.

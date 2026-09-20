@@ -248,6 +248,32 @@ public class ContactMailSearchTests
     public void HeaderNamesAddress_MatchesWholeAddressesOnly(string header, string address, bool expected)
         => Assert.Equal(expected, MainViewModel.HeaderNamesAddress(header, address));
 
+    [Theory]
+    [InlineData("Bob <bob@example.com>", "example.com", true)]
+    [InlineData("Bob <bob@sub.example.com>", "example.com", false)]
+    [InlineData("Bob <bob@example.com.au>", "example.com", false)]
+    [InlineData("Ann <ann@x.com>, Bob <bob@example.com>", "example.com", true)]
+    public void HeaderNamesDomain_MatchesExactMailboxDomain(string header, string domain, bool expected)
+        => Assert.Equal(expected, MainViewModel.HeaderNamesDomain(header, domain));
+
+    [Fact]
+    public async Task ShowContactMail_Domain_ReturnsMessagesInBothDirections()
+    {
+        var messages = new[]
+        {
+            Msg("1", "Bob <bob@vendor.test>", "kelly@example.com", 2),
+            Msg("2", "Kelly <kelly@example.com>", "sales@vendor.test", 1),
+            Msg("3", "Ann <ann@other.test>", "kelly@example.com", 0),
+        };
+        var vm = MakeVm(messages);
+        await vm.InitialLoadAsync();
+
+        await vm.ShowContactMailAsync("vendor.test", MainViewModel.ContactMailDirection.Domain);
+
+        Assert.Equal(new[] { "2", "1" }, vm.Messages.Select(message => message.MessageId).ToArray());
+        Assert.Equal("Domain history with @vendor.test", vm.SelectedFolder?.DisplayName);
+    }
+
     [Fact]
     public async Task ShowContactMail_DoesNotMatchALongerAddress()
     {

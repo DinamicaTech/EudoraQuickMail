@@ -1091,6 +1091,12 @@ public partial class ComposeWindow : Window
         if ((pressedModifiers & (ModifierKeys.Control | ModifierKeys.Alt)) ==
             (ModifierKeys.Control | ModifierKeys.Alt))
             return;
+        if (e.Key == Key.F4 && pressedModifiers == ModifierKeys.Control)
+        {
+            _vm.CancelCommand.Execute(null);
+            e.Handled = true;
+            return;
+        }
         // Ctrl+Shift+P: open the command palette
         if (e.Key == Key.P && Keyboard.Modifiers == (ModifierKeys.Control | ModifierKeys.Shift))
         {
@@ -2044,7 +2050,7 @@ public partial class ComposeWindow : Window
             // editor.html is the bridge between HugeRTE and ComposeViewModel (file drop, content
             // snapshots, spelling, translation, and grammar).  Serve that one page from the EXE,
             // even though HugeRTE's library files remain loose assets.  Users commonly update a
-            // portable installation by copying only QuickMail.exe; allowing an old editor.html to
+            // portable installation by copying only EudoraQM.exe; allowing an old editor.html to
             // survive beside the new EXE silently restores HugeRTE's native "unsupported file"
             // blocker for PDF/Office/ZIP drops.
             HtmlBodyEditor.CoreWebView2.AddWebResourceRequestedFilter(

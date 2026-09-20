@@ -6,7 +6,7 @@ namespace QuickMail.Helpers;
 
 /// <summary>
 /// Creates and removes the Eudora QuickMail desktop shortcut. The shortcut targets the running
-/// executable; under a Velopack install that path (%LocalAppData%\QuickMail\current\QuickMail.exe)
+/// executable; under a Velopack install that path (%LocalAppData%\QuickMail\current\EudoraQM.exe)
 /// is stable across updates, so the link stays valid after the app updates itself.
 /// </summary>
 public static class DesktopShortcut

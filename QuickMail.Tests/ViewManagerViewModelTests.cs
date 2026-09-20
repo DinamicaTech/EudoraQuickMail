@@ -251,8 +251,7 @@ public class ViewManagerWindowTests : WpfTestBase
                 WpfTestApplication.EnsureStarted();
         }
 
-        const string stylesUri = "pack://application:,,,/QuickMail;component/Styles/AccessibleStyles.xaml";
-        var uri = new Uri(stylesUri, UriKind.Absolute);
+        var uri = WpfTestApplication.ResourceUri("Styles/AccessibleStyles.xaml");
         // Capture to local so nullable analysis knows it's non-null (it was just created above).
         var app = Application.Current!;
         if (app.Resources.MergedDictionaries.All(d => d.Source != uri))

@@ -253,7 +253,7 @@ public partial class App : Application
         if (IsHelpRequest(e.Args))
         {
             MessageBox.Show(
-                "Usage: QuickMail.exe [options]\n\n" +
+                "Usage: EudoraQM.exe [options]\n\n" +
                 "Options:\n" +
                 "  --profileDir <path>   Store all data in <path> instead of the default\n" +
                 "                        %AppData%\\QuickMail directory. The directory is\n" +

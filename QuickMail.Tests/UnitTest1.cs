@@ -214,7 +214,7 @@ public class XamlParseTests : WpfTestBase
         var app = Application.Current!;
         foreach (var style in new[] { "AccessibleStyles", "ThemedControls" })
         {
-            var uri = new Uri($"pack://application:,,,/QuickMail;component/Styles/{style}.xaml", UriKind.Absolute);
+            var uri = WpfTestApplication.ResourceUri($"Styles/{style}.xaml");
             if (app.Resources.MergedDictionaries.All(d => d.Source != uri))
                 app.Resources.MergedDictionaries.Add(new ResourceDictionary { Source = uri });
         }
@@ -554,7 +554,7 @@ public class XamlParseTests : WpfTestBase
     public void ThemedControls_XamlParsesWithoutException()
     {
         EnsureApplication();
-        var uri = new Uri("pack://application:,,,/QuickMail;component/Styles/ThemedControls.xaml", UriKind.Absolute);
+        var uri = WpfTestApplication.ResourceUri("Styles/ThemedControls.xaml");
         var dict = new ResourceDictionary { Source = uri };
         Assert.True(dict.Count > 0);
     }

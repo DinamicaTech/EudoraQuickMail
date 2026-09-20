@@ -172,7 +172,8 @@ public static class FolderTreeBuilder
             SpecialFolderKind.Sent   => 3,
             SpecialFolderKind.Trash  => 4,
             SpecialFolderKind.Junk   => 5,
-            _ => 6,
+            SpecialFolderKind.RecoveryDeleted => 6,
+            _ => 7,
         };
     }
 

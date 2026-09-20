@@ -24,7 +24,7 @@ the program directory (default: `Program Files\Eudora QuickMail`) and the data d
 (default: the current user's `Documents\Eudora QuickMail`). Shortcuts retain the selected
 data directory through the `--profileDir` argument.
 
-To recompile the installer without re-publishing (when `publish\QuickMail.exe` already
+To recompile the installer without re-publishing (when `publish\EudoraQM.exe` already
 exists), run the compiler directly:
 
 ```bat
@@ -34,7 +34,7 @@ exists), run the compiler directly:
 ## What gets installed
 
 QuickMail publishes as a **self-contained, single-file** `win-x64` executable: the .NET 8
-runtime is bundled inside `QuickMail.exe`, so the installer ships only that one file and
+runtime is bundled inside `EudoraQM.exe`, so the installer ships only that one file and
 requires **no .NET runtime install**.
 
 The single external prerequisite is the **Microsoft Edge WebView2 Runtime** (used to render
@@ -45,7 +45,7 @@ installer downloads and installs it on demand.
 
 - **Per-user install by default**, with no elevation required. The user may choose an
   all-users (Program Files) install from the standard privileges dialog, which elevates.
-- **Version** is read from `QuickMail.exe`'s file version at compile time, so the installer
+- **Version** is read from `EudoraQM.exe`'s file version at compile time, so the installer
   and output filename always match the build.
 - On **upgrade**, if QuickMail is running the Restart Manager prompts the user to close it
   before files are replaced.

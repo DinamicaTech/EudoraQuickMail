@@ -237,7 +237,7 @@ public sealed class SingleInstanceService : IDisposable
         try
         {
             using var process = Process.GetProcessById(owner.ProcessId);
-            if (!process.ProcessName.Equals("QuickMail", StringComparison.OrdinalIgnoreCase) ||
+            if (!process.ProcessName.Equals("EudoraQM", StringComparison.OrdinalIgnoreCase) ||
                 process.StartTime.ToUniversalTime().Ticks != owner.StartTimeUtcTicks)
             {
                 error = "The process which owns this profile has changed. It was not closed.";

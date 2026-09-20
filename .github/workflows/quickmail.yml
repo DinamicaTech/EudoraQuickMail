@@ -316,7 +316,7 @@ jobs:
               return $br.ReadUInt16()
             } finally { $fs.Dispose() }
           }
-          $expected = @{ 'publish/QuickMail.exe' = 0x8664; 'publish-arm64/QuickMail.exe' = 0xAA64 }
+          $expected = @{ 'publish/EudoraQM.exe' = 0x8664; 'publish-arm64/EudoraQM.exe' = 0xAA64 }
           $names    = @{ 0x8664 = 'x64'; 0xAA64 = 'ARM64'; 0x14C = 'x86' }
           foreach ($path in $expected.Keys) {
             $actual = Get-PEMachine $path
@@ -332,7 +332,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: QuickMail-win-x64
-          path: publish/QuickMail.exe
+          path: publish/EudoraQM.exe
           if-no-files-found: error
           retention-days: 7
 
@@ -340,7 +340,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: QuickMail-win-arm64
-          path: publish-arm64/QuickMail.exe
+          path: publish-arm64/EudoraQM.exe
           if-no-files-found: error
           retention-days: 7
 
@@ -403,7 +403,7 @@ jobs:
           # The post-pack signing insertion point and promotion checklist are documented in
           # docs/SIGNING.md. Never reuse the upstream project's credentials or certificate.
           vpk pack --packId QuickMail --packVersion $version --packDir publish `
-            --mainExe QuickMail.exe --packTitle QuickMail --packAuthors "DinamicaTech and QuickMail contributors" `
+            --mainExe EudoraQM.exe --packTitle QuickMail --packAuthors "DinamicaTech and QuickMail contributors" `
             --shortcuts StartMenuRoot --outputDir installer/Output/Releases `
             --framework webview2 `
             --msi --instLocation PerUser `
@@ -443,7 +443,7 @@ jobs:
           $version = '${{ github.ref_name }}'.TrimStart('v')
           vpk pack --packId QuickMail --packVersion $version --packDir publish-arm64 `
             --runtime win-arm64 --channel win-arm64 `
-            --mainExe QuickMail.exe --packTitle QuickMail --packAuthors "DinamicaTech and QuickMail contributors" `
+            --mainExe EudoraQM.exe --packTitle QuickMail --packAuthors "DinamicaTech and QuickMail contributors" `
             --shortcuts StartMenuRoot --outputDir installer/Output/Releases `
             --framework webview2 `
             --msi --instLocation PerUser `
@@ -455,30 +455,38 @@ jobs:
           Write-Host "--- Velopack output (both channels) ---"
           Get-ChildItem installer/Output/Releases | Select-Object -ExpandProperty Name
 
-      # Both publish directories produce a file literally named QuickMail.exe — the one
+      # Both publish directories produce a file literally named EudoraQM.exe — the one
       # genuine filename collision between the two architectures, since this asset is
       # uploaded straight from the publish folder rather than through vpk (which suffixes
       # everything by channel). Rename the ARM64 copy so both can live in one release.
-      # The x64 asset keeps the bare QuickMail.exe name that existing links and habits
-      # depend on. A future signing step must run before this harmless ARM64 rename.
+      # The x64 asset keeps the bare EudoraQM.exe name used by current download links.
+      # A future signing step must run before this harmless ARM64 rename.
       - name: Name the ARM64 portable exe
         if: startsWith(github.ref, 'refs/tags/v')
         shell: pwsh
-        run: Rename-Item publish-arm64/QuickMail.exe QuickMail-arm64.exe
+        run: Rename-Item publish-arm64/EudoraQM.exe EudoraQM-arm64.exe
+
+      # Keep the installer asset name stable across releases. Pre-releases use a versioned
+      # release URL; once the channel is promoted to stable the website can switch to
+      # /releases/latest/download without changing the asset name.
+      - name: Name the direct-download installer
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: Rename-Item installer/Output/Releases/QuickMail-win-Setup.exe EudoraQM-Setup.exe
 
       # Create a GitHub Release when a version tag is pushed (e.g. v1.2.0)
       # Release notes are read from docs/release-notes-<tag>.md if present,
       # otherwise GitHub auto-generates notes from commits.
       #
       # Uploaded assets serve two consumers:
-      #  - people: QuickMail-<version>-win.msi (wizard installer with license acceptance)
-      #    and QuickMail.exe (portable) for x64; the -win-arm64 / -arm64 pair for ARM64
+      #  - people: EudoraQM-Setup.exe (direct-download installer),
+      #    QuickMail-<version>-win.msi (wizard installer with license acceptance), and
+      #    EudoraQM.exe (portable) for x64; the -win-arm64 / -arm64 pair for ARM64
       #  - the in-app updater: RELEASES, releases.win.json, assets.win.json and the
       #    matching -win-arm64 trio, plus the .nupkg packages (full + delta), which
       #    Velopack's GithubSource reads from the latest release.
-      # Intentionally not shipped: QuickMail-win-Setup.exe (one-click, no wizard/license)
-      # and QuickMail-win-Portable.zip (the raw single-file QuickMail.exe remains the
-      # portable download), and their ARM64 equivalents.
+      # Intentionally not shipped: QuickMail-win-Portable.zip (the raw single-file
+      # EudoraQM.exe remains the portable download) and the ARM64 Setup/Portable assets.
       #
       # The *.nupkg glob covers both channels' packages; every other Velopack path is
       # listed per channel so a missing file fails the release rather than silently
@@ -490,8 +498,9 @@ jobs:
         with:
           name: QuickMail ${{ github.ref_name }}
           files: |
-            publish/QuickMail.exe
-            publish-arm64/QuickMail-arm64.exe
+            publish/EudoraQM.exe
+            publish-arm64/EudoraQM-arm64.exe
+            installer/Output/Releases/EudoraQM-Setup.exe
             installer/Output/Releases/QuickMail-*-win.msi
             installer/Output/Releases/QuickMail-*-win-arm64.msi
             installer/Output/Releases/*.nupkg

@@ -105,13 +105,16 @@ public partial class LocalStoreService
                     ? SpecialFolderKind.Sent
                 : message.FolderName.Equals("Trash", StringComparison.OrdinalIgnoreCase)
                     ? SpecialFolderKind.Trash
+                : message.FolderName.Equals("RecoveryDeleted", StringComparison.OrdinalIgnoreCase)
+                    ? SpecialFolderKind.RecoveryDeleted
                 : message.FolderName.Equals("In", StringComparison.OrdinalIgnoreCase)
                   || message.FolderName.Equals("Inbox", StringComparison.OrdinalIgnoreCase)
                     ? SpecialFolderKind.Inbox
                 : SpecialFolderKind.None;
             folder.Parameters.AddWithValue("$kind", (int)kind);
             folder.Parameters.AddWithValue("$exclude", kind is SpecialFolderKind.Drafts
-                or SpecialFolderKind.Scheduled or SpecialFolderKind.Sent or SpecialFolderKind.Trash ? 1 : 0);
+                or SpecialFolderKind.Scheduled or SpecialFolderKind.Sent or SpecialFolderKind.Trash
+                or SpecialFolderKind.RecoveryDeleted ? 1 : 0);
             await folder.ExecuteNonQueryAsync(ct);
         }
         await EnsureNotContainerAsync(conn, tx, message.AccountId, message.FolderName, allowMissing: true, ct);

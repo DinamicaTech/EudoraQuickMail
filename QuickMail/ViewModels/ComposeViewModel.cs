@@ -656,42 +656,40 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
             _isSent = true;
             outcome = "accepted";
 
-            // Append to Sent folder (best-effort — fire and forget so it doesn't block the UI),
-            // then tell the main mailbox to synchronize/refresh its canonical Out aggregate.
-            // Previously the remote append succeeded but Sent was excluded from every cache sweep,
-            // leaving Gmail with hundreds of server Sent messages and zero local rows.
-            _ = Task.Run(async () =>
+            // Compatibility-only path (production sends through ScheduledSendService). Persist the
+            // Sent copy before consuming an existing draft so a failed append never destroys the
+            // only local copy of a successfully submitted message.
+            var sentCopySaved = false;
+            var sentCopyStarted = Stopwatch.GetTimestamp();
+            try
             {
-                var sentCopyStarted = Stopwatch.GetTimestamp();
-                var sentCopyOutcome = "failed";
-                try
-                {
-                    using var sentCts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-                    await _imap.AppendToSentAsync(account.Id, compose, sentCts.Token);
-                    sentCopyOutcome = "completed";
-                }
-                catch (Exception ex)
-                {
-                    LogService.Log("SendAsync: failed to append to Sent folder", ex);
-                }
-                finally
-                {
-                    PerformanceLogService.Record("Send background: append Sent copy",
-                        Stopwatch.GetElapsedTime(sentCopyStarted),
-                        $"{sendDetails}; outcome={sentCopyOutcome}");
-                    SentMailChanged?.Invoke(account.Id);
-                }
-            });
+                using var sentCts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+                await _imap.AppendToSentAsync(account.Id, compose, sentCts.Token);
+                sentCopySaved = true;
+            }
+            catch (Exception ex)
+            {
+                LogService.Log("SendAsync: failed to append to Sent folder", ex);
+            }
+            finally
+            {
+                PerformanceLogService.Record("Send compose: append Sent copy",
+                    Stopwatch.GetElapsedTime(sentCopyStarted),
+                    $"{sendDetails}; outcome={(sentCopySaved ? "completed" : "failed")}");
+                SentMailChanged?.Invoke(account.Id);
+            }
 
-            // Delete the draft from the server (if one was saved)
-            if (!string.IsNullOrEmpty(_draftMessageId) && _draftFolderName != null)
+            // Consume the source draft only after the Sent copy has been materialized. It must not
+            // be moved to Trash: that creates a misleading duplicate of an outgoing message there.
+            if (sentCopySaved && !string.IsNullOrEmpty(_draftMessageId) && _draftFolderName != null)
             {
                 try
                 {
                     using var delCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
                     stageStarted = Stopwatch.GetTimestamp();
-                    await _imap.MoveToTrashAsync(account.Id, _draftFolderName, _draftMessageId, delCts.Token);
-                    PerformanceLogService.Record("Send compose: move source draft to Trash",
+                    await _imap.PermanentlyDeleteBatchAsync(account.Id, _draftFolderName,
+                        [_draftMessageId], delCts.Token);
+                    PerformanceLogService.Record("Send compose: remove source draft",
                         Stopwatch.GetElapsedTime(stageStarted), sendDetails);
                 }
                 catch (Exception ex)

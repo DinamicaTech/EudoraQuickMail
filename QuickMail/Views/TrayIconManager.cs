@@ -14,13 +14,12 @@ internal sealed class TrayIconManager : IDisposable
     private readonly System.Windows.Forms.NotifyIcon _icon;
     private readonly System.Drawing.Icon _normalIcon;
     private readonly System.Drawing.Icon _newMailIcon;
-    private readonly System.IO.Stream? _newMailIconStream;
     private int _pendingNewMessages;
 
     public TrayIconManager(Action onOpen, Action onExit)
     {
         _normalIcon  = LoadAppIcon();
-        _newMailIcon = LoadNewMailIcon(_normalIcon, out _newMailIconStream);
+        _newMailIcon = LoadNewMailIcon(_normalIcon);
         _icon = new System.Windows.Forms.NotifyIcon
         {
             Text    = "Eudora QuickMail",
@@ -71,11 +70,14 @@ internal sealed class TrayIconManager : IDisposable
             ? "Eudora QuickMail — 1 new message"
             : $"Eudora QuickMail — {_pendingNewMessages:N0} new messages";
         _icon.Visible = true;
-        LogService.Debug($"Tray icon: signalled {count:N0} new message(s) for {accountLabel}.");
+        LogService.Log($"Tray icon: showing new-mail indicator for {accountLabel}; " +
+            $"received={count:N0}, pending={_pendingNewMessages:N0}.");
     }
 
     public void ClearNewMailIndicator()
     {
+        if (_pendingNewMessages > 0)
+            LogService.Log($"Tray icon: clearing new-mail indicator; pending={_pendingNewMessages:N0}.");
         _pendingNewMessages = 0;
         _icon.Icon = _normalIcon;
         _icon.Text = "Eudora QuickMail";
@@ -101,27 +103,27 @@ internal sealed class TrayIconManager : IDisposable
         return (System.Drawing.Icon)System.Drawing.SystemIcons.Application.Clone();
     }
 
-    private static System.Drawing.Icon LoadNewMailIcon(System.Drawing.Icon fallbackSource,
-        out System.IO.Stream? resourceStream)
+    private static System.Drawing.Icon LoadNewMailIcon(System.Drawing.Icon fallbackSource)
     {
-        resourceStream = null;
         try
         {
             var resource = System.Windows.Application.GetResourceStream(new Uri(
-                "pack://application:,,,/QuickMail;component/Assets/App/QuickMailReceived.ico",
+                "pack://application:,,,/EudoraQM;component/Assets/App/QuickMailReceived.ico",
                 UriKind.Absolute));
             if (resource?.Stream is { } stream)
             {
-                // System.Drawing.Icon retains its source stream, so keep the WPF resource stream
-                // alive for exactly as long as the NotifyIcon owns the icon.
-                resourceStream = stream;
-                return new System.Drawing.Icon(stream);
+                using (stream)
+                using (var received = new System.Drawing.Icon(stream, 32, 32))
+                {
+                    // Even a purpose-built icon can be almost indistinguishable at the tray's
+                    // 16-pixel size. Rasterize its 32-pixel frame and add a high-contrast badge so
+                    // the unread state remains visible on every Windows scaling/theme combination.
+                    return CreateBadgedNewMailIcon(received);
+                }
             }
         }
         catch (Exception ex)
         {
-            resourceStream?.Dispose();
-            resourceStream = null;
             LogService.Debug($"TrayIconManager: could not load received-mail icon: {ex.Message}");
         }
 
@@ -161,7 +163,6 @@ internal sealed class TrayIconManager : IDisposable
         _icon.Visible = false; // remove from the tray immediately
         _icon.Dispose();
         _newMailIcon.Dispose();
-        _newMailIconStream?.Dispose();
         _normalIcon.Dispose();
     }
 

@@ -1952,7 +1952,8 @@ public class ImapMailService : IMailService, IChangeNotifier, IConnectionProbe
     {
         var kind = GetSpecialFolderKind(attrs, fullName);
         return kind is SpecialFolderKind.Trash or SpecialFolderKind.Junk
-                    or SpecialFolderKind.Sent  or SpecialFolderKind.Drafts;
+                    or SpecialFolderKind.Sent  or SpecialFolderKind.Drafts
+                    or SpecialFolderKind.RecoveryDeleted;
     }
 
     private static SpecialFolderKind GetSpecialFolderKind(FolderAttributes attrs, string fullName)
@@ -1975,6 +1976,7 @@ public class ImapMailService : IMailService, IChangeNotifier, IConnectionProbe
             leaf.Equals("Spam",   StringComparison.OrdinalIgnoreCase)) return SpecialFolderKind.Junk;
         if (leaf.Equals("Sent",   StringComparison.OrdinalIgnoreCase)) return SpecialFolderKind.Sent;
         if (leaf.Equals("Drafts", StringComparison.OrdinalIgnoreCase)) return SpecialFolderKind.Drafts;
+        if (leaf.Equals("RecoveryDeleted", StringComparison.OrdinalIgnoreCase)) return SpecialFolderKind.RecoveryDeleted;
         if (leaf.Equals("Archive",  StringComparison.OrdinalIgnoreCase) ||
             leaf.Equals("Archived", StringComparison.OrdinalIgnoreCase)) return SpecialFolderKind.Archive;
         return SpecialFolderKind.None;

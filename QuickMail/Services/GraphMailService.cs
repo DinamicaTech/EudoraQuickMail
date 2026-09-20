@@ -560,10 +560,11 @@ public class GraphMailService : IMailService, IConnectionProbe
         "deleted items" or "trash" => SpecialFolderKind.Trash,
         "junk email" or "junk" => SpecialFolderKind.Junk,
         "archive" => SpecialFolderKind.Archive,
+        "recoverydeleted" => SpecialFolderKind.RecoveryDeleted,
         _ => SpecialFolderKind.None,
     };
 
     private static bool IsExcludedKind(SpecialFolderKind kind)
         => kind is SpecialFolderKind.Sent or SpecialFolderKind.Drafts
-            or SpecialFolderKind.Trash or SpecialFolderKind.Junk;
+            or SpecialFolderKind.Trash or SpecialFolderKind.Junk or SpecialFolderKind.RecoveryDeleted;
 }

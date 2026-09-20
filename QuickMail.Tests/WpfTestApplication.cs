@@ -50,6 +50,15 @@ internal static class WpfTestApplication
             throw new InvalidOperationException("The WPF test application could not start.", _startupError);
     }
 
+    internal static Uri ResourceUri(string relativePath)
+    {
+        var productAssembly = typeof(QuickMail.App).Assembly.GetName().Name
+            ?? throw new InvalidOperationException("The product assembly has no name.");
+        return new Uri(
+            $"pack://application:,,,/{productAssembly};component/{relativePath.TrimStart('/')}",
+            UriKind.Absolute);
+    }
+
     private static void Run()
     {
         try
@@ -60,9 +69,7 @@ internal static class WpfTestApplication
             };
             foreach (var style in new[] { "AccessibleStyles", "ThemedControls" })
             {
-                var uri = new Uri(
-                    $"pack://application:,,,/QuickMail;component/Styles/{style}.xaml",
-                    UriKind.Absolute);
+                var uri = ResourceUri($"Styles/{style}.xaml");
                 if (app.Resources.MergedDictionaries.All(d => d.Source != uri))
                     app.Resources.MergedDictionaries.Add(new ResourceDictionary { Source = uri });
             }
