@@ -155,7 +155,7 @@ sealed class StubBugReportService : IBugReportService
 {
     public Task<BugReportResult> SubmitAsync(BugReportModel report, CancellationToken cancellationToken = default) =>
         Task.FromResult(BugReportResult.Failed("stub"));
-    public string BuildFallbackUrl(BugReportModel report) => "https://github.com/DinamicaTech/QuickMail/issues/new";
+    public string BuildFallbackUrl(BugReportModel report) => "https://github.com/DinamicaTech/EudoraQuickMail/issues/new";
     public string BuildReportText(BugReportModel report) => report.WhatHappened;
 }
 

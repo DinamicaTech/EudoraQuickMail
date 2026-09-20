@@ -10,7 +10,7 @@ namespace QuickMail.Tests;
 
 sealed class FakeBugReportService : IBugReportService
 {
-    public BugReportResult NextResult = BugReportResult.Succeeded("https://github.com/DinamicaTech/QuickMail/issues/1");
+    public BugReportResult NextResult = BugReportResult.Succeeded("https://github.com/DinamicaTech/EudoraQuickMail/issues/1");
     public BugReportModel? LastSubmitted;
 
     public Task<BugReportResult> SubmitAsync(BugReportModel report, CancellationToken cancellationToken = default)
@@ -20,7 +20,7 @@ sealed class FakeBugReportService : IBugReportService
     }
 
     public string BuildFallbackUrl(BugReportModel report) =>
-        $"https://github.com/DinamicaTech/QuickMail/issues/new?title={report.Summary}";
+        $"https://github.com/DinamicaTech/EudoraQuickMail/issues/new?title={report.Summary}";
 
     public string BuildReportText(BugReportModel report) => $"BODY:{report.WhatHappened}";
 }
@@ -72,7 +72,7 @@ public class ReportBugViewModelTests : WpfTestBase
         var vm = Make(out var service);
         vm.Summary = "Something broke";
         vm.WhatHappened = "It broke.";
-        service.NextResult = BugReportResult.Succeeded("https://github.com/DinamicaTech/QuickMail/issues/42");
+        service.NextResult = BugReportResult.Succeeded("https://github.com/DinamicaTech/EudoraQuickMail/issues/42");
 
         var succeeded = false;
         vm.SendSucceeded += (_, _) => succeeded = true;
@@ -81,7 +81,7 @@ public class ReportBugViewModelTests : WpfTestBase
 
         Assert.True(vm.IsSent);
         Assert.False(vm.IsSending);
-        Assert.Equal("https://github.com/DinamicaTech/QuickMail/issues/42", vm.IssueUrl);
+        Assert.Equal("https://github.com/DinamicaTech/EudoraQuickMail/issues/42", vm.IssueUrl);
         Assert.True(succeeded);
         Assert.Equal("Close", vm.CancelButtonLabel);
     }

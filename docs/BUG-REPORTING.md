@@ -30,7 +30,7 @@ relay exists to avoid.
 ### What the app does *not* do
 
 - It never holds a GitHub credential. The relay key it ships authorises one thing: "file an
-  issue on DinamicaTech/QuickMail".
+  issue on DinamicaTech/EudoraQuickMail".
 - It never sends labels. The relay applies `bug` and `user-reported` itself, so an extracted
   relay key cannot apply arbitrary ones.
 - It never reads `quickmail.log` or any message content. Product decision, see
@@ -42,12 +42,12 @@ relay exists to avoid.
 
 | Piece | Value | Where |
 |---|---|---|
-| Relay endpoint | `https://quickmail-bug-relay.quickmail.workers.dev/report` | Cloudflare Workers |
+| Relay endpoint | `https://quickmail-bug-relay.ronald-8e0.workers.dev/report` | Cloudflare Workers |
 | GitHub App | `quickmail-bug-reporter`, App ID `4506736` | <https://github.com/settings/apps/quickmail-bug-reporter> |
 | App installation | `151714686`, scoped to this repo, Issues read/write only | <https://github.com/settings/installations> |
-| Cloudflare account | `7c86d5a72a98b9de96e24f55aaecf9af`, under kelly@kellford.com | <https://dash.cloudflare.com> |
+| Cloudflare account | `8e0ce5ea13c8c9576077373cdf7fd835`, under Ronald@dinamica.tech | <https://dash.cloudflare.com> |
 
-**Repository secrets** (<https://github.com/DinamicaTech/QuickMail/settings/secrets/actions>):
+**Repository secrets** (<https://github.com/DinamicaTech/EudoraQuickMail/settings/secrets/actions>):
 
 | Secret | Used by | For |
 |---|---|---|
@@ -92,14 +92,14 @@ That is expected, not a bug.
 Confirms the relay, the App, and the token exchange all still work. Needs the relay key:
 
 ```bash
-curl -X POST https://quickmail-bug-relay.quickmail.workers.dev/report -H "X-QuickMail-Key: PASTE_RELAY_KEY" -H "Content-Type: application/json" -d "{\"title\":\"Relay check - ignore\",\"body\":\"Close me.\"}"
+curl -X POST https://quickmail-bug-relay.ronald-8e0.workers.dev/report -H "X-QuickMail-Key: PASTE_RELAY_KEY" -H "Content-Type: application/json" -d "{\"title\":\"Relay check - ignore\",\"body\":\"Close me.\"}"
 ```
 
 Success is `{"issueUrl":"...","number":N}`. Close the issue afterwards. If `curl` fails with
 a `schannel` TLS error on Windows, that is local curl, not the relay — use PowerShell:
 
 ```powershell
-Invoke-RestMethod -Method Post -Uri "https://quickmail-bug-relay.quickmail.workers.dev/report" -Headers @{ "X-QuickMail-Key" = "PASTE_RELAY_KEY" } -ContentType "application/json" -Body '{"title":"Relay check - ignore","body":"Close me."}'
+Invoke-RestMethod -Method Post -Uri "https://quickmail-bug-relay.ronald-8e0.workers.dev/report" -Headers @{ "X-QuickMail-Key" = "PASTE_RELAY_KEY" } -ContentType "application/json" -Body '{"title":"Relay check - ignore","body":"Close me."}'
 ```
 
 ---
@@ -129,7 +129,7 @@ status-404 failure rather than this message.
 offline" from "Worker is gone":
 
 ```bash
-curl -s -o /dev/null -w "%{http_code}\n" -X POST https://quickmail-bug-relay.quickmail.workers.dev/report
+curl -s -o /dev/null -w "%{http_code}\n" -X POST https://quickmail-bug-relay.ronald-8e0.workers.dev/report
 ```
 
 `401` means the Worker is alive and rejecting an unauthenticated request — good. Anything

@@ -43,7 +43,7 @@ At <https://github.com/settings/apps/new>:
 
 - **Name**: `QuickMail Bug Reporter` (this becomes the issue author, shown as
   `quickmail-bug-reporter[bot]`)
-- **Homepage URL**: `https://github.com/DinamicaTech/QuickMail`
+- **Homepage URL**: `https://github.com/DinamicaTech/EudoraQuickMail`
 - **Webhook**: uncheck **Active**. The relay does not receive webhooks.
 - **Repository permissions** → **Issues**: **Read and write**. Leave every other permission
   at *No access*.
@@ -55,7 +55,7 @@ Create it, then from the App's settings page:
 - **Generate a private key** at the bottom. A `.pem` file downloads — this is the only copy,
   GitHub does not show it again.
 - **Install App** in the left sidebar → install on your account → **Only select
-  repositories** → `QuickMail`.
+  repositories** → `EudoraQuickMail`.
 - After installing, the browser lands on a URL ending in a number, e.g.
   `.../installations/12345678`. That number is the **installation ID**. To find it later:
   <https://github.com/settings/installations> → **Configure** beside the App → read it off
@@ -88,7 +88,7 @@ Copy the token. Like the private key, it is shown once.
 
 ### 3. Set the repository secrets
 
-At <https://github.com/DinamicaTech/QuickMail/settings/secrets/actions>:
+At <https://github.com/DinamicaTech/EudoraQuickMail/settings/secrets/actions>:
 
 | Secret | Value |
 |---|---|
@@ -145,7 +145,7 @@ the dashboard URL after `dash.cloudflare.com/`. Otherwise it is not needed.
 
 ### 5. Point the app at the relay
 
-Still at <https://github.com/DinamicaTech/QuickMail/settings/variables/actions>, add a
+Still at <https://github.com/DinamicaTech/EudoraQuickMail/settings/variables/actions>, add a
 repository **variable** (not a secret):
 
 | Variable | Value |
