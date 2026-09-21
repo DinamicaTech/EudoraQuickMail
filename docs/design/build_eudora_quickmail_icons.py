@@ -8,6 +8,17 @@ ROOT = Path(__file__).parent / "EudoraQuickMail-v2"
 MASTER_DIR = ROOT / "masters"
 PNG_DIR = ROOT / "png"
 SIZES = (16, 24, 32, 48, 64, 128, 256)
+# Small Windows icon slots benefit from optical sizing.  The paper-plane mark is
+# naturally wide and the normal 84% master padding makes it look smaller than
+# neighbouring taskbar icons.  Fill the small canvases, then progressively
+# restore the regular breathing room for larger artwork.
+OPTICAL_EXTENTS = {
+    16: 1024,
+    24: 1024,
+    32: 1024,
+    48: 1024,
+    64: 960,
+}
 
 
 def normalize_master(source: Path) -> Image.Image:
@@ -32,6 +43,33 @@ def normalize_master(source: Path) -> Image.Image:
     return canvas
 
 
+def render_icon(master: Image.Image, size: int) -> Image.Image:
+    """Render one optically sized icon frame without changing the master."""
+    if size not in OPTICAL_EXTENTS:
+        return master.resize((size, size), Image.Resampling.LANCZOS)
+
+    alpha = master.getchannel("A")
+    mask = alpha.point(lambda value: 255 if value >= 16 else 0)
+    bounds = mask.getbbox()
+    if bounds is None:
+        raise ValueError("Master contains no visible pixels")
+
+    cropped = master.crop(bounds)
+    target_extent = OPTICAL_EXTENTS[size] * size / 1024
+    scale = min(target_extent / cropped.width, target_extent / cropped.height)
+    rendered = cropped.resize(
+        (
+            max(1, round(cropped.width * scale)),
+            max(1, round(cropped.height * scale)),
+        ),
+        Image.Resampling.LANCZOS,
+    )
+    canvas = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    position = ((size - rendered.width) // 2, (size - rendered.height) // 2)
+    canvas.alpha_composite(rendered, position)
+    return canvas
+
+
 def save_icon_family(stem: str) -> dict[int, Image.Image]:
     master = normalize_master(MASTER_DIR / f"{stem}.png")
     PNG_DIR.mkdir(parents=True, exist_ok=True)
@@ -39,13 +77,14 @@ def save_icon_family(stem: str) -> dict[int, Image.Image]:
 
     rendered: dict[int, Image.Image] = {}
     for size in SIZES:
-        rendered[size] = master.resize((size, size), Image.Resampling.LANCZOS)
+        rendered[size] = render_icon(master, size)
         rendered[size].save(PNG_DIR / f"{stem}-{size}.png", optimize=True)
 
-    master.save(
+    rendered[max(SIZES)].save(
         ROOT / f"{stem}.ico",
         format="ICO",
         sizes=[(size, size) for size in SIZES if size <= 256],
+        append_images=[rendered[size] for size in SIZES[:-1]],
     )
     return rendered
 

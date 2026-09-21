@@ -10,6 +10,7 @@ using System.Threading;
 using System.Windows;
 using System.Windows.Markup;
 using System.Xml;
+using Microsoft.Data.Sqlite;
 using QuickMail.Controls;
 using QuickMail.Models;
 using QuickMail.Services;
@@ -730,6 +731,13 @@ public class LocalStoreServiceTests
         var remaining = await store.LoadFolderSummariesAsync(accountId, "Inbox");
         Assert.Equal(550, remaining.Count);
         Assert.All(remaining, m => Assert.Equal(1, int.Parse(m.MessageId) % 2));
+
+        using var conn = new SqliteConnection($"Data Source={Path.Combine(tempDir, "mail.db")};Mode=ReadOnly;");
+        conn.Open();
+        using var count = conn.CreateCommand();
+        count.CommandText = "SELECT COUNT(*) FROM LocalMessageFtsKey WHERE account_id=$aid AND folder_name='Inbox';";
+        count.Parameters.AddWithValue("$aid", accountId.ToString());
+        Assert.Equal(550L, Convert.ToInt64(count.ExecuteScalar()));
     }
 
     [Fact]

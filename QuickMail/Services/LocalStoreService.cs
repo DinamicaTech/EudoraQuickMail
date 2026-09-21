@@ -1319,8 +1319,13 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
     //           POP3/local messages, so textual searches silently omitted remote Inbox mail.
     //   7 → 8   replace the visible SHA prefix on locally received attachments with Explorer-style
     //           ordinal suffixes while retaining hashes for embedded-resource deduplication.
-    // Add new migrations as: if (version < 9) { ...; }
-    private const int CurrentSchemaVersion = 8;
+    //   8 → 9   remove orphaned, reproducible key/cache rows left by older deletion paths.
+    //           Do not physically delete old FTS documents here: token removal from a very large
+    //           FTS5 index can take minutes and would hold the splash screen for the whole repair.
+    //           Removing their ordinary key rows makes them unreachable; an explicit index rebuild
+    //           can later compact the FTS storage without delaying normal startup.
+    // Add new migrations as: if (version < 10) { ...; }
+    private const int CurrentSchemaVersion = 9;
 
     private void RunDataMigrations(SqliteConnection conn)
     {
@@ -1509,6 +1514,48 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
 
         if (version < 8)
             MigrateLegacyReceivedAttachmentNames(conn);
+
+        if (version < 9)
+        {
+            using var tx = conn.BeginTransaction();
+            using var cleanupCmd = conn.CreateCommand();
+            cleanupCmd.Transaction = tx;
+            cleanupCmd.CommandText = """
+                DELETE FROM LocalMessageFtsKey
+                 WHERE NOT EXISTS (
+                       SELECT 1 FROM MessageSummary s
+                        WHERE s.account_id=LocalMessageFtsKey.account_id
+                          AND s.folder_name=LocalMessageFtsKey.folder_name
+                          AND s.unique_id=LocalMessageFtsKey.unique_id);
+
+                DELETE FROM AttachmentContentFts
+                 WHERE rowid IN (
+                       SELECT a.fts_rowid
+                         FROM AttachmentContent a
+                        WHERE NOT EXISTS (
+                              SELECT 1 FROM MessageSummary s
+                               WHERE s.account_id=a.account_id
+                                 AND s.folder_name=a.folder_name
+                                 AND s.unique_id=a.unique_id));
+
+                DELETE FROM AttachmentContent
+                 WHERE NOT EXISTS (
+                       SELECT 1 FROM MessageSummary s
+                        WHERE s.account_id=AttachmentContent.account_id
+                          AND s.folder_name=AttachmentContent.folder_name
+                          AND s.unique_id=AttachmentContent.unique_id);
+
+                DELETE FROM ImapBodyCacheState
+                 WHERE NOT EXISTS (
+                       SELECT 1 FROM MessageSummary s
+                        WHERE s.account_id=ImapBodyCacheState.account_id
+                          AND s.folder_name=ImapBodyCacheState.folder_name
+                          AND s.unique_id=ImapBodyCacheState.unique_id);
+                """;
+            var removed = cleanupCmd.ExecuteNonQuery();
+            tx.Commit();
+            LogService.Log($"LocalStoreService: v9 orphan key/cache cleanup removed {removed} reproducible rows; FTS compaction deferred.");
+        }
 
         SetUserVersion(conn, CurrentSchemaVersion);
     }
@@ -1713,11 +1760,17 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
             // Build "$u0,$u1,..." once for this chunk.
             var placeholders = string.Join(',', Enumerable.Range(0, count).Select(i => $"$u{i}"));
             await using var cmd = conn.CreateCommand();
+            cmd.Transaction = (SqliteTransaction)tx;
             // Also clear source links in CalendarEvent for any deleted message that was
             // an invite source.  Cleared rather than deleted because the event itself
             // (the user's acceptance, the meeting time) should stay visible in the
             // calendar even after the original invite email is purged from the cache.
             cmd.CommandText =
+                $"DELETE FROM LocalMessageFts WHERE rowid IN (SELECT fts_rowid FROM LocalMessageFtsKey WHERE account_id=$aid AND folder_name=$fn AND unique_id IN ({placeholders}));" +
+                $"DELETE FROM LocalMessageFtsKey WHERE account_id=$aid AND folder_name=$fn AND unique_id IN ({placeholders});" +
+                $"DELETE FROM AttachmentContentFts WHERE rowid IN (SELECT fts_rowid FROM AttachmentContent WHERE account_id=$aid AND folder_name=$fn AND unique_id IN ({placeholders}));" +
+                $"DELETE FROM AttachmentContent WHERE account_id=$aid AND folder_name=$fn AND unique_id IN ({placeholders});" +
+                $"DELETE FROM ImapBodyCacheState WHERE account_id=$aid AND folder_name=$fn AND unique_id IN ({placeholders});" +
                 $"DELETE FROM MessageSummary WHERE account_id=$aid AND folder_name=$fn AND unique_id IN ({placeholders});" +
                 $"DELETE FROM MessageDetail  WHERE account_id=$aid AND folder_name=$fn AND unique_id IN ({placeholders});" +
                 $"UPDATE CalendarEvent SET source_message_id='', source_folder='' WHERE account_id=$aid AND source_folder=$fn AND source_message_id IN ({placeholders});";
@@ -1736,11 +1789,18 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
         await using var conn = await OpenAsync();
         await using var tx   = await conn.BeginTransactionAsync();
         await using var cmd  = conn.CreateCommand();
+        cmd.Transaction = (SqliteTransaction)tx;
         cmd.CommandText =
+            "DELETE FROM LocalMessageFts WHERE rowid IN (SELECT fts_rowid FROM LocalMessageFtsKey WHERE account_id = $aid);" +
+            "DELETE FROM LocalMessageFtsKey WHERE account_id = $aid;" +
+            "DELETE FROM AttachmentContentFts WHERE rowid IN (SELECT fts_rowid FROM AttachmentContent WHERE account_id = $aid);" +
+            "DELETE FROM AttachmentContent WHERE account_id = $aid;" +
+            "DELETE FROM ImapBodyCacheState WHERE account_id = $aid;" +
             "DELETE FROM MessageDetail  WHERE account_id = $aid;" +
             "DELETE FROM MessageSummary WHERE account_id = $aid;" +
             "DELETE FROM CalendarEvent  WHERE account_id = $aid;" +
-            "DELETE FROM Folder         WHERE account_id = $aid;";
+            "DELETE FROM Folder         WHERE account_id = $aid;" +
+            "DELETE FROM DeltaToken     WHERE account_id = $aid;";
         cmd.Parameters.AddWithValue("$aid", accountId.ToString());
         await cmd.ExecuteNonQueryAsync();
         await tx.CommitAsync();
@@ -1762,7 +1822,13 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
         foreach (var id in ids)
         {
             await using var cmd = conn.CreateCommand();
+            cmd.Transaction = (SqliteTransaction)tx;
             cmd.CommandText =
+                "DELETE FROM LocalMessageFts WHERE rowid IN (SELECT fts_rowid FROM LocalMessageFtsKey WHERE account_id = $aid);" +
+                "DELETE FROM LocalMessageFtsKey WHERE account_id = $aid;" +
+                "DELETE FROM AttachmentContentFts WHERE rowid IN (SELECT fts_rowid FROM AttachmentContent WHERE account_id = $aid);" +
+                "DELETE FROM AttachmentContent WHERE account_id = $aid;" +
+                "DELETE FROM ImapBodyCacheState WHERE account_id = $aid;" +
                 "DELETE FROM MessageDetail  WHERE account_id = $aid;" +
                 "DELETE FROM MessageSummary WHERE account_id = $aid;" +
                 "DELETE FROM DeltaToken     WHERE account_id = $aid;";
