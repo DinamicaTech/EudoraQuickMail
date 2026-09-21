@@ -41,6 +41,7 @@ currently available in the upstream repository.
 | Product focus | Modern, accessible, keyboard-first Windows email client | Local-first client and practical Eudora successor for large historical archives |
 | Protocols | Multiple IMAP/SMTP accounts and supported services | Retains IMAP/SMTP and adds local accounts with safe destructive POP3 retrieval and SMTP delivery |
 | Data authority | The IMAP server is the primary authority and SQLite acts as a cache | The local SQLite store can be the primary authority; mail remains available offline |
+| Attachment persistence | Attachment handling follows the server/cache model, without a dedicated independent on-disk attachment corpus | Locally retained received, embedded, and migrated attachments are materialized as independent files below the profile's `Attachments` tree; SQLite keeps their references and metadata |
 | Eudora migration | No dedicated migration tool | Guided migration of Eudora mailboxes, hierarchies, accounts, filters, headers, HTML, and attachments |
 | Upgrade from QuickMail | Uses its existing profile directly | Creates a validated, independent copy of a QuickMail profile and opens it offline for review |
 | Organization | Unified inbox, account and folder trees, and conversations | Canonical folder tree shared by accounts, aggregate roots, and local system folders |
@@ -184,6 +185,15 @@ Composition is designed for intensive, multilingual use.
 
 ### 8. Reading, export, and attachment handling
 
+- Locally retained received, embedded, and migrated attachments are stored as ordinary independent
+  files below the profile's `Attachments` directory rather than being usable only as binary content
+  inside the SQLite database. The database records their paths and metadata.
+- This separation makes the attachment corpus easier to inspect, back up, recover, and maintain
+  with normal file tools, while also preventing large attachment payloads from unnecessarily
+  inflating the primary mail database.
+- Received POP3 attachments are organized into predictable category and year folders. Existing
+  outgoing source files can remain referenced, and Eudora imports respect the user's selected
+  keep, copy, or move strategy.
 - The preview can be detached to a second monitor and configured to follow the main selection.
 - One or more messages can be exported as EML or HTML, their original headers can be copied, and
   their source can be inspected.
