@@ -43,8 +43,8 @@ relay exists to avoid.
 | Piece | Value | Where |
 |---|---|---|
 | Relay endpoint | `https://quickmail-bug-relay.ronald-8e0.workers.dev/report` | Cloudflare Workers |
-| GitHub App | `quickmail-bug-reporter`, App ID `4506736` | <https://github.com/settings/apps/quickmail-bug-reporter> |
-| App installation | `151714686`, scoped to this repo, Issues read/write only | <https://github.com/settings/installations> |
+| GitHub App | `eudoraqm-bug-reporter`, App ID `5016050` | <https://github.com/settings/apps/eudoraqm-bug-reporter> |
+| App installation | `163376210`, scoped to this repo, Issues read/write only | <https://github.com/settings/installations> |
 | Cloudflare account | `8e0ce5ea13c8c9576077373cdf7fd835`, under Ronald@dinamica.tech | <https://dash.cloudflare.com> |
 
 **Repository secrets** (<https://github.com/DinamicaTech/EudoraQuickMail/settings/secrets/actions>):
@@ -171,7 +171,7 @@ What the underlying GitHub status usually means:
 | 403 | the App's Issues permission was reduced below Read and write |
 
 Verify the App is still installed with Issues read/write:
-<https://github.com/settings/installations> → **Configure** beside QuickMail Bug Reporter.
+<https://github.com/settings/installations> → **Configure** beside EudoraQM Bug Reporter.
 
 **If the private key is the problem, do not regenerate it casually** — generating a new key at
 GitHub does not revoke the old one, but you must then push the new one through
@@ -205,7 +205,7 @@ shows in the Worker log.
 
 ## F. Issues attributed to the maintainer
 
-The relay always authors as `app/quickmail-bug-reporter`. An issue authored by **kellylford**
+The relay always authors as `app/eudoraqm-bug-reporter`. An issue authored by **kellylford**
 came from a build that predates the relay and is still using the embedded PAT.
 
 That is expected until users update, and it is why `BUG_REPORT_TOKEN` must stay valid for now.

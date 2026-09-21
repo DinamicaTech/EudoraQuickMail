@@ -41,8 +41,8 @@ node relay/test/jwt.test.js
 
 At <https://github.com/settings/apps/new>:
 
-- **Name**: `QuickMail Bug Reporter` (this becomes the issue author, shown as
-  `quickmail-bug-reporter[bot]`)
+- **Name**: `EudoraQM Bug Reporter` (this becomes the issue author, shown as
+  `eudoraqm-bug-reporter[bot]`)
 - **Homepage URL**: `https://github.com/DinamicaTech/EudoraQuickMail`
 - **Webhook**: uncheck **Active**. The relay does not receive webhooks.
 - **Repository permissions** → **Issues**: **Read and write**. Leave every other permission
@@ -71,7 +71,7 @@ Token** → **Get started**, which is at the *top* of that page, above the templ
 use the **Edit Cloudflare Workers** template: it grants a spread of Workers-adjacent
 permissions and a zone-scoped one, and there is no zone here to scope it to.
 
-- **Token name**: `QuickMail relay deploy`
+- **Token name**: `EudoraQM relay deploy`
 - **Permissions**, two rows:
   - `Account` / `Workers Scripts` / **Edit** — uploads the Worker and sets its secrets
   - `Account` / `Account Settings` / **Read** — lets wrangler resolve which account to deploy to
@@ -122,8 +122,8 @@ Register it at `https://dash.cloudflare.com/<account id>/workers/subdomain`. **N
 `/workers/onboarding` URL wrangler prints in that error; that page 404s.
 
 The name is lowercase letters, digits and hyphens, globally unique across Cloudflare, and
-permanent — it becomes part of the public relay address. This account uses `quickmail`, so
-the Worker lives at `https://quickmail-bug-relay.quickmail.workers.dev`.
+permanent — it becomes part of the public relay address. This account uses `ronald-8e0`, so
+the Worker lives at `https://quickmail-bug-relay.ronald-8e0.workers.dev`.
 
 ### 4. Deploy
 
@@ -162,7 +162,7 @@ curl -X POST https://quickmail-bug-relay.<your-subdomain>.workers.dev/report -H 
 ```
 
 Success returns `{"issueUrl":"...","number":N}`, and the issue is authored by
-`quickmail-bug-reporter[bot]` rather than by you — that authorship is the whole point, so it
+`eudoraqm-bug-reporter[bot]` rather than by you — that authorship is the whole point, so it
 is worth confirming. Close the issue afterwards.
 
 Failures worth recognising:
