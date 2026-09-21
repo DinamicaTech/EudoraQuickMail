@@ -7,9 +7,10 @@ public partial class FirstRunWelcomeWindow : Window
 {
     private readonly bool _importOnly;
     private readonly List<string> _selectedSources = [];
-    public enum WelcomeChoice { None, CreateAccount, ImportEudora }
+    public enum WelcomeChoice { None, CreateAccount, ImportEudora, ImportQuickMail }
 
     public WelcomeChoice Choice { get; private set; }
+    public string ImportedQuickMailProfile { get; private set; } = string.Empty;
     public IReadOnlyList<string> SelectedSources => _selectedSources;
     public bool IsSelectiveImport => _selectedSources.Count > 0 &&
         !_selectedSources[0].EndsWith("Eudora.exe", StringComparison.OrdinalIgnoreCase);
@@ -36,6 +37,7 @@ public partial class FirstRunWelcomeWindow : Window
             HeadingText.Text = "Import from Eudora";
             IntroductionText.Text = "Import Eudora accounts, folders, messages, filters and referenced attachments. Eudora should be closed during the import.";
             WithoutEudoraButton.Content = "Cancel";
+            ImportQuickMailButton.Visibility = Visibility.Collapsed;
         }
     }
 
@@ -117,6 +119,15 @@ public partial class FirstRunWelcomeWindow : Window
             return;
         }
         Choice = WelcomeChoice.CreateAccount;
+        DialogResult = true;
+    }
+
+    private void ImportQuickMail_Click(object sender, RoutedEventArgs e)
+    {
+        var importer = new QuickMailProfileImportWindow(DataFolder) { Owner = this };
+        if (importer.ShowDialog() != true || !importer.ImportCompleted) return;
+        ImportedQuickMailProfile = importer.ImportedProfile;
+        Choice = WelcomeChoice.ImportQuickMail;
         DialogResult = true;
     }
 

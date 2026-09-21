@@ -9200,6 +9200,22 @@ public partial class MainWindow : Window
         Application.Current.Shutdown();
     }
 
+    private void MenuImportQuickMailProfile_Click(object sender, RoutedEventArgs e)
+    {
+        var documents = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+        var destination = Path.Combine(documents, "Eudora QuickMail - Imported");
+        var wizard = new QuickMailProfileImportWindow(destination) { Owner = this };
+        if (wizard.ShowDialog() != true || !wizard.ImportCompleted) return;
+
+        if (!App.TryLaunchProfile(wizard.ImportedProfile, out var error))
+        {
+            MessageBox.Show(this, error, "Open Imported Profile",
+                MessageBoxButton.OK, MessageBoxImage.Error);
+            return;
+        }
+        Application.Current.Shutdown();
+    }
+
     private async void MenuUpdateAttachmentIndex_Click(object sender, RoutedEventArgs e)
     {
         if (_localStore is not LocalStoreService localStore) { _vm.StatusText = "Attachment indexing is unavailable."; return; }

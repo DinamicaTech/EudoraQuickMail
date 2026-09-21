@@ -74,11 +74,14 @@
         </GroupBox>
 
         <Grid Grid.Row="5">
-            <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+            <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
             <Button x:Name="WithoutEudoraButton" Grid.Column="1" Margin="0,0,8,0" Padding="18,7"
-                    Content="Skip Eudora import (you can run it later from the Tools menu)"
+                    Content="Start fresh"
+                    ToolTip="Create a new account now. Both import options remain available later from the File menu."
                     Click="WithoutEudora_Click"/>
-            <Button Grid.Column="2" Padding="18,7" Content="Import Eudora" IsDefault="True" Click="Import_Click"/>
+            <Button x:Name="ImportQuickMailButton" Grid.Column="2" Margin="0,0,8,0" Padding="18,7"
+                    Content="Import QuickMail…" Click="ImportQuickMail_Click"/>
+            <Button Grid.Column="3" Padding="18,7" Content="Import Eudora" IsDefault="True" Click="Import_Click"/>
         </Grid>
     </Grid>
 </Window>

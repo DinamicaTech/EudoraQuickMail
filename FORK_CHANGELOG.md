@@ -10,6 +10,11 @@ before a public release.
 
 ## Unreleased
 
+- Added a first-run and File-menu QuickMail profile importer. It snapshots `mail.db` through
+  SQLite's backup API (including WAL state), validates the source schema and database integrity,
+  copies supported profile data into an independent destination, preserves locally stored POP3
+  MIME/attachment bytes and remote attachment metadata, and starts the imported profile offline by
+  default. The source profile is never modified and a running QuickMail instance is rejected.
 - Added message Snooze as a visible unified system folder. Snoozed mail is hidden from its
   original folder but remains searchable; at the selected preset or custom local date/time it
   returns to that folder as unread. The local metadata works for POP/archive and IMAP accounts.

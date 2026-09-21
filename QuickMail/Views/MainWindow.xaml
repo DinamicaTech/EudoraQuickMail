@@ -368,6 +368,9 @@
                 <Separator/>
                 <MenuItem Header="_Manage Accounts…"
                           Command="{Binding ManageAccountsCommand}"/>
+                <MenuItem Header="Import _QuickMail Profile…"
+                          AutomationProperties.Name="Import QuickMail Profile"
+                          Click="MenuImportQuickMailProfile_Click"/>
                 <MenuItem Header="_Import from Eudora…"
                           Click="MenuImportEudora_Click"/>
                 <Separator/>

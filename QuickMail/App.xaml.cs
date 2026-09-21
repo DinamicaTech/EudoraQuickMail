@@ -1,5 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Diagnostics;
+using System.IO;
 using System.Threading.Tasks;
 using System.Windows;
 using QuickMail.Helpers;
@@ -345,10 +346,30 @@ public partial class App : Application
                 return;
             }
 
-            ApplyFirstRunDefaults(profile);
-            openAccountCreationAfterStartup = true;
-            _startupSplash?.Show();
-            _startupSplash?.SetStatus("Opening the local mail database…");
+            if (welcome.Choice == Views.FirstRunWelcomeWindow.WelcomeChoice.ImportQuickMail)
+            {
+                var imported = Path.GetFullPath(welcome.ImportedQuickMailProfile);
+                var active = Path.GetFullPath(profile.ProfileDir);
+                if (!string.Equals(imported.TrimEnd(Path.DirectorySeparatorChar),
+                        active.TrimEnd(Path.DirectorySeparatorChar), StringComparison.OrdinalIgnoreCase))
+                {
+                    if (!TryLaunchProfile(imported, out var launchError))
+                        MessageBox.Show(launchError, "Open Imported Profile",
+                            MessageBoxButton.OK, MessageBoxImage.Error);
+                    Shutdown();
+                    return;
+                }
+
+                _startupSplash?.Show();
+                _startupSplash?.SetStatus("Opening the imported QuickMail profile…");
+            }
+            else
+            {
+                ApplyFirstRunDefaults(profile);
+                openAccountCreationAfterStartup = true;
+                _startupSplash?.Show();
+                _startupSplash?.SetStatus("Opening the local mail database…");
+            }
         }
 
         var onlineMode = e.Args.Contains("--online", StringComparer.OrdinalIgnoreCase);
@@ -1036,6 +1057,27 @@ public partial class App : Application
         }
         Current.Shutdown();
         return true;
+    }
+
+    internal static bool TryLaunchProfile(string profileDirectory, out string? error)
+    {
+        try
+        {
+            var executable = Environment.ProcessPath;
+            if (string.IsNullOrWhiteSpace(executable))
+                throw new InvalidOperationException("The current executable path is unavailable.");
+            var start = new System.Diagnostics.ProcessStartInfo(executable) { UseShellExecute = true };
+            start.ArgumentList.Add("--profileDir");
+            start.ArgumentList.Add(Path.GetFullPath(profileDirectory));
+            System.Diagnostics.Process.Start(start);
+            error = null;
+            return true;
+        }
+        catch (Exception ex)
+        {
+            error = $"The profile was imported successfully, but Eudora QuickMail could not open it: {ex.Message}";
+            return false;
+        }
     }
 
     private static void ShowProfileError(string dir, string reason)
