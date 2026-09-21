@@ -16,6 +16,10 @@ keyboard-driven workspace.
 [User guide](USERGUIDE.md) ·
 [Report a problem](https://github.com/DinamicaTech/EudoraQuickMail/issues)
 
+> [!TIP]
+> **What does Eudora QuickMail add to the original QuickMail project?**<br>
+> [Explore the improvements and see which users benefit most →](docs/EUDORA-QUICKMAIL-VS-QUICKMAIL.md)
+
 > **Project status:** active development. QuickMail is already used with real mail archives,
 > but it has not yet reached a stable 1.0 release. Back up important data and review the
 > release notes before upgrading.
@@ -31,6 +35,7 @@ classic Eudora distinctive with current Windows integration and modern mail serv
 | | Capability |
 |---|---|
 | **Mail, brought together** | Multiple IMAP, SMTP, POP3 and Microsoft Graph accounts; unified views; conversation threading; shared mailboxes; safe move, copy, archive, delete and restore workflows. |
+| **Migration without starting over** | Guided import from classic Eudora installations and safe, independent cloning of existing QuickMail profiles. |
 | **Fast local search** | SQLite-backed local storage, near-instant search across large archives, saved views and full-text search inside supported attachments. |
 | **Calendar in context** | Local calendars and Google Calendar integration; day, week and month views; event editing; ICS invitation detection and RSVP controls. |
 | **People and organization** | Local address book and groups, optional Google and Microsoft contact sync, iCloud support, rules with real-message preview and recipient discovery. |
@@ -51,11 +56,21 @@ It does not require a Dinámica Ingeniería cloud account.
 See the [privacy policy](https://www.dinamica.tech/privacy) for the complete description of
 data handling.
 
-## Bring your Eudora history forward
+## Bring your existing mail forward
 
-The included Eudora importer provides a dedicated migration path for classic mailboxes,
-folders, messages and attachments. Large archives are processed with visible progress,
-recovery safeguards and a local data model designed to preserve message identity.
+Eudora QuickMail includes dedicated migration paths for both classic **Eudora** installations
+and profiles created by the original **QuickMail** project.
+
+- **From Eudora:** import mailboxes, folder hierarchies, messages, accounts, supported filters and
+  referenced attachments. Large archives are processed with visible progress, recovery safeguards
+  and a local data model designed to preserve message identity.
+- **From QuickMail:** choose **Import QuickMail…** during first run, or use
+  **File → Import QuickMail Profile…** later. Eudora QuickMail creates an independent, validated
+  copy of the profile and starts it offline for review; the original profile is never modified.
+
+See the [user guide](USERGUIDE.md#migrating-existing-mail) for migration instructions and
+[the comparison with the original QuickMail](docs/EUDORA-QUICKMAIL-VS-QUICKMAIL.md) for the
+capabilities added by this fork.
 
 The name reflects both sides of the project: **Eudora** honours the application and workflow
 that inspired it, while **QuickMail** credits the open-source project on which this fork was
@@ -174,6 +189,7 @@ QuickMail/
 
 ## Documentation
 
+- [`docs/EUDORA-QUICKMAIL-VS-QUICKMAIL.md`](docs/EUDORA-QUICKMAIL-VS-QUICKMAIL.md) — what this fork adds to the original QuickMail
 - [`USERGUIDE.md`](USERGUIDE.md) — complete user guide
 - [`FORK_CHANGELOG.md`](FORK_CHANGELOG.md) — history of this fork
 - [`CHANGELOG.md`](CHANGELOG.md) — project changelog

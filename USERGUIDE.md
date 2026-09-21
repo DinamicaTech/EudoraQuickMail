@@ -7,6 +7,7 @@ QuickMail is a desktop email client for Windows. It supports multiple IMAP/SMTP 
 ## Contents
 
 - [Installing QuickMail](#installing-quickmail)
+- [Migrating existing mail](#migrating-existing-mail)
 - [Layout](#layout)
 - [Menu bar](#menu-bar)
 - [Connecting accounts](#connecting-accounts)
@@ -48,6 +49,44 @@ Two download options are available from the [Releases page](https://github.com/D
 | **`EudoraQM.exe`** — standalone portable executable | No installation required. Copy it anywhere and run it directly. |
 
 Both downloads include the .NET 8 runtime — you do not need to install .NET separately.
+
+## Migrating existing mail
+
+Eudora QuickMail supports two migration paths. Both leave the source data unchanged so that you can
+verify the imported profile before relying on it.
+
+### Migrating from Eudora
+
+Choose **Import Eudora** during first run, or **File → Import from Eudora…** later. The guided
+import can migrate a complete Eudora installation or selected mailbox files, including mailbox
+hierarchies, messages, accounts, supported filters and referenced attachments. Close Eudora before
+starting the import. For a large archive, keep the original Eudora folder as a backup until you
+have reviewed message counts, folders and attachments in Eudora QuickMail.
+
+### Migrating from QuickMail
+
+On first run, choose **Import QuickMail…** to create an independent Eudora QuickMail profile from
+an existing QuickMail profile. You can run the same operation later from
+**File → Import QuickMail Profile…**.
+
+Close QuickMail before starting. The importer normally detects its default profile at
+`%AppData%\QuickMail`; use **Browse** if QuickMail was started with a custom `--profileDir`.
+Select a new or otherwise unused folder as the Eudora QuickMail destination. The source profile is
+read-only and is never upgraded or changed.
+
+The import preserves cached messages and bodies, account definitions, contacts, groups, rules,
+views, templates, flags, shortcuts, custom themes and locally managed attachments. Recent POP3
+messages retain their stored original MIME data and attachments. IMAP and Microsoft 365 attachment
+metadata is retained, while attachment content that was not cached by QuickMail remains available
+from the mail server.
+
+The imported profile starts in **Work Offline** mode by default. Review its accounts and folders,
+then turn off **Tools → Work Offline** when you are ready to send or receive mail. Passwords and
+OAuth tokens remain in Windows Credential Manager; they can normally be reused on the same Windows
+account, but a profile moved to another computer may require authentication again.
+
+For a feature-by-feature overview, see
+[Eudora QuickMail compared with the original QuickMail project](docs/EUDORA-QUICKMAIL-VS-QUICKMAIL.md).
 
 ### WebView2 Runtime
 
