@@ -10,4 +10,8 @@ This is a non-destructive icon proposal derived from the blue paper-airplane/env
 - `masters/`: unmodified generated source images.
 - `preview-contact-sheet.png`: light/dark and small-size visual check.
 
-The current production icons under `QuickMail/Assets/App/` have not been changed.
+The 16, 24, 32, and 48 px frames use edge-to-edge optical sizing so the wide
+paper-plane mark has the same perceived taskbar weight as neighbouring icons.
+Larger frames progressively restore the original presentation-image padding.
+
+The production icons under `QuickMail/Assets/App/` are synchronized from this set.

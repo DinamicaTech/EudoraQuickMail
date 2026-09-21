@@ -11,7 +11,7 @@ brings multiple accounts, large mail archives, calendars and contacts into one f
 keyboard-driven workspace.
 
 [Product website](https://www.dinamica.tech/eudoraquickmail) ·
-[Download for Windows](https://github.com/DinamicaTech/EudoraQuickMail/releases/download/v0.8.72/EudoraQM-Setup.exe) ·
+[Download for Windows](https://github.com/DinamicaTech/EudoraQuickMail/releases/latest/download/EudoraQM-Setup.exe) ·
 [All release files](https://github.com/DinamicaTech/EudoraQuickMail/releases/latest) ·
 [User guide](USERGUIDE.md) ·
 [Report a problem](https://github.com/DinamicaTech/EudoraQuickMail/issues)
@@ -80,15 +80,14 @@ built and describes its goal—making serious email work remarkably fast.
 
 Release installers are published on the
 [GitHub Releases page](https://github.com/DinamicaTech/EudoraQuickMail/releases). For most PCs, use the
-[direct Windows installer](https://github.com/DinamicaTech/EudoraQuickMail/releases/download/v0.8.72/EudoraQM-Setup.exe).
+[direct Windows installer](https://github.com/DinamicaTech/EudoraQuickMail/releases/latest/download/EudoraQM-Setup.exe).
 Choose the Windows
 x64 package for most PCs or the ARM64 package for native Windows on ARM. Portable executables
 are also provided.
 
-> The first DinamicaTech build is published as a **pre-release** and is temporarily unsigned
-> while the project onboards to SignPath Foundation. Windows may therefore show an
-> "Unknown publisher" warning. It will not be promoted to a stable release until project-owned
-> signing is in place.
+> Current builds are temporarily unsigned while the project completes onboarding to SignPath
+> Foundation. Windows may therefore show an "Unknown publisher" warning. The permanent installer
+> link above always follows the latest promoted release.
 
 ## Code signing policy
 

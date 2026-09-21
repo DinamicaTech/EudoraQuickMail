@@ -45,7 +45,7 @@ Two download options are available from the [Releases page](https://github.com/D
 
 | Download | When to use |
 |----------|-------------|
-| **`quickmail-vX.X.X-setup.exe`** — Windows installer | Recommended for most users. Installs per-user with no elevation required and registers an uninstaller in Windows Settings. |
+| **`EudoraQM-Setup.exe`** — Windows installer | Recommended for most users. Installs Eudora QuickMail and registers an uninstaller in Windows Settings. The permanent download link always follows the latest promoted release. |
 | **`EudoraQM.exe`** — standalone portable executable | No installation required. Copy it anywhere and run it directly. |
 
 Both downloads include the .NET 8 runtime — you do not need to install .NET separately.

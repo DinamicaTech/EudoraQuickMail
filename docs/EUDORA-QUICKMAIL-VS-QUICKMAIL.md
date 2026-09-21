@@ -28,7 +28,7 @@ local archive can be the primary source of truth instead of serving only as an I
 This comparison uses QuickMail commit
 [`deb82e8`](https://github.com/kellylford/QuickMail/commit/deb82e88aa80cdca9e2f087a345c727c9b3ab9f9),
 identified by the project as the fork baseline. It describes Eudora QuickMail through version
-**0.8.72**, together with several capabilities already documented for the following release.
+**0.8.73**.
 
 QuickMail may continue to evolve independently. In this document, “the original project” means
 **the specific baseline from which this fork was created**, not necessarily the latest version

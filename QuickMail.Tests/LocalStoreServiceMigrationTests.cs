@@ -106,6 +106,15 @@ public class LocalStoreServiceMigrationTests
         return cmd.ExecuteScalar() != null;
     }
 
+    private static long ScalarLong(string dbPath, string sql)
+    {
+        using var conn = new SqliteConnection($"Data Source={dbPath};Mode=ReadOnly;");
+        conn.Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = sql;
+        return Convert.ToInt64(cmd.ExecuteScalar() ?? 0);
+    }
+
     private static string ColumnType(string dbPath, string table, string column)
     {
         using var conn = new SqliteConnection($"Data Source={dbPath};Mode=ReadOnly;");
@@ -146,6 +155,9 @@ public class LocalStoreServiceMigrationTests
         Assert.Single(await store.LoadFolderSummariesAsync(imap, "Inbox"));   // IMAP summary survives
         Assert.NotNull(await store.LoadDetailAsync(imap, "Inbox", "i1"));     // IMAP body survives (finding 3)
         Assert.Contains(await store.LoadCalendarEventsAsync(), e => e.Uid == "evt1"); // calendar survives the clear (finding 3)
+        var dbPath = Path.Combine(dir, "mail.db");
+        Assert.Equal(0, ScalarLong(dbPath, $"SELECT COUNT(*) FROM LocalMessageFtsKey WHERE account_id='{graph}';"));
+        Assert.Equal(1, ScalarLong(dbPath, $"SELECT COUNT(*) FROM LocalMessageFtsKey WHERE account_id='{imap}';"));
     }
 
     [Fact]
@@ -203,7 +215,7 @@ public class LocalStoreServiceMigrationTests
         store.Initialize();
 
         Assert.True(File.Exists(dbPath + ".pre-v2"), "pre-v2 backup should be created");
-        Assert.Equal(8, ReadUserVersion(dbPath));
+        Assert.Equal(9, ReadUserVersion(dbPath));
         Assert.True(TableExists(dbPath, "DeltaToken"), "DeltaToken table should exist after migration");
         Assert.True(TableExists(dbPath, "CalendarEvent"), "CalendarEvent table should exist after migration");
     }
@@ -239,7 +251,7 @@ public class LocalStoreServiceMigrationTests
         store.Initialize();
 
         Assert.False(File.Exists(dbPath + ".pre-v2"), "fresh DB must not produce a backup");
-        Assert.Equal(8, ReadUserVersion(dbPath));
+        Assert.Equal(9, ReadUserVersion(dbPath));
         Assert.True(TableExists(dbPath, "DeltaToken"));
         Assert.True(TableExists(dbPath, "CalendarEvent"));
         Assert.Equal("TEXT", ColumnType(dbPath, "MessageSummary", "unique_id"));
@@ -319,8 +331,63 @@ public class LocalStoreServiceMigrationTests
         var result = await store.SearchLocalMessagesAsync(new LocalSearchQuery("fork",
             FolderScopes: [new LocalFolderScope(accountId, "INBOX")]), TestContext.Current.CancellationToken);
 
-        Assert.Equal(8, ReadUserVersion(dbPath));
+        Assert.Equal(9, ReadUserVersion(dbPath));
         Assert.Equal("imap-existing", Assert.Single(result.Messages).MessageId);
+    }
+
+    [Fact]
+    public async Task V9RemovesOrphanedKeysAndCaches_WithoutRebuildingLargeFtsIndex()
+    {
+        var dir = NewTempDir();
+        var dbPath = Path.Combine(dir, "mail.db");
+        var accountId = Guid.NewGuid();
+        var store = new LocalStoreService(new ProfileContext(dir));
+        store.Initialize();
+        await store.UpsertSummariesAsync([new MailMessageSummary
+        {
+            MessageId = "valid", AccountId = accountId, FolderName = "In",
+            Subject = "Keep me", Date = DateTimeOffset.UtcNow,
+        }]);
+
+        using (var conn = new SqliteConnection($"Data Source={dbPath}"))
+        {
+            conn.Open();
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = """
+                INSERT INTO LocalMessageFts(account_id,unique_id,folder_name,subject)
+                VALUES('orphan-account','orphan','In','discard indexed message');
+                INSERT INTO LocalMessageFtsKey(account_id,unique_id,folder_name,fts_rowid)
+                VALUES('orphan-account','orphan','In',last_insert_rowid());
+
+                INSERT INTO LocalMessageFts(account_id,unique_id,folder_name,subject)
+                VALUES('unkeyed-account','unkeyed','In','discard unkeyed row');
+
+                INSERT INTO AttachmentContentFts(attachment_name,entry_path,content_text)
+                VALUES('orphan.pdf','','discard attachment text');
+                INSERT INTO AttachmentContent(account_id,unique_id,folder_name,attachment_name,fts_rowid)
+                VALUES('orphan-account','orphan','In','orphan.pdf',last_insert_rowid());
+
+                INSERT INTO AttachmentContentFts(attachment_name,entry_path,content_text)
+                VALUES('unlinked.pdf','','discard unlinked attachment text');
+
+                INSERT INTO ImapBodyCacheState(unique_id,account_id,folder_name,status)
+                VALUES('orphan','orphan-account','INBOX',1);
+                PRAGMA user_version = 8;
+                """;
+            cmd.ExecuteNonQuery();
+        }
+
+        store.Initialize();
+
+        Assert.Equal(9, ReadUserVersion(dbPath));
+        Assert.Equal(1, ScalarLong(dbPath, "SELECT COUNT(*) FROM MessageSummary;"));
+        Assert.Equal(1, ScalarLong(dbPath, "SELECT COUNT(*) FROM LocalMessageFtsKey;"));
+        // Old FTS documents are deliberately left for an explicit rebuild: removing their key
+        // makes them unreachable without making startup retokenize a multi-gigabyte index.
+        Assert.Equal(3, ScalarLong(dbPath, "SELECT COUNT(*) FROM LocalMessageFts;"));
+        Assert.Equal(0, ScalarLong(dbPath, "SELECT COUNT(*) FROM AttachmentContent;"));
+        Assert.Equal(1, ScalarLong(dbPath, "SELECT COUNT(*) FROM AttachmentContentFts;"));
+        Assert.Equal(0, ScalarLong(dbPath, "SELECT COUNT(*) FROM ImapBodyCacheState;"));
     }
 
     [Fact]
