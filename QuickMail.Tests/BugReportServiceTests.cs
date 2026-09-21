@@ -69,7 +69,7 @@ public class BugReportServiceTests
     private static HttpResponseMessage IssueCreated(int number = 999) => new(HttpStatusCode.Created)
     {
         Content = new StringContent(
-            $"{{\"issueUrl\":\"https://github.com/DinamicaTech/QuickMail/issues/{number}\",\"number\":{number}}}"),
+            $"{{\"issueUrl\":\"https://github.com/DinamicaTech/EudoraQuickMail/issues/{number}\",\"number\":{number}}}"),
     };
 
     [Theory]
@@ -99,7 +99,7 @@ public class BugReportServiceTests
         var result = await service.SubmitAsync(SampleReport());
 
         Assert.True(result.Success);
-        Assert.Equal("https://github.com/DinamicaTech/QuickMail/issues/999", result.IssueUrl);
+        Assert.Equal("https://github.com/DinamicaTech/EudoraQuickMail/issues/999", result.IssueUrl);
         Assert.Equal(HttpMethod.Post, handler.LastRequest!.Method);
         Assert.Equal(RelayUrl, handler.LastRequest!.RequestUri!.ToString());
         Assert.Equal("relay-key", Assert.Single(handler.LastRequest!.Headers.GetValues("X-QuickMail-Key")));
@@ -176,7 +176,7 @@ public class BugReportServiceTests
 
         var url = service.BuildFallbackUrl(report);
 
-        Assert.StartsWith("https://github.com/DinamicaTech/QuickMail/issues/new?", url);
+        Assert.StartsWith("https://github.com/DinamicaTech/EudoraQuickMail/issues/new?", url);
         Assert.DoesNotContain("\"", url);
         Assert.DoesNotContain("\n", url);
     }

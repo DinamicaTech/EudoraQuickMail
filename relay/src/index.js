@@ -15,7 +15,7 @@
  */
 
 const REPO_OWNER = 'DinamicaTech';
-const REPO_NAME = 'QuickMail';
+const REPO_NAME = 'EudoraQuickMail';
 const USER_AGENT = 'QuickMail-BugReport-Relay';
 const ISSUE_LABELS = ['bug', 'user-reported'];
 

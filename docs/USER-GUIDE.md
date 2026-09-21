@@ -58,7 +58,7 @@ The two versions are otherwise identical: same features, same settings, same dat
 
 ### Installing for the first time
 
-1. Download **QuickMail-win.msi** — or **QuickMail-win-arm64.msi** for a Snapdragon PC, as described above — from the [releases page](https://github.com/DinamicaTech/QuickMail/releases) and run it.
+1. Download **QuickMail-win.msi** — or **QuickMail-win-arm64.msi** for a Snapdragon PC, as described above — from the [releases page](https://github.com/DinamicaTech/EudoraQuickMail/releases) and run it.
 2. The setup wizard walks through a welcome page, the license agreement, and installation. QuickMail installs for the current user only — no administrator permission is needed. If the WebView2 component QuickMail uses to display mail is missing from your PC, setup adds it automatically.
 3. A Start Menu entry is created. The first time QuickMail starts, it asks whether to also add a desktop shortcut — either answer is remembered, and you can change your mind anytime in **Settings → General** under **Desktop Shortcut**.
 
@@ -77,7 +77,7 @@ If you have been running the regular QuickMail on a Snapdragon PC, you can switc
 QuickMail mentions this once when it notices it is running on an ARM PC, and the **Help** menu then keeps a **Get the ARM Version** entry that brings you back to this section, where step 2 links to the download. That entry appears only on ARM PCs running the regular build; you can also reach it from the command palette. To switch:
 
 1. Uninstall QuickMail from **Settings → Apps**. When the uninstaller offers to delete your data, choose **No**.
-2. Download and run **QuickMail-win-arm64.msi** from the [releases page](https://github.com/DinamicaTech/QuickMail/releases).
+2. Download and run **QuickMail-win-arm64.msi** from the [releases page](https://github.com/DinamicaTech/EudoraQuickMail/releases).
 3. Start QuickMail. Everything is as you left it, for the same reason as above — your accounts, settings, and mail are stored separately from the program itself.
 
 **Do not skip step 1.** Running the ARM installer on top of a regular QuickMail of the same version does not replace it — Windows treats the two as separate programs, leaves the regular one in place, and reports success. QuickMail keeps starting exactly as before, so nothing tells you the switch did not happen. Uninstalling first is what makes it work.

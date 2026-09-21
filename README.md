@@ -11,10 +11,10 @@ brings multiple accounts, large mail archives, calendars and contacts into one f
 keyboard-driven workspace.
 
 [Product website](https://www.dinamica.tech/eudoraquickmail) ·
-[Download for Windows](https://github.com/DinamicaTech/QuickMail/releases/download/v0.8.72/EudoraQM-Setup.exe) ·
-[All release files](https://github.com/DinamicaTech/QuickMail/releases/latest) ·
+[Download for Windows](https://github.com/DinamicaTech/EudoraQuickMail/releases/download/v0.8.72/EudoraQM-Setup.exe) ·
+[All release files](https://github.com/DinamicaTech/EudoraQuickMail/releases/latest) ·
 [User guide](USERGUIDE.md) ·
-[Report a problem](https://github.com/DinamicaTech/QuickMail/issues)
+[Report a problem](https://github.com/DinamicaTech/EudoraQuickMail/issues)
 
 > **Project status:** active development. QuickMail is already used with real mail archives,
 > but it has not yet reached a stable 1.0 release. Back up important data and review the
@@ -64,8 +64,8 @@ built and describes its goal—making serious email work remarkably fast.
 ## Download and install
 
 Release installers are published on the
-[GitHub Releases page](https://github.com/DinamicaTech/QuickMail/releases). For most PCs, use the
-[direct Windows installer](https://github.com/DinamicaTech/QuickMail/releases/download/v0.8.72/EudoraQM-Setup.exe).
+[GitHub Releases page](https://github.com/DinamicaTech/EudoraQuickMail/releases). For most PCs, use the
+[direct Windows installer](https://github.com/DinamicaTech/EudoraQuickMail/releases/download/v0.8.72/EudoraQM-Setup.exe).
 Choose the Windows
 x64 package for most PCs or the ARM64 package for native Windows on ARM. Portable executables
 are also provided.

@@ -40,7 +40,7 @@ QuickMail is a desktop email client for Windows. It supports multiple IMAP/SMTP 
 
 ## Installing QuickMail
 
-Two download options are available from the [Releases page](https://github.com/DinamicaTech/QuickMail/releases):
+Two download options are available from the [Releases page](https://github.com/DinamicaTech/EudoraQuickMail/releases):
 
 | Download | When to use |
 |----------|-------------|

@@ -11,7 +11,7 @@ of this fork.
 ## Team roles
 
 - **Committers and reviewers:** members authorized to maintain the
-  [`DinamicaTech/QuickMail`](https://github.com/DinamicaTech/QuickMail) repository.
+  [`DinamicaTech/EudoraQuickMail`](https://github.com/DinamicaTech/EudoraQuickMail) repository.
 - **Approvers:** [owners of the DinamicaTech GitHub organization](https://github.com/orgs/DinamicaTech/people?query=role%3Aowner).
 
 All maintainers must use multi-factor authentication for GitHub and SignPath. Contributions from
@@ -34,7 +34,7 @@ to a stable/latest release while it remains unsigned.
 ## SignPath Foundation onboarding
 
 1. Make the source repository and the initial unsigned pre-release public.
-2. Apply to SignPath Foundation for the `DinamicaTech/QuickMail` project.
+2. Apply to SignPath Foundation for the `DinamicaTech/EudoraQuickMail` project.
 3. Configure the SignPath organization, project, signing policy and artifact configuration using
    repository or environment variables/secrets; never commit IDs, API tokens or certificates.
 4. Add the official SignPath GitHub action between packaging and the Release step. Sign both x64

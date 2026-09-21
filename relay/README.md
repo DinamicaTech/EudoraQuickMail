@@ -41,9 +41,9 @@ node relay/test/jwt.test.js
 
 At <https://github.com/settings/apps/new>:
 
-- **Name**: `QuickMail Bug Reporter` (this becomes the issue author, shown as
-  `quickmail-bug-reporter[bot]`)
-- **Homepage URL**: `https://github.com/DinamicaTech/QuickMail`
+- **Name**: `EudoraQM Bug Reporter` (this becomes the issue author, shown as
+  `eudoraqm-bug-reporter[bot]`)
+- **Homepage URL**: `https://github.com/DinamicaTech/EudoraQuickMail`
 - **Webhook**: uncheck **Active**. The relay does not receive webhooks.
 - **Repository permissions** → **Issues**: **Read and write**. Leave every other permission
   at *No access*.
@@ -55,7 +55,7 @@ Create it, then from the App's settings page:
 - **Generate a private key** at the bottom. A `.pem` file downloads — this is the only copy,
   GitHub does not show it again.
 - **Install App** in the left sidebar → install on your account → **Only select
-  repositories** → `QuickMail`.
+  repositories** → `EudoraQuickMail`.
 - After installing, the browser lands on a URL ending in a number, e.g.
   `.../installations/12345678`. That number is the **installation ID**. To find it later:
   <https://github.com/settings/installations> → **Configure** beside the App → read it off
@@ -71,7 +71,7 @@ Token** → **Get started**, which is at the *top* of that page, above the templ
 use the **Edit Cloudflare Workers** template: it grants a spread of Workers-adjacent
 permissions and a zone-scoped one, and there is no zone here to scope it to.
 
-- **Token name**: `QuickMail relay deploy`
+- **Token name**: `EudoraQM relay deploy`
 - **Permissions**, two rows:
   - `Account` / `Workers Scripts` / **Edit** — uploads the Worker and sets its secrets
   - `Account` / `Account Settings` / **Read** — lets wrangler resolve which account to deploy to
@@ -88,7 +88,7 @@ Copy the token. Like the private key, it is shown once.
 
 ### 3. Set the repository secrets
 
-At <https://github.com/DinamicaTech/QuickMail/settings/secrets/actions>:
+At <https://github.com/DinamicaTech/EudoraQuickMail/settings/secrets/actions>:
 
 | Secret | Value |
 |---|---|
@@ -122,8 +122,8 @@ Register it at `https://dash.cloudflare.com/<account id>/workers/subdomain`. **N
 `/workers/onboarding` URL wrangler prints in that error; that page 404s.
 
 The name is lowercase letters, digits and hyphens, globally unique across Cloudflare, and
-permanent — it becomes part of the public relay address. This account uses `quickmail`, so
-the Worker lives at `https://quickmail-bug-relay.quickmail.workers.dev`.
+permanent — it becomes part of the public relay address. This account uses `ronald-8e0`, so
+the Worker lives at `https://quickmail-bug-relay.ronald-8e0.workers.dev`.
 
 ### 4. Deploy
 
@@ -145,7 +145,7 @@ the dashboard URL after `dash.cloudflare.com/`. Otherwise it is not needed.
 
 ### 5. Point the app at the relay
 
-Still at <https://github.com/DinamicaTech/QuickMail/settings/variables/actions>, add a
+Still at <https://github.com/DinamicaTech/EudoraQuickMail/settings/variables/actions>, add a
 repository **variable** (not a secret):
 
 | Variable | Value |
@@ -162,7 +162,7 @@ curl -X POST https://quickmail-bug-relay.<your-subdomain>.workers.dev/report -H 
 ```
 
 Success returns `{"issueUrl":"...","number":N}`, and the issue is authored by
-`quickmail-bug-reporter[bot]` rather than by you — that authorship is the whole point, so it
+`eudoraqm-bug-reporter[bot]` rather than by you — that authorship is the whole point, so it
 is worth confirming. Close the issue afterwards.
 
 Failures worth recognising:

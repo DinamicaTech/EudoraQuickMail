@@ -17,14 +17,14 @@ namespace QuickMail.Services;
 /// if the relay is unavailable or fails.
 ///
 /// The relay, not this app, holds the credential that can write to the repository. What
-/// ships here is a relay key that only means "may file an issue on DinamicaTech/QuickMail" —
+/// ships here is a relay key that only means "may file an issue on DinamicaTech/EudoraQuickMail" —
 /// it is assumed extractable from the binary, and is rotatable without touching any GitHub
 /// account. Do not reintroduce a GitHub token into this class; that was the #222/#501 defect.
 /// </summary>
 public partial class BugReportService : IBugReportService, IDisposable
 {
     private const string RepoOwner = "DinamicaTech";
-    private const string RepoName  = "QuickMail";
+    private const string RepoName  = "EudoraQuickMail";
 
     // Releases before the relay cached a real GitHub PAT here. Nothing reads it any more, so
     // on first run of an updated build we delete it rather than leave a live credential
