@@ -19,7 +19,7 @@ public partial class QuickSearchHelpWindow : Window
             new Row("A#", "Number of attachments", "A#>=1"),
             new Row("AN", "Attachment name or internal path", "AN:invoice?.pdf"),
             new Row("AC", "Extracted attachment content", "AC:contract"),
-            new Row("D", "Message date", "D=03/2015"),
+            new Row("D", "Message date; relative days accept ':'", "D:today"),
             new Row("N", "Unread messages (no operator or value)", "N"),
             new Row("I", "Incoming messages (no operator or value)", "I"),
             new Row("O", "Outgoing messages (no operator or value)", "O"),

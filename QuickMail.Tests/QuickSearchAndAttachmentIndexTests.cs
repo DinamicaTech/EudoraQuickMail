@@ -73,6 +73,22 @@ public class QuickSearchParserTests
         Assert.Equal(3, month.Start.ToLocalTime().Month);
         Assert.Equal(4, month.End.ToLocalTime().Month);
     }
+
+    [Theory]
+    [InlineData("today", 0)]
+    [InlineData("yesterday", -1)]
+    [InlineData("tomorrow", 1)]
+    public void RelativeDateShortcutsUseLocalCalendarDays(string keyword, int dayOffset)
+    {
+        var parsed = QuickSearchParser.Parse($"d:{keyword}");
+        var term = Assert.Single(Assert.Single(parsed.Groups).Alternatives);
+        Assert.Equal(QuickSearchField.Date, term.Field);
+        Assert.Equal("=", term.Operator);
+
+        var range = QuickSearchParser.ParseDateRange(keyword);
+        Assert.Equal(DateTime.Today.AddDays(dayOffset), range.Start.ToLocalTime().Date);
+        Assert.Equal(DateTime.Today.AddDays(dayOffset + 1), range.End.ToLocalTime().Date);
+    }
 }
 
 public class AttachmentExtractorTests
@@ -125,6 +141,37 @@ public class AttachmentExtractorTests
 
 public class QuickSearchStoreTests
 {
+    [Fact]
+    public async Task RelativeDateShortcutsFilterStoredMessagesByLocalDay()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "QuickMail-relative-date-search-test-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var store = new LocalStoreService(new ProfileContext(directory)); store.Initialize();
+            var account = Guid.NewGuid();
+            DateTimeOffset AtLocalNoon(DateTime day) => new(day.Year, day.Month, day.Day, 12, 0, 0,
+                TimeZoneInfo.Local.GetUtcOffset(day.AddHours(12)));
+            await store.UpsertSummariesAsync([
+                new MailMessageSummary { AccountId = account, FolderName = "Out", MessageId = "yesterday", Subject = "Yesterday", Date = AtLocalNoon(DateTime.Today.AddDays(-1)) },
+                new MailMessageSummary { AccountId = account, FolderName = "Out", MessageId = "today", Subject = "Today", Date = AtLocalNoon(DateTime.Today) },
+                new MailMessageSummary { AccountId = account, FolderName = "Out", MessageId = "tomorrow", Subject = "Tomorrow", Date = AtLocalNoon(DateTime.Today.AddDays(1)) },
+            ]);
+
+            Assert.Equal("today", Assert.Single((await store.SearchLocalMessagesAsync(
+                new LocalSearchQuery("d:today"), TestContext.Current.CancellationToken)).Messages).MessageId);
+            Assert.Equal("yesterday", Assert.Single((await store.SearchLocalMessagesAsync(
+                new LocalSearchQuery("d:yesterday"), TestContext.Current.CancellationToken)).Messages).MessageId);
+            Assert.Equal("tomorrow", Assert.Single((await store.SearchLocalMessagesAsync(
+                new LocalSearchQuery("d:tomorrow"), TestContext.Current.CancellationToken)).Messages).MessageId);
+        }
+        finally
+        {
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            Directory.Delete(directory, true);
+        }
+    }
+
     [Fact]
     public async Task ImapSummaryIsSearchableBeforeBodyIsOpened()
     {

@@ -642,6 +642,12 @@ public partial class App : Application
             commandRegistry.ApplyUserOverrides(startupCfg.CustomHotkeys);
 
             var viewService = new ViewService(profile);
+            if (!probeMode)
+            {
+                var addedBuiltInViews = BuiltInSavedViewMigration.Apply(viewService, configService, startupCfg);
+                if (addedBuiltInViews > 0)
+                    LogService.Log($"Built-in saved views migration: added {addedBuiltInViews:N0} view(s).");
+            }
 
             // Imported Eudora names can contain invisible leading/trailing spaces. Normalize the
             // canonical/local projection once (subsequent starts are a cheap no-op) before the tree
@@ -1030,10 +1036,12 @@ public partial class App : Application
     {
         var configService = new ConfigService(profile);
         var config = configService.Load();
+        config.RememberViewPerFolder = true;
         config.ShowAccountsPanel = false;
         config.ShowCombinedViews = false;
         config.ShowTodayAgenda = true;
         config.ShowCalendar = true;
+        config.ShowFilteredDestinationTab = true;
         config.NotifyOnNewMail = true;
         config.AutoSaveDrafts = true;
         config.AutoSaveIntervalSeconds = 30;

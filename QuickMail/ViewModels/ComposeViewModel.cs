@@ -980,10 +980,18 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private async Task SaveAsTemplateAsync()
     {
-        // Templates are plain-text only — in HTML mode use the editor's text rendering.
-        var templateBody = CurrentMode == ComposeMode.Html
-            ? (RichBodyProvider?.Invoke() ?? RichBodySnapshot.Empty).PlainText
-            : Body;
+        // Templates are plain-text only. HugeRTE's plain-text serialization can concatenate
+        // adjacent block elements, so derive template text from the authoritative HTML and keep
+        // paragraph/BR boundaries. This is intentionally template-only: the outgoing MIME
+        // representations continue to use the editor snapshot unchanged.
+        var templateBody = Body;
+        if (CurrentMode == ComposeMode.Html)
+        {
+            var snapshot = RichBodyProvider?.Invoke() ?? RichBodySnapshot.Empty;
+            templateBody = string.IsNullOrWhiteSpace(snapshot.Html)
+                ? snapshot.PlainText
+                : HtmlStripper.ToPlainText(snapshot.Html);
+        }
         if (string.IsNullOrWhiteSpace(templateBody))
         {
             SetStatusOutcome("Nothing to save — body is empty.");

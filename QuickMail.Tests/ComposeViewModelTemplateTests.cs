@@ -345,6 +345,23 @@ public class ComposeViewModelTemplateTests
     }
 
     [Fact]
+    public async Task SaveAsTemplate_FromHtmlPreservesParagraphAndExplicitLineBreaks()
+    {
+        var (vm, templates) = MakeVm();
+        vm.CurrentMode = ComposeMode.Html;
+        vm.RichBodyProvider = () => new RichBodySnapshot(
+            "<p>First paragraph</p><p>Second<br>line</p>",
+            string.Empty,
+            "First paragraphSecondline");
+        vm.PromptTemplateNameRequested = _ => "Paragraphs";
+
+        await InvokeSaveAsTemplateAsync(vm);
+
+        Assert.Single(templates.AddedTemplates);
+        Assert.Equal("First paragraph\n\nSecond\nline", templates.AddedTemplates[0].Body);
+    }
+
+    [Fact]
     public async Task SaveAsTemplate_ShowsErrorWhenBodyEmpty()
     {
         var (vm, templates) = MakeVm();

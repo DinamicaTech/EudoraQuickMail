@@ -482,6 +482,27 @@ public class SavedViewsMainViewModelTests
         Assert.Equal(MainViewModel.AllMailFolder.FullName, vm.SelectedFolder?.FullName);
     }
 
+    [Fact]
+    public async Task ApplyView_GlobalSavedSearch_KeepsItsOwnViewsNodeSelected()
+    {
+        var view = new SavedView
+        {
+            Name = "Received today",
+            SearchQuery = "D:today;I",
+            SearchEverywhere = true,
+            // Reproduces older user-created smart folders, which captured whichever virtual
+            // folder was selected at creation time.
+            VirtualFolderKey = "LocalFolder:6c908b6e-c53d-4f22-a1f2-626fcbef850e",
+        };
+        var vm = MakeVm([view]);
+
+        await SelectView(vm, view);
+
+        Assert.Equal("\0View:" + view.Id, vm.SelectedFolder?.FullName);
+        Assert.Equal("Received today", vm.SelectedFolder?.DisplayName);
+        Assert.Same(view, vm.ActiveView);
+    }
+
     // -- Apply view restores mode / filter / sort ----------------------------
 
     [Fact]

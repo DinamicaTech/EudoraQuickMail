@@ -2733,6 +2733,20 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         await ApplyViewStateAsync(view);
 
+        if (!string.IsNullOrWhiteSpace(view.SearchQuery) && view.SearchEverywhere)
+        {
+            // A global smart folder belongs to its own node under Views. Selecting the underlying
+            // folder that happened to be active when it was created made the tree jump to In even
+            // though the global search itself was correct.
+            SelectedFolder = new MailFolderModel
+            {
+                FullName = $"{ViewPrefix}{view.Id}",
+                DisplayName = view.Name,
+            };
+            await ApplySavedSearchAsync(view);
+            return;
+        }
+
         if (view.Folders.Count == 0)
         {
             if (!string.IsNullOrEmpty(view.VirtualFolderKey))
@@ -6487,6 +6501,18 @@ public partial class MainViewModel : ObservableObject, IDisposable
             if (_canonicalLocalTree != null)
                 await RefreshCanonicalFolderCountsAsync();
 
+            if (ActiveView is { SearchQuery: { } savedQuery } savedSearch &&
+                !string.IsNullOrWhiteSpace(savedQuery))
+            {
+                // A smart view must be rebuilt by executing its SQLite query again. Loading its
+                // underlying rows and passing them through MatchesSearch treats expressions such
+                // as D:today;I or N as literal text and empties the entire grid after a move/delete.
+                await ApplySavedSearchAsync(savedSearch);
+                PerformanceLogService.Record("Mailbox: local refresh/SQLite",
+                    Stopwatch.GetElapsedTime(started), details + $"; rows={Messages.Count}; source=saved-search");
+                return;
+            }
+
             if (SelectedFolder is { } rootFolder && TryParseRootMail(rootFolder.FullName, out var rootId))
             {
                 await FetchRootMailAsync(rootId, rootFolder);
@@ -6902,12 +6928,14 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (TryGetContactMailFromSentinel(folder.FullName, out var contactAddress, out var contactDirection))
             return FetchContactMailAsync(contactAddress, contactDirection);
 
-        // Saved-view sentinels — re-fetch without resetting mode/filter/sort
+        // Saved-view sentinels must reapply the whole view. In particular, smart folders need to
+        // rerun their stored F3 query; FetchViewFoldersAsync alone leaves an empty base set for
+        // global views and is the path Shift+Delete uses after refreshing special-folder badges.
         if (TryGetViewIdFromSentinel(folder.FullName, out var viewId) ||
             TryGetViewAllIdFromSentinel(folder.FullName, out viewId))
         {
             var view = SavedViews.FirstOrDefault(v => v.Id == viewId);
-            if (view != null) return FetchViewFoldersAsync(view);
+            if (view != null) return ApplyViewAsync(view);
         }
         return Task.CompletedTask;
     }
@@ -8524,6 +8552,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
             if (node.Folder == null || !TryParseCanonicalFolder(node.Folder.FullName, out var id) ||
                 !_canonicalFolders.TryGetValue(id, out var canonical)) continue;
             var (unread, total) = CanonicalDisplayCounts(canonical);
+            if (node.Folder.UnreadCount == unread && node.Folder.MessageCount == total)
+                continue;
             node.Folder.UnreadCount = unread;
             node.Folder.MessageCount = total;
             node.NotifyUnreadChanged();

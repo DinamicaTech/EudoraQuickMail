@@ -62,6 +62,56 @@ public sealed class ImapBodyBackfillTests : IDisposable
         Assert.Equal(2, vm.Messages.Count);
     }
 
+    [Fact]
+    public async Task LocalMutationRefreshRerunsTheActiveGlobalSavedSearch()
+    {
+        Directory.CreateDirectory(_directory);
+        var store = new LocalStoreService(new ProfileContext(_directory));
+        store.Initialize();
+        var account = new AccountModel
+        {
+            Id = Guid.NewGuid(),
+            IsActive = true,
+            BackendKind = BackendKind.LocalArchive,
+        };
+        var first = Summary(account.Id, "In", "1", "<first@example.com>", "First today");
+        first.Direction = MessageDirection.Incoming;
+        var second = Summary(account.Id, "In", "2", "<second@example.com>", "Second today");
+        second.Direction = MessageDirection.Incoming;
+        await store.UpsertSummariesAsync([first, second]);
+        var view = new SavedView
+        {
+            Name = "Received today",
+            SearchQuery = "D:today;I",
+            SearchEverywhere = true,
+        };
+        using var vm = new MainViewModel(new StubImapMailService(), new StubAccountService(),
+            new StubCredentialService(), store, new StubOAuthService(), new StubSyncService(),
+            new StubConfigService(), new StubCommandRegistry(), new FakeViewService([view]),
+            new StubRuleService(), new StubSmtpService(), uiDispatcher: new StubUiDispatcher());
+        vm.LoadAccountList([account]);
+
+        await vm.SelectViewCommand.ExecuteAsync(view.Id.ToString());
+        Assert.Equal(2, vm.Messages.Count);
+
+        await store.DeleteSummariesAsync(first.AccountId, first.FolderName, [first.MessageId]);
+        vm.RemoveMessagesFromActiveView([first]);
+        await vm.RefreshAfterLocalMutationAsync("regression-test");
+
+        Assert.Single(vm.Messages);
+        Assert.Equal(second.MessageId, vm.Messages[0].MessageId);
+        Assert.Equal("D:today;I", vm.SearchText);
+        Assert.True(vm.SearchEverywhere);
+        Assert.Same(view, vm.ActiveView);
+
+        // Shift+Delete refreshes special-folder metadata and then re-enters the selected virtual
+        // node. Set Sync Range uses that same FetchVirtualAsync path, so pin it here too.
+        await vm.SetSyncDaysCommand.ExecuteAsync("180");
+        Assert.Single(vm.Messages);
+        Assert.Equal(second.MessageId, vm.Messages[0].MessageId);
+        Assert.Same(view, vm.ActiveView);
+    }
+
     private static MailMessageSummary Summary(Guid accountId, string folder, string uid,
         string internetId, string subject = "Body test") => new()
     {

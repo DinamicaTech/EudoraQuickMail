@@ -111,6 +111,7 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
             // A binding is inserted before an IMAP CREATE is attempted. If CREATE failed, there is
             // no physical Folder row and the old, whitespace-padded promise must not poison every
             // retry. Existing server aliases are deliberately preserved byte-for-byte.
+            var physicalExists = false;
             await using (var physical = connection.CreateCommand())
             {
                 physical.Transaction = (SqliteTransaction)tx;
@@ -120,7 +121,8 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
                     """;
                 physical.Parameters.AddWithValue("$account", accountId.ToString("D"));
                 physical.Parameters.AddWithValue("$path", existingBinding);
-                if (await physical.ExecuteScalarAsync() == null &&
+                physicalExists = await physical.ExecuteScalarAsync() != null;
+                if (!physicalExists &&
                     !string.Equals(existingBinding, path, StringComparison.Ordinal))
                 {
                     await using var repair = connection.CreateCommand();
@@ -136,6 +138,31 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
                     await repair.ExecuteNonQueryAsync();
                     existingBinding = path;
                 }
+            }
+
+            // SaveFoldersAsync replaces the server-owned folder catalogue. A canonical binding can
+            // therefore outlive its physical Folder row until the corresponding folder is first
+            // created on that IMAP account. Recreate the cache row before returning the binding;
+            // otherwise a successful remote MOVE is followed by "Destination folder does not
+            // exist" while mirroring that move into SQLite.
+            if (!physicalExists)
+            {
+                var bindingSlash = existingBinding.LastIndexOf('/');
+                var bindingParent = bindingSlash < 0 ? null : existingBinding[..bindingSlash];
+                await using var ensure = connection.CreateCommand();
+                ensure.Transaction = (SqliteTransaction)tx;
+                ensure.CommandText = """
+                    INSERT OR IGNORE INTO Folder(account_id,full_name,display_name,parent_id,kind,
+                        exclude_from_all_mail,unread_count,message_count,sort_order,is_container)
+                    VALUES($account,$path,$name,$parent,$kind,0,0,0,0,$container);
+                    """;
+                ensure.Parameters.AddWithValue("$account", accountId.ToString("D"));
+                ensure.Parameters.AddWithValue("$path", existingBinding);
+                ensure.Parameters.AddWithValue("$name", name);
+                ensure.Parameters.AddWithValue("$parent", (object?)bindingParent ?? DBNull.Value);
+                ensure.Parameters.AddWithValue("$kind", kind);
+                ensure.Parameters.AddWithValue("$container", container);
+                await ensure.ExecuteNonQueryAsync();
             }
 
             // The canonical node is authoritative. A failed/aborted quick-filter creation could

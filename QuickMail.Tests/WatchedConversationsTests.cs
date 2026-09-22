@@ -70,10 +70,14 @@ public class WatchedConversationsTests
         ILocalStoreService store = cached != null
             ? new FilterableStoreForFlags(cached)
             : new StubLocalStoreService();
+        var config = new StubConfigService();
+        // Watched Conversations is part of the optional Combined views group. Opt in explicitly
+        // because the product''s new-profile default intentionally keeps that group hidden.
+        config.Load().ShowCombinedViews = true;
 
         var vm = new MainViewModel(
             new StubImapMailService(), new StubAccountService(), new StubCredentialService(),
-            store, new StubOAuthService(), sync, new StubConfigService(),
+            store, new StubOAuthService(), sync, config,
             registry ?? new StubCommandRegistry(), new StubViewService(), new StubRuleService(),
             new StubSmtpService(), watchService: watch);
 

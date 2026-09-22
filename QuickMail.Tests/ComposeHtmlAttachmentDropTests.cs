@@ -62,6 +62,42 @@ public class ComposeHtmlAttachmentDropTests
         Assert.DoesNotContain(" Drop=\"Window_Drop\"", source, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void HugeRteSelectionReplacementPreservesTranslatedLineBreaks()
+    {
+        var source = File.ReadAllText(Path.Combine(
+            RepoRoot(), "QuickMail", "Assets", "HugeRte", "editor.html"));
+
+        var functionStart = source.IndexOf("window.quickmailReplaceSelection = text =>", StringComparison.Ordinal);
+        Assert.True(functionStart >= 0, "The HTML compose selection replacement bridge is missing.");
+        var functionEnd = source.IndexOf("window.quickmailSetLanguage", functionStart, StringComparison.Ordinal);
+        Assert.True(functionEnd > functionStart, "The HTML compose selection replacement bridge is incomplete.");
+        var replacementBridge = source[functionStart..functionEnd];
+
+        Assert.Contains("dom.encode(text).replace(/\\r\\n|\\r|\\n/g, '<br>')", replacementBridge,
+            StringComparison.Ordinal);
+        Assert.Contains("selection.setContent(html)", replacementBridge, StringComparison.Ordinal);
+        Assert.DoesNotContain("selection.setContent(quickMailEditor.dom.encode(text))", replacementBridge,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void HugeRteTemplateInsertionPreservesStoredLineBreaks()
+    {
+        var source = File.ReadAllText(Path.Combine(
+            RepoRoot(), "QuickMail", "Assets", "HugeRte", "editor.html"));
+
+        var functionStart = source.IndexOf("window.quickmailInsertText = text =>", StringComparison.Ordinal);
+        Assert.True(functionStart >= 0, "The HTML compose template insertion bridge is missing.");
+        var functionEnd = source.IndexOf("window.quickmailGetSelection", functionStart, StringComparison.Ordinal);
+        Assert.True(functionEnd > functionStart, "The HTML compose template insertion bridge is incomplete.");
+        var insertionBridge = source[functionStart..functionEnd];
+
+        Assert.Contains("dom.encode(text).replace(/\\r\\n|\\r|\\n/g, '<br>')", insertionBridge,
+            StringComparison.Ordinal);
+        Assert.Contains("insertContent(html)", insertionBridge, StringComparison.Ordinal);
+    }
+
     private static string RepoRoot()
     {
         for (var directory = new DirectoryInfo(AppContext.BaseDirectory);

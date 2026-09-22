@@ -221,6 +221,10 @@ public class ConfigService : IConfigService
                     case "showaccountspanel": config.ShowAccountsPanel = ParseBool(value); break;
                     case "showtodayagenda":   config.ShowTodayAgenda   = ParseBool(value); break;
                     case "showfiltereddestinationtab": config.ShowFilteredDestinationTab = ParseBool(value); break;
+                    case "builtinsavedviewsversion":
+                        if (int.TryParse(value, out var builtInViewsVersion))
+                            config.BuiltInSavedViewsVersion = Math.Max(0, builtInViewsVersion);
+                        break;
                     case "quicksearchhistory":
                         try
                         {
@@ -501,6 +505,10 @@ public class ConfigService : IConfigService
 
         sb.AppendLine($"ShowFilteredDestinationTab = {(config.ShowFilteredDestinationTab ? "on" : "off")}");
         sb.AppendLine("# Keep one background tab pointing at the latest successful rule destination.");
+        sb.AppendLine();
+
+        sb.AppendLine($"BuiltInSavedViewsVersion = {Math.Max(0, config.BuiltInSavedViewsVersion)}");
+        sb.AppendLine("# Internal one-time migration marker for the curated Views set.");
         sb.AppendLine();
 
         sb.AppendLine($"QuickSearchHistory = {JsonSerializer.Serialize(QuickSearchHistory.Normalize(config.QuickSearchHistory))}");

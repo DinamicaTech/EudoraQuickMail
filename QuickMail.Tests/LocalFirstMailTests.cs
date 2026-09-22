@@ -331,6 +331,50 @@ public sealed class LocalFirstMailTests : IDisposable
     }
 
     [Fact]
+    public async Task CanonicalFolderBinding_RecreatesPhysicalRowRemovedByServerFolderRefresh()
+    {
+        var ownerId = Guid.NewGuid();
+        var imapId = Guid.NewGuid();
+        var owner = new AccountModel
+        {
+            Id = ownerId, AccountName = "Owner", Username = "owner@example.test",
+            BackendKind = BackendKind.Pop3Smtp, IsActive = true,
+            FolderTreeRootId = ownerId, FolderTreeRootName = "Eudora",
+        };
+        var store = CreateStore();
+        await store.SaveFoldersAsync(ownerId,
+        [
+            Folder(ownerId, "Ocio/Batalladores", container: false),
+        ]);
+        await store.SaveFoldersAsync(imapId,
+        [
+            Folder(imapId, "INBOX", container: false),
+        ]);
+        new LocalFolderTreeMigrationService().BuildShadowTree(
+            Path.Combine(_directory, "mail.db"), [owner]);
+
+        var target = (await store.LoadCanonicalLocalFolderTreeAsync())!.Folders.Single(folder =>
+            folder.CanonicalPath == "Ocio/Batalladores");
+        var binding = await store.EnsureCanonicalFolderBindingAsync(target.FolderId, imapId);
+
+        // A server folder refresh does not yet return the destination because it has not been
+        // created remotely. It replaces the Folder cache but intentionally keeps the canonical
+        // binding, reproducing the Gmail filter failure seen in production.
+        await store.SaveFoldersAsync(imapId,
+        [
+            Folder(imapId, "INBOX", container: false),
+        ]);
+        await store.SaveLocalMessageAsync(Message(imapId, "INBOX", "gmail-message", "body"));
+
+        Assert.Equal(binding, await store.EnsureCanonicalFolderBindingAsync(target.FolderId, imapId));
+        await store.MoveLocalMessagesAsync(imapId, "INBOX", binding, ["gmail-message"]);
+
+        Assert.Empty(await store.LoadFolderSummariesAsync(imapId, "INBOX"));
+        Assert.Single(await store.LoadFolderSummariesAsync(imapId, binding));
+        Assert.Contains((await store.LoadFoldersAsync())[imapId], folder => folder.FullName == binding);
+    }
+
+    [Fact]
     public async Task LocalSystemFolders_AreCreatedWithoutConnectingThePop3Account()
     {
         var accountId = Guid.NewGuid();

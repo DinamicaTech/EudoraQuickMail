@@ -76,13 +76,16 @@ public static class QuickSearchParser
             var op = rest.StartsWith(">=", StringComparison.Ordinal) || rest.StartsWith("<=", StringComparison.Ordinal) ? rest[..2]
                 : rest.Length > 0 && rest[0] is ':' or '=' or '<' or '>' ? rest[..1] : string.Empty;
             if (op.Length == 0) continue; // ordinary text beginning with a prefix letter
-            if (field is QuickSearchField.AttachmentCount or QuickSearchField.Date)
-            {
-                if (op == ":") throw new FormatException($"{prefix} requires =, <, <=, > or >=.");
-            }
-            else if (op != ":") throw new FormatException($"{prefix} is a text field and requires ':'.");
             var value = rest[op.Length..].Trim();
             if (value.Length == 0) throw new FormatException($"Missing value after {prefix}{op}.");
+            if (field is QuickSearchField.AttachmentCount or QuickSearchField.Date)
+            {
+                if (op == ":" && field == QuickSearchField.Date && IsRelativeDate(value))
+                    op = "="; // Friendly F3 shorthand: d:today / d:yesterday / d:tomorrow.
+                else if (op == ":")
+                    throw new FormatException($"{prefix} requires =, <, <=, > or >=.");
+            }
+            else if (op != ":") throw new FormatException($"{prefix} is a text field and requires ':'.");
             return new(field, op, value);
         }
         return new(QuickSearchField.Any, ":", token);
@@ -90,6 +93,15 @@ public static class QuickSearchParser
 
     public static (DateTimeOffset Start, DateTimeOffset End) ParseDateRange(string value)
     {
+        var relativeDay = value.Trim().ToLowerInvariant() switch
+        {
+            "today" => DateTime.Today,
+            "yesterday" => DateTime.Today.AddDays(-1),
+            "tomorrow" => DateTime.Today.AddDays(1),
+            _ => (DateTime?)null,
+        };
+        if (relativeDay is { } day) return Range(day, day.AddDays(1));
+
         var culture = CultureInfo.CurrentCulture;
         if (int.TryParse(value, out var year) && year is >= 1 and <= 9999)
             return Range(new DateTime(year, 1, 1), new DateTime(year, 1, 1).AddYears(1));
@@ -99,12 +111,17 @@ public static class QuickSearchParser
             return Range(new DateTime(year, month, 1), new DateTime(year, month, 1).AddMonths(1));
         if (DateTime.TryParse(value, culture, DateTimeStyles.AllowWhiteSpaces, out var date))
             return Range(date.Date, date.Date.AddDays(1));
-        throw new FormatException($"Invalid date '{value}'. Use a local date, MM/yyyy, or yyyy.");
+        throw new FormatException($"Invalid date '{value}'. Use today, yesterday, tomorrow, a local date, MM/yyyy, or yyyy.");
 
         static (DateTimeOffset, DateTimeOffset) Range(DateTime start, DateTime end) =>
             (new DateTimeOffset(start, TimeZoneInfo.Local.GetUtcOffset(start)).ToUniversalTime(),
              new DateTimeOffset(end, TimeZoneInfo.Local.GetUtcOffset(end)).ToUniversalTime());
     }
+
+    private static bool IsRelativeDate(string value) =>
+        value.Equals("today", StringComparison.OrdinalIgnoreCase)
+        || value.Equals("yesterday", StringComparison.OrdinalIgnoreCase)
+        || value.Equals("tomorrow", StringComparison.OrdinalIgnoreCase);
 
     private static IReadOnlyList<string> SplitTopLevel(string text, char separator)
     {

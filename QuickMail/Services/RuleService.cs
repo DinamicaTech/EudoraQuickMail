@@ -497,8 +497,14 @@ public class RuleService : IRuleService
                     .FirstOrDefault(account => account.Id == group.Key.AccountId)?.BackendKind;
                 if (backend is BackendKind.ImapSmtp or BackendKind.MicrosoftGraph &&
                     _store is ILocalMailboxStore mailboxStore)
+                {
+                    // The folder catalogue may have refreshed while the remote MOVE was running.
+                    // Resolve again so an existing canonical binding repairs its physical cache row
+                    // before MoveLocalMessagesAsync validates the destination.
+                    physicalTarget = await ResolveTargetFolderAsync(targetFolder, group.Key.AccountId);
                     await mailboxStore.MoveLocalMessagesAsync(
                         group.Key.AccountId, group.Key.FolderName, physicalTarget, uids, ct);
+                }
             }
             catch (OperationCanceledException) { throw; }
             catch (Exception ex)

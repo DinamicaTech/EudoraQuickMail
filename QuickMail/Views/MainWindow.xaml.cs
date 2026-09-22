@@ -5314,7 +5314,10 @@ public partial class MainWindow : Window
             : string.Empty;
     }
 
-    private async Task ApplyRulesToSelectedMessagesAsync()
+    private Task ApplyRulesToSelectedMessagesAsync() =>
+        RunWithDelayedIndicatorAsync("Applying filters…", ApplyRulesToSelectedMessagesCoreAsync);
+
+    private async Task ApplyRulesToSelectedMessagesCoreAsync()
     {
         var selected = MessageList.SelectedItems.OfType<MailMessageSummary>().ToList();
         if (selected.Count == 0) return;
@@ -5324,6 +5327,7 @@ public partial class MainWindow : Window
         MailRule? destinationRule = null;
         var createRuleInstead = false;
         MailMessageSummary? newRuleSource = null;
+        var filteringFailed = false;
         _vm.IsBusy = true;
         _vm.IsStatusHighlighted = true;
         _vm.StatusText = $"Filtering {selected.Count:N0} selected messages…";
@@ -5378,14 +5382,23 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
+            filteringFailed = true;
             LogService.Log("Apply rules to selected messages", ex);
             _vm.StatusText = $"Filtering failed: {ex.Message}";
             AccessibilityHelper.Announce(this, _vm.StatusText, category: AnnouncementCategory.Result);
+            MessageBox.Show(this,
+                "The filter matched the selected message, but its action could not be completed.\n\n" +
+                ex.Message,
+                "Filtering failed",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
         }
         finally
         {
             _vm.IsBusy = false;
-            _vm.IsStatusHighlighted = false;
+            // Keep the status panel red after an error so the failure remains visible after
+            // the modal explanation is dismissed. A later successful operation clears it.
+            _vm.IsStatusHighlighted = filteringFailed;
             if (createRuleInstead && newRuleSource != null)
                 OpenRulesManager(CreateRuleTemplateFromMessage(newRuleSource));
         }

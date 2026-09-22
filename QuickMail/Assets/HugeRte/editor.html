@@ -376,7 +376,11 @@
       if (!quickMailEditor) return;
       if (quickMailSelectionBookmark)
         quickMailEditor.selection.moveToBookmark(quickMailSelectionBookmark);
-      quickMailEditor.selection.setContent(quickMailEditor.dom.encode(text));
+      // setContent consumes HTML. Keep the translated/corrected value as plain text, but make
+      // its line endings explicit HTML breaks; otherwise Chromium collapses every CR/LF into
+      // whitespace and a multi-paragraph selection comes back as one continuous paragraph.
+      const html = quickMailEditor.dom.encode(text).replace(/\r\n|\r|\n/g, '<br>');
+      quickMailEditor.selection.setContent(html);
       quickMailSelectionBookmark = null;
       quickMailEditor.focus();
       emitContent();

@@ -84,10 +84,14 @@ public class AllArchiveVirtualFolderTests
     {
         var imap = new FolderedMailService(folders, messages);
         var sync = new RaisableSyncService();
+        var config = new StubConfigService();
+        // These tests exercise the aggregate itself, including its tree placement. The product
+        // default is now hidden, so opt in explicitly just as a user would in Display Mode.
+        config.Load().ShowCombinedViews = true;
         var vm = new MainViewModel(
             imap, new StubAccountService(), new StubCredentialService(),
             new StubLocalStoreService(), new StubOAuthService(), sync,
-            new StubConfigService(), new StubCommandRegistry(), new StubViewService(),
+            config, new StubCommandRegistry(), new StubViewService(),
             new StubRuleService(), new StubSmtpService());
 
         foreach (var a in accounts) vm.Accounts.Add(a);

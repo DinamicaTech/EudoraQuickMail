@@ -39,13 +39,13 @@ public class ConfigModel
     public bool RememberViewPerFolder { get; set; } = true;
 
     /// <summary>Show the global cross-account aggregate group in the folder tree.</summary>
-    public bool ShowCombinedViews { get; set; } = true;
+    public bool ShowCombinedViews { get; set; } = false;
 
     /// <summary>Show Calendar and its sources in the folder tree.</summary>
     public bool ShowCalendar { get; set; } = true;
 
     /// <summary>Show the account selector above the unified folder tree.</summary>
-    public bool ShowAccountsPanel { get; set; } = true;
+    public bool ShowAccountsPanel { get; set; } = false;
 
     /// <summary>Show today's compact appointment list above the folder tree.</summary>
     public bool ShowTodayAgenda { get; set; } = true;
@@ -58,6 +58,12 @@ public class ConfigModel
 
     /// <summary>Most recently executed quick searches, newest first (maximum ten).</summary>
     public List<string> QuickSearchHistory { get; set; } = [];
+
+    /// <summary>
+    /// Last curated saved-view set offered to this profile. This is a migration marker rather than
+    /// a preference: once installed, users may remove a built-in view without it returning.
+    /// </summary>
+    public int BuiltInSavedViewsVersion { get; set; }
 
     /// <summary>
     /// How many days of mail to sync. 0 = sync all mail (no date filter).
