@@ -935,14 +935,20 @@ public partial class CalendarViewModel : ObservableObject
     /// </summary>
     private void ApplyFilters()
     {
-        var baseEvents = _calendarService.Events
-            .Where(e => (_sourceFilter?.Account is not Guid a || e.AccountId == a)
-                        && (_sourceFilter?.CalendarId is not string c || e.CalendarId == c))
+        var allActiveEvents = _calendarService.Events
             .Where(e => _showDeclinedEvents || e.ResponseStatus != CalendarResponseStatus.Declined)
             .Where(e => e.ResponseStatus != CalendarResponseStatus.Cancelled)
             .ToList();
 
-        RebuildTodayEvents(baseEvents);
+        // The compact agenda at the left is deliberately global: it is the user's complete day
+        // at a glance. The source selector belongs to the full calendar pane and must not hide
+        // appointments from other accounts here. Account colours identify their origin.
+        RebuildTodayEvents(allActiveEvents);
+
+        var baseEvents = allActiveEvents
+            .Where(e => (_sourceFilter?.Account is not Guid a || e.AccountId == a)
+                        && (_sourceFilter?.CalendarId is not string c || e.CalendarId == c))
+            .ToList();
 
         // The date window for the current view. Null = Agenda "all" (one-offs are not date-bounded).
         var monthGridStart = WeekStart(new DateTime(ReferenceDate.Year, ReferenceDate.Month, 1));

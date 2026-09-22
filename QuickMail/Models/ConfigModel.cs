@@ -450,6 +450,12 @@ public class ConfigModel
     /// </summary>
     public string GoogleClientSecret { get; set; } = string.Empty;
 
+    /// <summary>
+    /// Whether the values above replace the OAuth client embedded in official builds. Null means
+    /// a legacy config: existing credentials are treated as an intentional custom client.
+    /// </summary>
+    public bool? UseCustomGoogleOAuthClient { get; set; }
+
     // ── Feature flags ─────────────────────────────────────────────────────────────
 
     /// <summary>

@@ -110,6 +110,22 @@ public class StringToBrushConverter : IValueConverter
         throw new NotSupportedException();
 }
 
+/// <summary>Maps a calendar event's persistent account id to its stable display colour.</summary>
+public class CalendarAccountColorConverter : IValueConverter
+{
+    public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+    {
+        var hex = CalendarAccountColors.For(value is Guid accountId ? accountId : Guid.Empty);
+        var color = (System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(hex);
+        var brush = new System.Windows.Media.SolidColorBrush(color);
+        brush.Freeze();
+        return brush;
+    }
+
+    public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture) =>
+        throw new NotSupportedException();
+}
+
 public partial class MainWindow : Window
 {
     public event Action? StartupReady;
@@ -4343,8 +4359,9 @@ public partial class MainWindow : Window
             start = e.StartTime!.Value.ToString("yyyy-MM-dd'T'HH:mm:ss", CultureInfo.InvariantCulture),
             end = e.EndTime?.ToString("yyyy-MM-dd'T'HH:mm:ss", CultureInfo.InvariantCulture),
             allDay = e.IsAllDay,
-            backgroundColor = e.IsCancelled ? "#a4262c" : e.IsGraph ? "#0f6cbd" : e.IsUserCreated ? "#107c10" : "#8764b8",
-            borderColor = "transparent"
+            backgroundColor = e.IsCancelled ? "#a4262c" : CalendarAccountColors.For(e.AccountId),
+            borderColor = "transparent",
+            textColor = "#ffffff"
         }).ToArray();
         var payload = JsonSerializer.Serialize(new
         {

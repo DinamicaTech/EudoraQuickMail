@@ -28,6 +28,26 @@ public class ConfigServiceSaveTests
         Assert.Equal(config.AnnounceHints, reloaded.AnnounceHints);
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void SaveThenLoad_RoundTripsCustomGoogleOAuthChoice(bool enabled)
+    {
+        var profile = MakeTempProfile();
+        var service = new ConfigService(profile);
+        var config = service.Load();
+        config.UseCustomGoogleOAuthClient = enabled;
+        config.GoogleClientId = "custom-client";
+        config.GoogleClientSecret = "custom-secret";
+
+        service.Save(config);
+
+        var reloaded = new ConfigService(profile).Load();
+        Assert.Equal(enabled, reloaded.UseCustomGoogleOAuthClient);
+        Assert.Equal("custom-client", reloaded.GoogleClientId);
+        Assert.Equal("custom-secret", reloaded.GoogleClientSecret);
+    }
+
     [Fact]
     public void SaveThenLoad_RoundTripsBoundedQuickSearchHistory()
     {

@@ -24,6 +24,7 @@
         <local:BoolToGridLengthConverter        x:Key="BoolToGridLengthConverter"/>
         <local:StringToVisibilityConverter      x:Key="StringToVisibilityConverter"/>
         <local:StringToBrushConverter           x:Key="StringToBrushConverter"/>
+        <local:CalendarAccountColorConverter    x:Key="CalendarAccountColorConverter"/>
 
         <!-- ── Shared context menus ── -->
 
@@ -899,12 +900,6 @@
                         <Button Content="↻" Width="26" Padding="2,0" ToolTip="Refresh today"
                                 Click="TodayAgendaRefresh_Click" AutomationProperties.Name="Refresh today's agenda"/>
                     </StackPanel>
-                    <ComboBox DockPanel.Dock="Right" Width="145" Margin="4,2"
-                              ItemsSource="{Binding CalendarVm.SourceChoices}"
-                              SelectedItem="{Binding CalendarVm.SelectedSource, Mode=TwoWay}"
-                              DisplayMemberPath="Label"
-                              ToolTip="Choose which calendar is shown"
-                              AutomationProperties.Name="Calendar source"/>
                     <TextBlock Text="{Binding CalendarVm.TodayAgendaTitle}" FontWeight="SemiBold" Padding="6,4"/>
                 </DockPanel>
 
@@ -931,7 +926,7 @@
                         <ListBox.ItemTemplate>
                             <DataTemplate>
                                 <Border Margin="3,2" Padding="6,3" CornerRadius="4"
-                                        Background="{DynamicResource Theme.Success}"
+                                        Background="{Binding AccountId, Converter={StaticResource CalendarAccountColorConverter}}"
                                         ToolTip="{Binding DetailText}">
                                     <Grid>
                                         <Grid.ColumnDefinitions>
@@ -1507,7 +1502,14 @@
                             <Button Content="_Go To Date…" AutomationProperties.Name="Go to date"
                                     MinWidth="96" Margin="0,0,8,0" Click="CalendarGoToDate_Click"/>
                             <Button Content="_Refresh (F5)" AutomationProperties.Name="Refresh calendar, F5"
-                                    MinWidth="96" Click="CalendarRefresh_Click"/>
+                                    MinWidth="96" Margin="0,0,12,0" Click="CalendarRefresh_Click"/>
+                            <TextBlock Text="Calendar:" VerticalAlignment="Center" Margin="0,0,5,0"/>
+                            <ComboBox Width="190" VerticalAlignment="Center"
+                                      ItemsSource="{Binding CalendarVm.SourceChoices}"
+                                      SelectedItem="{Binding CalendarVm.SelectedSource, Mode=TwoWay}"
+                                      DisplayMemberPath="Label"
+                                      ToolTip="Choose which calendar is shown"
+                                      AutomationProperties.Name="Calendar source"/>
                         </StackPanel>
 
                         <!-- Period label + search + item toolbar -->

@@ -149,6 +149,9 @@ public partial class SettingsViewModel : ObservableObject
     private bool _googleSignIn;
 
     [ObservableProperty]
+    private bool _useCustomGoogleOAuthClient;
+
+    [ObservableProperty]
     private string _googleClientId = string.Empty;
 
     [ObservableProperty]
@@ -522,6 +525,11 @@ public partial class SettingsViewModel : ObservableObject
         AutoUpdate                       = cfg.AutoUpdate;
         ShowUpdateInstalledAlerts        = cfg.ShowUpdateInstalledAlerts;
         GoogleSignIn                     = ReadFeature(cfg, FeatureFlag.GoogleAuth, false);
+        // Configs created before this switch existed used any stored credentials automatically.
+        // Preserve that behaviour until the user explicitly turns custom credentials off.
+        UseCustomGoogleOAuthClient       = cfg.UseCustomGoogleOAuthClient
+            ?? (!string.IsNullOrWhiteSpace(cfg.GoogleClientId)
+                || !string.IsNullOrWhiteSpace(cfg.GoogleClientSecret));
         GoogleClientId                   = cfg.GoogleClientId;
         GoogleClientSecret               = cfg.GoogleClientSecret;
         AutoSaveDrafts                   = cfg.AutoSaveDrafts;
@@ -622,6 +630,12 @@ public partial class SettingsViewModel : ObservableObject
         // Written both ways round, never removed when false: an explicit "false" in the file is how
         // a user who turns this back off stays off if the built-in default ever changes again.
         cfg.Features[FeatureFlag.GoogleAuth.ToString()] = GoogleSignIn ? "true" : "false";
+        // Do not add an empty [google] section to every new config. False only needs persisting
+        // when credentials remain, so their legacy presence cannot silently reactivate them.
+        cfg.UseCustomGoogleOAuthClient = UseCustomGoogleOAuthClient
+            ? true
+            : (!string.IsNullOrWhiteSpace(GoogleClientId)
+               || !string.IsNullOrWhiteSpace(GoogleClientSecret) ? false : null);
         cfg.GoogleClientId = GoogleClientId.Trim();
         cfg.GoogleClientSecret = GoogleClientSecret.Trim();
         if (DesktopShortcut != Helpers.DesktopShortcut.Exists())

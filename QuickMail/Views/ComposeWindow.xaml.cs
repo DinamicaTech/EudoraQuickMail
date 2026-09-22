@@ -601,6 +601,13 @@ public partial class ComposeWindow : Window
         {
             // Superseded by a newer keystroke
         }
+        catch (Exception ex)
+        {
+            // Autocomplete is a convenience feature; corrupt legacy contact data or an I/O error
+            // must never escape an async-void text event and take down the compose window.
+            AutoCompletePopup.IsOpen = false;
+            LogService.Log("Address autocomplete failed", ex);
+        }
     }
 
     protected override void OnSourceInitialized(EventArgs e)

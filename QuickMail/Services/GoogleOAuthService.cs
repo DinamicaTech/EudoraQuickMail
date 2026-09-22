@@ -67,16 +67,20 @@ public partial class GoogleOAuthService : IGoogleOAuthService
     {
         _credentialService = credentialService;
         var cfg = configService?.Load();
-        _clientId = !string.IsNullOrWhiteSpace(cfg?.GoogleClientId) ? cfg.GoogleClientId.Trim() : ClientId;
-        _clientSecret = !string.IsNullOrWhiteSpace(cfg?.GoogleClientSecret) ? cfg.GoogleClientSecret.Trim() : ClientSecret;
+        var hasLegacyCustomClient = !string.IsNullOrWhiteSpace(cfg?.GoogleClientId)
+                                    || !string.IsNullOrWhiteSpace(cfg?.GoogleClientSecret);
+        var useCustomClient = cfg?.UseCustomGoogleOAuthClient ?? hasLegacyCustomClient;
+        _clientId = useCustomClient ? cfg?.GoogleClientId.Trim() ?? string.Empty : ClientId;
+        _clientSecret = useCustomClient ? cfg?.GoogleClientSecret.Trim() ?? string.Empty : ClientSecret;
     }
 
     private void EnsureConfigured()
     {
         if (string.IsNullOrWhiteSpace(_clientId))
             throw new InvalidOperationException(
-                "Google OAuth is not configured. Enter a Desktop app Client ID and Client Secret " +
-                "in Settings > Advanced > Google integration, save, and restart QuickMail.");
+                "Google OAuth is not configured. Official builds include the Eudora QuickMail " +
+                "OAuth client. For a local or custom build, enable Use custom Google OAuth client " +
+                "in Settings > Advanced, enter its Desktop app credentials, save, and restart QuickMail.");
     }
 
     private GoogleAuthorizationCodeFlow CreateFlow(string[]? scopes, IDataStore? dataStore = null,

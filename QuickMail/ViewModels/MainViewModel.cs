@@ -2173,6 +2173,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (CalendarVm == null) return;
         var tab = OpenTabs.OfType<CalendarTabViewModel>().FirstOrDefault();
         if (tab != null && ActiveTab != tab) ActiveTab = tab;
+        // The F3 bar searches mail, not appointments. Do not leave it visible above Calendar.
+        IsSearchActive = false;
         IsMessageOpen = false;
         MessageDetail = null;
         await CalendarVm.LoadAsync();

@@ -465,6 +465,26 @@ public class CalendarViewModelTests
     }
 
     [Fact]
+    public async Task SourceFilter_DoesNotHideOtherAccountsFromCompactTodayAgenda()
+    {
+        var acctA = Guid.NewGuid();
+        var acctB = Guid.NewGuid();
+        var fromA = MakeEvent("a-today", DateTime.Today.AddHours(10)); fromA.AccountId = acctA;
+        var fromB = MakeEvent("b-today", DateTime.Today.AddHours(11)); fromB.AccountId = acctB;
+
+        var vm = MakeVm(new List<CalendarEvent> { fromA, fromB });
+        await vm.LoadAsync();
+
+        vm.SourceFilter = new MainViewModel.CalendarFilter(acctA, null);
+
+        Assert.Single(vm.VisibleEvents);
+        Assert.Equal("a-today", vm.VisibleEvents[0].Uid);
+        Assert.Equal(2, vm.TodayEvents.Count);
+        Assert.Contains(vm.TodayEvents, e => e.Uid == "a-today");
+        Assert.Contains(vm.TodayEvents, e => e.Uid == "b-today");
+    }
+
+    [Fact]
     public async Task SourceFilter_SingleCalendar_ShowsOnlyThatCalendarsEvents()
     {
         var acct = Guid.NewGuid();

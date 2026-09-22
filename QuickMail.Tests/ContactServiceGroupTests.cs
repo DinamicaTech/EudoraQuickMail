@@ -337,6 +337,71 @@ public class ContactServiceGroupTestsV2
     }
 
     [Fact]
+    public async Task LegacyPersistedSentHistoryRows_AreRemovedAndDoNotBreakGroupSearch()
+    {
+        var dir = TempDir();
+        try
+        {
+            Directory.CreateDirectory(dir);
+            var contacts = new[]
+            {
+                new ContactModel
+                {
+                    Id = 7, DisplayName = "Saved", EmailAddress = "saved@example.test",
+                    Source = ContactSource.Google,
+                },
+                new ContactModel
+                {
+                    Id = -1, DisplayName = "Old transient", EmailAddress = "old@example.test",
+                    Source = ContactSource.SentHistory, IsPriorRecipient = true,
+                },
+            };
+            var groups = new[]
+            {
+                new GroupModel { Id = 1, Name = "Saved group", MemberContactIds = [7] },
+            };
+            await File.WriteAllTextAsync(Path.Combine(dir, "contacts.json"), JsonSerializer.Serialize(contacts));
+            await File.WriteAllTextAsync(Path.Combine(dir, "groups.json"), JsonSerializer.Serialize(groups));
+
+            using var service = new ContactService(new ProfileContext(dir));
+            var matches = await service.SearchGroupsAsync("Saved");
+
+            Assert.Single(matches);
+            Assert.Equal(1, matches[0].ResolvedMemberCount);
+            var persisted = JsonSerializer.Deserialize<List<ContactModel>>(
+                await File.ReadAllTextAsync(Path.Combine(dir, "contacts.json")));
+            Assert.NotNull(persisted);
+            Assert.DoesNotContain(persisted!, c => c.Source == ContactSource.SentHistory);
+        }
+        finally { Cleanup(dir); }
+    }
+
+    [Fact]
+    public async Task DuplicatePersistentContactIds_AreReassignedBeforeGroupSearch()
+    {
+        var dir = TempDir();
+        try
+        {
+            Directory.CreateDirectory(dir);
+            var contacts = new[]
+            {
+                new ContactModel { Id = 3, DisplayName = "First", EmailAddress = "first@example.test" },
+                new ContactModel { Id = 3, DisplayName = "Second", EmailAddress = "second@example.test" },
+            };
+            await File.WriteAllTextAsync(Path.Combine(dir, "contacts.json"), JsonSerializer.Serialize(contacts));
+
+            using var service = new ContactService(new ProfileContext(dir));
+            await service.SearchGroupsAsync(string.Empty);
+
+            var persisted = JsonSerializer.Deserialize<List<ContactModel>>(
+                await File.ReadAllTextAsync(Path.Combine(dir, "contacts.json")));
+            Assert.NotNull(persisted);
+            Assert.Equal(2, persisted!.Select(c => c.Id).Distinct().Count());
+        }
+        finally { Cleanup(dir); }
+    }
+
+    [Fact]
     public async Task Concurrent_GroupAndContactWritesDoNotDeadlock()
     {
         var (service, dir) = MakeService();

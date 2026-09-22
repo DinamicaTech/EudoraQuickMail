@@ -430,6 +430,7 @@ public class ConfigService : IConfigService
             {
                 switch (key)
                 {
+                    case "usecustomgoogleoauthclient": config.UseCustomGoogleOAuthClient = ParseBool(value); break;
                     case "googleclientid":     config.GoogleClientId     = value; break;
                     case "googleclientsecret": config.GoogleClientSecret = value; break;
                 }
@@ -924,14 +925,19 @@ public class ConfigService : IConfigService
         }
 
         // ── [google] ───────────────────────────────────────────────────────────────
-        // Only written when credentials are present, so the default config stays clean.
-        if (!string.IsNullOrEmpty(config.GoogleClientId) || !string.IsNullOrEmpty(config.GoogleClientSecret))
+        // Keep a fresh default config clean. An explicit false is retained when old/custom
+        // credentials remain in the file, otherwise their presence would reactivate legacy mode.
+        if (config.UseCustomGoogleOAuthClient.HasValue
+            || !string.IsNullOrEmpty(config.GoogleClientId)
+            || !string.IsNullOrEmpty(config.GoogleClientSecret))
         {
             sb.AppendLine("[google]");
-            sb.AppendLine("# Google OAuth credentials from Google Cloud Console.");
-            sb.AppendLine("# Required to use Google OAuth (Gmail) accounts.");
+            sb.AppendLine("# Optional custom Google OAuth client from Google Cloud Console.");
+            sb.AppendLine("# Official builds use Eudora QuickMail's embedded client unless enabled here.");
             sb.AppendLine("# Never commit this file to source control.");
             sb.AppendLine();
+            if (config.UseCustomGoogleOAuthClient.HasValue)
+                sb.AppendLine($"UseCustomGoogleOAuthClient = {config.UseCustomGoogleOAuthClient.Value.ToString().ToLowerInvariant()}");
             if (!string.IsNullOrEmpty(config.GoogleClientId))
                 sb.AppendLine($"GoogleClientId = {config.GoogleClientId}");
             if (!string.IsNullOrEmpty(config.GoogleClientSecret))

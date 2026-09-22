@@ -39,7 +39,11 @@ public class ContactService : IContactService, IDisposable
         await _loadLock.WaitAsync();
         try
         {
-            var existing = _contactsCache.FirstOrDefault(c => c.EmailAddress.Equals(contact.EmailAddress, StringComparison.OrdinalIgnoreCase));
+            // Sent-history rows are transient autocomplete hints, not saved contacts. Promoting an
+            // address must create a durable row rather than updating a negative transient id which
+            // SaveContacts deliberately omits.
+            var existing = _contactsCache.FirstOrDefault(c => c.Source != ContactSource.SentHistory
+                && c.EmailAddress.Equals(contact.EmailAddress, StringComparison.OrdinalIgnoreCase));
             if (existing != null)
             {
                 // Update: preserve non-empty display name if new one is empty
@@ -51,7 +55,7 @@ public class ContactService : IContactService, IDisposable
             else
             {
                 // New contact: assign an ID (max + 1)
-                contact.Id = _contactsCache.Count > 0 ? _contactsCache.Max(c => c.Id) + 1 : 1;
+                contact.Id = NextPersistentContactId();
                 _contactsCache.Add(contact);
             }
             LogService.Debug($"[ContactService] UpsertContactAsync: email={contact.EmailAddress} assignedId={contact.Id} cacheCount={_contactsCache.Count}");
@@ -199,11 +203,12 @@ public class ContactService : IContactService, IDisposable
             // membership) rather than being deleted and re-added.
             var existingBySourceId = _contactsCache
                 .Where(c => c.OwnerAccountId == accountId && c.Source == source && c.SourceId != null)
-                .ToDictionary(c => c.SourceId!, StringComparer.Ordinal);
+                .GroupBy(c => c.SourceId!, StringComparer.Ordinal)
+                .ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
 
             var seenSourceIds = new HashSet<string>(StringComparer.Ordinal);
             // Compute the next id once; recomputing Max() per new row would be O(n²).
-            var nextId = _contactsCache.Count > 0 ? _contactsCache.Max(c => c.Id) + 1 : 1;
+            var nextId = NextPersistentContactId();
 
             foreach (var sc in serverContacts)
             {
@@ -272,7 +277,7 @@ public class ContactService : IContactService, IDisposable
             // is NOT rewritten to disk — stale MemberContactIds are kept so an
             // undo of a contact delete (if the user used Ctrl+Z elsewhere) can
             // re-resolve the membership.
-            var byId = _contactsCache.ToDictionary(c => c.Id);
+            var byId = PersistentContactsById();
             foreach (var g in _groupsCache)
             {
                 g.ResolvedMemberCount = g.MemberContactIds.Count(id => byId.ContainsKey(id));
@@ -419,7 +424,7 @@ public class ContactService : IContactService, IDisposable
         await _loadLock.WaitAsync(ct);
         try
         {
-            var byId = _contactsCache.ToDictionary(c => c.Id);
+            var byId = PersistentContactsById();
             var matches = (string.IsNullOrEmpty(q)
                 ? _groupsCache.AsEnumerable()
                 : _groupsCache.Where(g => g.Name.Contains(q, StringComparison.OrdinalIgnoreCase)))
@@ -469,6 +474,20 @@ public class ContactService : IContactService, IDisposable
             // Check again after acquiring lock in case another thread loaded while we were waiting
             if (_loaded) return;
             _contactsCache = await LoadJsonAsync(_contactsFilePath, () => new List<ContactModel>());
+
+            // Versions before 0.8.74 accidentally wrote transient sent-mail suggestions to
+            // contacts.json. On the next run LoadSentRecipientsAsync generated the same negative
+            // ids again, so group autocomplete's id dictionary threw "same key: -1". Remove the
+            // legacy rows and repair any already-persisted duplicate ids before adding the fresh,
+            // in-memory-only suggestions.
+            var removedTransient = _contactsCache.RemoveAll(c => c.Source == ContactSource.SentHistory);
+            var repairedIds = RepairDuplicatePersistentIds(_contactsCache);
+            if (removedTransient > 0 || repairedIds > 0)
+            {
+                await WriteJsonAtomicallyAsync(_contactsFilePath, _contactsCache);
+                LogService.Debug($"ContactService: repaired contacts.json; removedTransient={removedTransient}; reassignedDuplicateIds={repairedIds}");
+            }
+
             _contactsCache.AddRange(await LoadSentRecipientsAsync());
             _groupsCache   = await LoadGroupsWithRecoveryAsync();
             _loaded = true;
@@ -570,7 +589,40 @@ public class ContactService : IContactService, IDisposable
     /// </summary>
     private async Task SaveContactsAsyncLocked()
     {
-        await WriteJsonAtomicallyAsync(_contactsFilePath, _contactsCache);
+        // Sent-history rows are rebuilt from mail.db and use session-only negative ids. Persisting
+        // them both bloats contacts.json and creates duplicate ids after the next startup.
+        await WriteJsonAtomicallyAsync(_contactsFilePath,
+            _contactsCache.Where(c => c.Source != ContactSource.SentHistory).ToList());
+    }
+
+    private int NextPersistentContactId()
+    {
+        var maximum = _contactsCache
+            .Where(c => c.Source != ContactSource.SentHistory)
+            .Select(c => c.Id)
+            .DefaultIfEmpty(0)
+            .Max();
+        return Math.Max(1, maximum + 1);
+    }
+
+    private Dictionary<int, ContactModel> PersistentContactsById() => _contactsCache
+        .Where(c => c.Source != ContactSource.SentHistory)
+        .GroupBy(c => c.Id)
+        .ToDictionary(g => g.Key, g => g.First());
+
+    private static int RepairDuplicatePersistentIds(List<ContactModel> contacts)
+    {
+        var used = new HashSet<int>();
+        var nextId = Math.Max(1, contacts.Select(c => c.Id).DefaultIfEmpty(0).Max() + 1);
+        var repaired = 0;
+        foreach (var contact in contacts)
+        {
+            if (used.Add(contact.Id)) continue;
+            while (!used.Add(nextId)) nextId++;
+            contact.Id = nextId++;
+            repaired++;
+        }
+        return repaired;
     }
 
     private async Task SaveGroupsAsyncLocked()

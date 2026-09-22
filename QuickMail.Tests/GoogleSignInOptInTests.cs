@@ -265,6 +265,40 @@ public class GoogleSignInOptInTests
     }
 
     [Fact]
+    public void LegacyStoredGoogleCredentialsEnableCustomClientMode()
+    {
+        var configService = new StubConfigService();
+        var cfg = configService.Load();
+        cfg.GoogleClientId = "legacy-client";
+        cfg.GoogleClientSecret = "legacy-secret";
+        Assert.Null(cfg.UseCustomGoogleOAuthClient);
+
+        var vm = new SettingsViewModel(configService, new StubCommandRegistry());
+
+        Assert.True(vm.UseCustomGoogleOAuthClient);
+    }
+
+    [Fact]
+    public void DisablingCustomClientKeepsCredentialsButPersistsTheChoice()
+    {
+        var configService = new StubConfigService();
+        var cfg = configService.Load();
+        cfg.GoogleClientId = "legacy-client";
+        cfg.GoogleClientSecret = "legacy-secret";
+        var vm = new SettingsViewModel(configService, new StubCommandRegistry())
+        {
+            UseCustomGoogleOAuthClient = false,
+        };
+
+        vm.SaveCommand.Execute(null);
+
+        var saved = configService.Load();
+        Assert.False(saved.UseCustomGoogleOAuthClient);
+        Assert.Equal("legacy-client", saved.GoogleClientId);
+        Assert.Equal("legacy-secret", saved.GoogleClientSecret);
+    }
+
+    [Fact]
     public void TurningItBackOffWritesAnExplicitFalseRatherThanDroppingTheKey()
     {
         var configService = new StubConfigService();

@@ -489,19 +489,28 @@
                                 <CheckBox Content="Sign in with _Google for Gmail accounts"
                                           IsChecked="{Binding GoogleSignIn, Mode=TwoWay}"
                                           AutomationProperties.Name="Sign in with Google for Gmail accounts"/>
-                                <TextBlock Text="Use OAuth credentials for a Google Cloud Desktop application. They enable independent Google Calendar links and, when the option above is enabled, Gmail sign-in. Changes take effect after restarting QuickMail."
+                                <TextBlock Text="Official builds use Eudora QuickMail's Google registration for Calendar and Gmail sign-in. Changes take effect after restarting QuickMail."
                                            Foreground="{DynamicResource Theme.TextSecondary}" FontSize="{DynamicResource Theme.FontSizeSmall}" Margin="0,3,0,0" TextWrapping="Wrap"/>
-                                <Label Content="Google Client _ID:" Target="{Binding ElementName=GoogleClientIdBox}"
-                                       Margin="0,10,0,0"/>
-                                <TextBox x:Name="GoogleClientIdBox" Text="{Binding GoogleClientId, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                         AutomationProperties.Name="Google OAuth Client ID"/>
-                                <Label Content="Google Client _Secret:" Target="{Binding ElementName=GoogleClientSecretBox}"
-                                       Margin="0,8,0,0"/>
-                                <TextBox x:Name="GoogleClientSecretBox" Text="{Binding GoogleClientSecret, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                         AutomationProperties.Name="Google OAuth Client Secret"/>
-                                <TextBlock Text="Create the credentials in Google Cloud Console as application type Desktop app, with the Google Calendar API enabled. The client secret identifies the installed application; user refresh tokens remain protected in Windows Credential Manager."
+                                <CheckBox Content="Use a _custom Google OAuth client (advanced)"
+                                          IsChecked="{Binding UseCustomGoogleOAuthClient, Mode=TwoWay}"
+                                          Margin="0,10,0,0"
+                                          AutomationProperties.Name="Use a custom Google OAuth client"/>
+                                <TextBlock Text="Enable only for a self-built copy, fork, or a different Google Cloud project. Existing configurations with custom credentials remain enabled for compatibility."
                                            Foreground="{DynamicResource Theme.TextSecondary}" FontSize="{DynamicResource Theme.FontSizeSmall}"
-                                           Margin="0,6,0,0" TextWrapping="Wrap"/>
+                                           Margin="0,3,0,0" TextWrapping="Wrap"/>
+                                <StackPanel Visibility="{Binding UseCustomGoogleOAuthClient, Converter={StaticResource BoolToVisibilityConverter}}">
+                                    <Label Content="Google Client _ID:" Target="{Binding ElementName=GoogleClientIdBox}"
+                                           Margin="0,10,0,0"/>
+                                    <TextBox x:Name="GoogleClientIdBox" Text="{Binding GoogleClientId, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                             AutomationProperties.Name="Google OAuth Client ID"/>
+                                    <Label Content="Google Client _Secret:" Target="{Binding ElementName=GoogleClientSecretBox}"
+                                           Margin="0,8,0,0"/>
+                                    <TextBox x:Name="GoogleClientSecretBox" Text="{Binding GoogleClientSecret, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                             AutomationProperties.Name="Google OAuth Client Secret"/>
+                                    <TextBlock Text="Create a Desktop app in Google Cloud Console and enable the Google Calendar API. User refresh tokens remain protected in Windows Credential Manager."
+                                               Foreground="{DynamicResource Theme.TextSecondary}" FontSize="{DynamicResource Theme.FontSizeSmall}"
+                                               Margin="0,6,0,0" TextWrapping="Wrap"/>
+                                </StackPanel>
                             </StackPanel>
                         </GroupBox>
 
