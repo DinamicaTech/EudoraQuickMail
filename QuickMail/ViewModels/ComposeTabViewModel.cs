@@ -10,6 +10,7 @@ public sealed class ComposeTabViewModel : TabSessionViewModel
     public Action AddAttachments { get; }
     public Func<Guid, string, string, bool> IsEditingDraft { get; }
     public Action DiscardDeletedDraft { get; }
+    public Func<Task<bool>>? PrepareForBackupAsync { get; set; }
 
     public ComposeTabViewModel(string title, object content, Func<Task<bool>> tryCloseAsync,
         Action forceDispose, Action addAttachments,

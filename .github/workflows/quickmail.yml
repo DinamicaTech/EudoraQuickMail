@@ -264,6 +264,12 @@ jobs:
           }
           exit 0
 
+      - name: Test backup agent
+        run: dotnet test Tools/DinamicaBackup.Tests/DinamicaBackup.Tests.csproj -c Release --logger trx --results-directory TestResults/BackupAgent
+
+      - name: Test backup configuration UI
+        run: dotnet test Tools/DinamicaBackupAgent.Tests/DinamicaBackupAgent.Tests.csproj -c Release --logger trx --results-directory TestResults/BackupAgentUI
+
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v7
@@ -461,6 +467,13 @@ jobs:
       # everything by channel). Rename the ARM64 copy so both can live in one release.
       # The x64 asset keeps the bare EudoraQM.exe name used by current download links.
       # A future signing step must run before this harmless ARM64 rename.
+      - name: Package complete portable applications
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: |
+          Compress-Archive -Path publish/* -DestinationPath EudoraQM-${{ github.ref_name }}-win-x64.zip
+          Compress-Archive -Path publish-arm64/* -DestinationPath EudoraQM-${{ github.ref_name }}-win-arm64.zip
+
       - name: Name the ARM64 portable exe
         if: startsWith(github.ref, 'refs/tags/v')
         shell: pwsh
@@ -500,6 +513,9 @@ jobs:
           files: |
             publish/EudoraQM.exe
             publish-arm64/EudoraQM-arm64.exe
+            publish/BackupAgent/DinamicaBackupAgent.exe
+            EudoraQM-${{ github.ref_name }}-win-x64.zip
+            EudoraQM-${{ github.ref_name }}-win-arm64.zip
             installer/Output/Releases/EudoraQM-Setup.exe
             installer/Output/Releases/QuickMail-*-win.msi
             installer/Output/Releases/QuickMail-*-win-arm64.msi

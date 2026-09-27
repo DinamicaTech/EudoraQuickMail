@@ -139,6 +139,7 @@ public class SyncService : ISyncService
         CancellationToken ct)
     {
         if (_activity is { CanReceive: false }) return;
+        using var backupOperation = BackupOperationTracker.Enter();
         var previewJobs = new ConcurrentBag<(AccountModel Account, MailFolderModel Folder, List<MailMessageSummary> Incoming)>();
         var accountList = accounts.ToList();
 
@@ -437,6 +438,7 @@ public class SyncService : ISyncService
     public async Task<IReadOnlyList<MailMessageSummary>> SyncOneFolderAsync(AccountModel account, MailFolderModel folder, CancellationToken ct)
     {
         if (_activity is { CanReceive: false }) return [];
+        using var backupOperation = BackupOperationTracker.Enter();
         // IDLE-triggered sync in non-online (SQLite cache) mode.
         //
         // We intentionally mirror SyncOneFolderOnlineAsync rather than calling
@@ -465,6 +467,7 @@ public class SyncService : ISyncService
     public async Task<IReadOnlyList<MailMessageSummary>> SyncOneFolderOnlineAsync(AccountModel account, MailFolderModel folder, CancellationToken ct)
     {
         if (_activity is { CanReceive: false }) return [];
+        using var backupOperation = BackupOperationTracker.Enter();
         // Fetch the last 50 messages. OnFolderSynced deduplicates by UID so already-visible
         // messages are harmlessly skipped; only truly new arrivals are inserted.
         LogService.Log($"IDLE targeted sync: fetching {account.AccountLabel}/{folder.FullName}");
@@ -493,6 +496,7 @@ public class SyncService : ISyncService
 
     private async Task<List<MailMessageSummary>> SyncFolderAsync(AccountModel account, MailFolderModel folder, CancellationToken ct)
     {
+        using var backupOperation = BackupOperationTracker.Enter();
         FolderSyncStageChanged?.Invoke(account.Id, "reading the local synchronization marker…");
         // ── New messages ─────────────────────────────────────────────────────────
         var maxKey   = await _store.GetMaxMessageKeyAsync(account.Id, folder.FullName);

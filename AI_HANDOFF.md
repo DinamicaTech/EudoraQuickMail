@@ -10,6 +10,17 @@
 
 ## 1. Purpose
 
+### Backup agent development (2026-09-27)
+
+`Tools/DinamicaBackup.Core`, `Tools/DinamicaBackupAgent` and `Tools/DinamicaBackup.Tests`
+implement the reusable backup/maintenance agent. See
+[`docs/backup-agent-implementation.md`](docs/backup-agent-implementation.md) for the
+accepted product contract, on-disk formats, integration protocol and validation scope.
+EQM exposes **Tools → Backup and Restore**. Publishing EQM also publishes the agent into
+`BackupAgent/`; copying only the main EXE will not install the new agent. All schedules
+default to disabled and task registration is an explicit configuration action.
+No production backup tasks or production data were changed during this development.
+
 This is the canonical briefing for a future developer or AI agent. It records the product
 intent, everything added to original QuickMail, behavior that must survive refactors,
 architecture, persistent data, migrations, build/release workflow, exclusions and the safe
@@ -163,6 +174,11 @@ Before work, run `git rev-parse --show-toplevel` and require
 - HTML default; docked-tab or floating compose, with docked preferred.
 - HugeRTE formatting, links, lists, colours, fonts, charmap, emoji, preview and word count.
 - Editable HTML reply/forward quote, account HTML signatures and recipient autocomplete.
+- Recipient chips validate syntax and mail-domain DNS automatically: invalid addresses are red,
+  unresolved mailboxes stay yellow and previously confirmed recipients are green. Clicking a
+  yellow chip explicitly runs one conservative SMTP `RCPT TO` probe without `DATA`; definitive
+  results persist per profile, ambiguous/policy/temporary replies remain yellow for 24 hours,
+  probes are serialized and limited to ten per hour, and Offline mode performs no network check.
 - Draft autosave/recovery, newline-preserving templates and scheduled delivery. Compose uses a
   split Send control: ordinary Send is the default; its menu exposes Send later, Save as Draft and
   Send immediately, which explicitly bypasses the configured Undo Send delay.

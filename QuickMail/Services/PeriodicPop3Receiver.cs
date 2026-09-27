@@ -14,6 +14,7 @@ public sealed class PeriodicPop3Receiver : IDisposable
     private readonly CancellationTokenSource _stop = new();
     private int _running;
     private int _disposed;
+    public bool IsRunning => Volatile.Read(ref _running) != 0;
 
     public PeriodicPop3Receiver(IAccountService accounts, IPop3ReceiveService receiver,
         IRuleService? rules = null, TimeSpan? interval = null, MailActivityPolicyService? activity = null)
@@ -36,6 +37,8 @@ public sealed class PeriodicPop3Receiver : IDisposable
         if (Interlocked.Exchange(ref _running, 1) != 0) return;
         try
         {
+            using var backupOperation = BackupOperationTracker.TryEnter();
+            if (backupOperation is null) return;
             var accounts = _accounts.LoadAccounts()
                 .Where(a => a.IsActive && a.BackendKind == BackendKind.Pop3Smtp
                     && (includeAccountsWithAutomaticCheckDisabled || a.CheckIncomingMail)).ToList();

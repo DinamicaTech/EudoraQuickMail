@@ -15,6 +15,10 @@ namespace QuickMail;
 public partial class App : Application
 {
     private int _shutdownState;
+    private FileStream? _backupProfileLease;
+    private bool _backupRestoredProfile;
+    internal bool HasPendingBackupMailWork => (_pop3Receiver?.IsRunning ?? false)
+        || (ScheduledSender?.IsDispatching ?? false) || BackupOperationTracker.Busy;
 
     /// <summary>True after a real main-window close has begun.</summary>
     internal bool IsShutdownInProgress => Volatile.Read(ref _shutdownState) != 0;
@@ -70,6 +74,7 @@ public partial class App : Application
     private WindowsToastNotificationService? _notificationService;
     private AutoDiscoverService? _autoDiscoverService;
     private ConnectionTruthProbe? _truthProbe;
+    private RecipientValidationService? _recipientValidationService;
     private PeriodicPop3Receiver? _pop3Receiver;
     private Views.SplashWindow? _startupSplash;
     public ScheduledSendService? ScheduledSender { get; private set; }
@@ -161,6 +166,7 @@ public partial class App : Application
             app.InitializeComponent();
             app.ShowEarlySplash(args);
             app.Run();
+            app._backupProfileLease?.Dispose();
         }
     }
 
@@ -284,6 +290,15 @@ public partial class App : Application
             return;
         }
         Profile = profile;
+
+        try { _backupProfileLease = DinamicaBackup.ProfileLease.OpenApplication(profile.ProfileDir); }
+        catch (IOException ex)
+        {
+            _startupSplash?.Close(); _startupSplash = null;
+            MessageBox.Show("This profile is unavailable during backup or maintenance.\n\n" + ex.Message,
+                "Eudora QuickMail — maintenance", MessageBoxButton.OK, MessageBoxImage.Information);
+            Shutdown(); return;
+        }
 
         LogService.Configure(profile.ProfileDir);
         PerformanceLogService.Configure(profile.ProfileDir);
@@ -429,6 +444,14 @@ public partial class App : Application
                 if (!onlineMode)
                     localStore.Initialize();
             MailActivityPolicy = new MailActivityPolicyService(profile);
+            var restoredProfileMarker = Path.Combine(profile.ProfileDir, ".backup-restored-profile.json");
+            if (File.Exists(restoredProfileMarker))
+            {
+                MailActivityPolicy.SetOffline();
+                _backupRestoredProfile = true;
+                File.Delete(restoredProfileMarker);
+                LogService.Log("Backup restore detected: starting offline so restored scheduled mail can be reviewed before sending.");
+            }
             Snooze = onlineMode ? null : new SnoozeService(localStore);
             UnsubscribePreferences = new UnsubscribePreferenceService(profile);
             splash?.SetStatus("Loading accounts and application settings…");
@@ -469,7 +492,7 @@ public partial class App : Application
             // incapable of connecting, syncing, or sending, not merely unlikely to.
             var probeMode = UiProbe != null;
             IMailService effectiveMail = probeMode ? new ProbeOfflineMailService() : mailRouter;
-            ISendMailService effectiveSmtp = probeMode ? new ProbeOfflineSendMailService() : smtpService;
+            ISendMailService effectiveSmtp = probeMode ? new ProbeOfflineSendMailService() : new BackupAwareSender(smtpService);
             IOAuthService effectiveOAuth = probeMode ? new ProbeOfflineOAuthService() : oauthService;
 
             // Change-notification router (new-mail + reachability). IMAP's strategy is a held IDLE
@@ -585,6 +608,8 @@ public partial class App : Application
 
             _contactService = new ContactService(profile, configService.Load().RecipientCacheYears);
             var contactService = _contactService;
+            _recipientValidationService = new RecipientValidationService(profile);
+            var recipientValidationService = _recipientValidationService;
             _templateService = new TemplateService(profile);
             var templateService = _templateService;
             // accountService drives the one-time "All accounts" → per-account rule migration (#333 D1).
@@ -813,8 +838,13 @@ public partial class App : Application
                 });
             }
 
-            var mainWindow = new MainWindow(mainVm, effectiveSmtp, accountService, credentialService, effectiveMail, effectiveOAuth, commandRegistry, contactService, configService, localStore, viewService, ruleService, templateService, featureGate, flagService, customDictionary, themeService, _bugReportService, _notificationService, contactSyncService, graphCalendarSync, serverRuleService, providerCatalog, _autoDiscoverService, _truthProbe, rowLayoutService, watchService, profile, ScheduledSender);
+            var mainWindow = new MainWindow(mainVm, effectiveSmtp, accountService, credentialService, effectiveMail, effectiveOAuth, commandRegistry, contactService, configService, localStore, viewService, ruleService, templateService, featureGate, flagService, customDictionary, themeService, _bugReportService, _notificationService, contactSyncService, graphCalendarSync, serverRuleService, providerCatalog, _autoDiscoverService, _truthProbe, rowLayoutService, watchService, profile, ScheduledSender, recipientValidationService);
             RecordStartupStage("construct main window");
+            mainWindow.InitializeBackupCoordination();
+            if (_backupRestoredProfile)
+                mainWindow.Loaded += (_, _) => mainWindow.Dispatcher.BeginInvoke(() => MessageBox.Show(mainWindow,
+                    "This profile was restored from a backup and is starting OFFLINE.\n\nReview accounts and Scheduled messages before going online: an old backup can contain messages already sent since that backup.",
+                    "Restored profile", MessageBoxButton.OK, MessageBoxImage.Information));
 
             if (_pop3Receiver is not null)
                 _pop3Receiver.Failed += (account, error, manual) =>
@@ -939,6 +969,7 @@ public partial class App : Application
         _notificationService?.Dispose(); // unhooks the toast-activation static event
         _autoDiscoverService?.Dispose(); // releases the autoconfig HttpClient
         _truthProbe?.Dispose();     // cancels in-flight probes before releasing their token source
+        _recipientValidationService?.Dispose();
         MailActivityPolicy?.Dispose();
         ScreenshotCapture?.Dispose(); // flushes any in-flight PNG save (best effort, bounded)
         LogService.Log("Shutdown: application services disposed.");

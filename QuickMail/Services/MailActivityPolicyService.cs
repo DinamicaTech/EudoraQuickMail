@@ -14,6 +14,13 @@ public sealed class MailActivityPolicyService : IDisposable
     private readonly Timer _timer;
     private State _state;
     private int _disposed;
+    private volatile bool _maintenance;
+    public void SetMaintenance(bool active)
+    {
+        if (_maintenance == active) return;
+        _maintenance = active;
+        Changed?.Invoke();
+    }
 
     public MailActivityPolicyService(ProfileContext profile)
     {
@@ -26,8 +33,8 @@ public sealed class MailActivityPolicyService : IDisposable
     public event Action? Changed;
     public MailActivityMode Mode { get { lock (_gate) { NormalizeExpiredFocus(); return _state.Mode; } } }
     public DateTimeOffset? FocusUntilUtc { get { lock (_gate) { NormalizeExpiredFocus(); return _state.FocusUntilUtc; } } }
-    public bool CanReceive => Mode == MailActivityMode.Online;
-    public bool CanSend => Mode != MailActivityMode.Offline;
+    public bool CanReceive => !_maintenance && Mode == MailActivityMode.Online;
+    public bool CanSend => !_maintenance && Mode != MailActivityMode.Offline;
     public string DisplayText => Mode switch
     {
         MailActivityMode.Offline => "Offline — sending and receiving are paused",

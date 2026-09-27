@@ -5,7 +5,6 @@ using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Linq;
 using System.Net;
-using System.Net.Mail;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -140,6 +139,7 @@ public partial class ComposeWindow : Window
     private readonly IContactService    _contactService;
     private readonly ITemplateService   _templateService;
     private readonly IConfigService     _configService;
+    private readonly IRecipientValidationService? _recipientValidationService;
     private readonly ICustomDictionaryService? _customDictionary;
     private readonly CatalanSpellCheckService _catalanSpellCheck;
     private readonly LanguageToolService _languageTool;
@@ -351,12 +351,13 @@ public partial class ComposeWindow : Window
     // once, from either the deferred pre-warm or a spell-check entry point.
     private bool _spellCheckEnabled;
 
-    public ComposeWindow(ComposeViewModel vm, IContactService contactService, ITemplateService templateService, IConfigService configService, ICustomDictionaryService? customDictionary = null, IThemeService? themeService = null)
+    public ComposeWindow(ComposeViewModel vm, IContactService contactService, ITemplateService templateService, IConfigService configService, ICustomDictionaryService? customDictionary = null, IThemeService? themeService = null, IRecipientValidationService? recipientValidationService = null)
     {
         _vm = vm;
         _contactService = contactService;
         _templateService = templateService;
         _configService = configService;
+        _recipientValidationService = recipientValidationService;
         _customDictionary = customDictionary;
         _catalanSpellCheck = new CatalanSpellCheckService(customDictionary);
         _languageTool = new LanguageToolService(TranslationProfile);
@@ -365,6 +366,8 @@ public partial class ComposeWindow : Window
         // drafts/scheduled mail and rich replies, so the plain TextBox is never rendered first.
         vm.CurrentMode = ResolveInitialComposeMode();
         InitializeComponent();
+        foreach (var box in new[] { ToBox, CcBox, BccBox })
+            box.ValidateAddressRequested = ValidateRecipientAsync;
         DataContext = vm;
         ConfigureStoredMessageEditMode();
         ApplyComposeMode();
@@ -880,6 +883,32 @@ public partial class ComposeWindow : Window
 
     // ── Ctrl+K: Check Addresses ───────────────────────────────────────────────
 
+    private async Task<RecipientValidationResult> ValidateRecipientAsync(string address, bool smtpProbe)
+    {
+        if (!IsValidEmailAddress(address))
+            return new(RecipientValidationState.Invalid,
+                "Invalid email address syntax. Check the recipient before sending.");
+
+        if (_recipientValidationService is null)
+            return new(RecipientValidationState.Indeterminate,
+                "The address syntax is valid, but the mailbox has not been verified.");
+
+        if (Application.Current is App { MailActivityPolicy.Mode: MailActivityMode.Offline })
+        {
+            var offline = new RecipientValidationResult(RecipientValidationState.Indeterminate,
+                "QuickMail is offline. Go online to verify this recipient.", CanProbe: true);
+            if (smtpProbe) _vm.SetStatusOutcome(offline.Detail);
+            return offline;
+        }
+
+        if (smtpProbe) _vm.SetStatusOutcome($"Checking {address} with the destination SMTP server…");
+        var result = smtpProbe
+            ? await _recipientValidationService.ProbeAsync(address, _vm.SenderAccount?.Username)
+            : await _recipientValidationService.ClassifyAsync(address);
+        if (smtpProbe) _vm.SetStatusOutcome(result.Detail);
+        return result;
+    }
+
     private async void CheckAddresses()
     {
         int total = ToBox.GetChips().Count + CcBox.GetChips().Count + BccBox.GetChips().Count;
@@ -951,9 +980,17 @@ public partial class ComposeWindow : Window
 
     private static bool IsValidEmailAddress(string email)
     {
-        if (string.IsNullOrWhiteSpace(email) || !email.Contains('@')) return false;
-        try { return new MailAddress(email).Host.Contains('.'); }
-        catch { return false; }
+        if (!EmailAddressValidator.TryNormalize(email, out var normalized)) return false;
+        var at = normalized.LastIndexOf('@');
+        if (at < 0 || at == normalized.Length - 1) return false;
+        var domain = normalized[(at + 1)..];
+        if (domain.StartsWith('[') && domain.EndsWith(']'))
+        {
+            var literal = domain[1..^1];
+            if (literal.StartsWith("IPv6:", StringComparison.OrdinalIgnoreCase)) literal = literal[5..];
+            return IPAddress.TryParse(literal, out _);
+        }
+        return domain.Contains('.', StringComparison.Ordinal);
     }
 
     protected override void OnClosed(EventArgs e)
@@ -969,6 +1006,27 @@ public partial class ComposeWindow : Window
         _autocompleteCts = null;
         _vm.Dispose();
         base.OnClosed(e);
+    }
+
+    internal async Task<bool> PrepareForBackupAsync()
+    {
+        if (_vm.IsBusy) return false;
+        CommitAllAddressInputs();
+        if (_vm.CurrentMode == ComposeMode.Html && _htmlEditorReady && HtmlBodyEditor.CoreWebView2 is not null)
+        {
+            var json = await HtmlBodyEditor.CoreWebView2.ExecuteScriptAsync(
+                "(() => { if (!quickMailEditor) return null; return {html: '<!doctype html><html><head>' + preservedHeadStyles + '</head><body>' + quickMailEditor.getContent() + '</body></html>', plain: quickMailEditor.getContent({format:'text'})}; })()");
+            using var document = System.Text.Json.JsonDocument.Parse(json);
+            if (document.RootElement.ValueKind == System.Text.Json.JsonValueKind.Object)
+            {
+                var html = document.RootElement.GetProperty("html").GetString() ?? "";
+                var plain = document.RootElement.GetProperty("plain").GetString() ?? "";
+                if (_htmlSnapshot.Html != html) { _htmlSnapshot = new RichBodySnapshot(html, plain, plain); _vm.MarkBodyDirty(); }
+            }
+        }
+        if (_vm.IsSent || !_vm.IsDirty) return true;
+        await _vm.AutoSaveAsync();
+        return !_vm.IsDirty;
     }
 
     private async void OnWindowClosing(object? sender, CancelEventArgs e)

@@ -1,3 +1,5 @@
+using QuickMail.Services;
+
 namespace QuickMail.Controls;
 
 public class AddressChipModel
@@ -5,6 +7,9 @@ public class AddressChipModel
     public string DisplayName { get; set; } = string.Empty;
     public string EmailAddress { get; set; } = string.Empty;
     public bool IsInvalid { get; set; }
+    public RecipientValidationState ValidationState { get; set; } = RecipientValidationState.Indeterminate;
+    public string ValidationDetail { get; set; } = "Checking recipient…";
+    public bool CanProbe { get; set; }
 
     // Text shown on the chip face
     // Keep the actual destination visible while composing; a display name alone can

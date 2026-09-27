@@ -30,6 +30,7 @@ public sealed class ScheduledSendService : IOutgoingMailQueue, IDisposable
     private readonly ConcurrentDictionary<Guid, byte> _inFlight = new();
     private readonly CancellationTokenSource _stop = new();
     private int _disposed;
+    public bool IsDispatching => _dispatchGate.CurrentCount == 0;
 
     public ScheduledSendService(ProfileContext profile, ISendMailService sender, IAccountService accounts,
         ICredentialService credentials, LocalStoreService store, IMailService mail,

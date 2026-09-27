@@ -711,6 +711,8 @@
             <!-- Tools — always available (mirrors the Compose window's Tools menu).
                  Each command lives here only; not duplicated in File/Message/View. -->
             <MenuItem Header="_Tools">
+                <MenuItem Header="_Backup and Restore…" Click="MenuBackupRestore_Click"/>
+                <Separator/>
                 <MenuItem x:Name="OfflineModeMenuItem" Header="Work _Offline"
                           IsCheckable="True" Click="OfflineModeMenuItem_Click"/>
                 <MenuItem Header="_Focus Mode">

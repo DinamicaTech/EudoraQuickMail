@@ -17,8 +17,10 @@
 
 using System.Linq;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Threading;
 using QuickMail.Controls;
+using QuickMail.Services;
 using Xunit;
 
 namespace QuickMail.Tests;
@@ -72,6 +74,37 @@ public class TokenizedAddressBoxPasteTests : WpfTestBase
         Assert.Contains(chips, c => c.EmailAddress == "alice@example.com");
         Assert.Contains(chips, c => c.EmailAddress == "bob@example.com");
         Assert.Equal(string.Empty, box.InputBox.Text);
+    }
+
+    [WpfFact]
+    public void YellowChip_ClickRunsExplicitProbeAndTurnsGreen()
+    {
+        EnsureApplication();
+        var box = new TokenizedAddressBox();
+        var calls = new List<bool>();
+        box.ValidateAddressRequested = (_, smtpProbe) =>
+        {
+            calls.Add(smtpProbe);
+            return Task.FromResult(smtpProbe
+                ? new RecipientValidationResult(RecipientValidationState.Valid, "Accepted.")
+                : new RecipientValidationResult(
+                    RecipientValidationState.Indeterminate, "Domain exists.", CanProbe: true));
+        };
+
+        box.InputBox.Text = "person@example.com,";
+        DoEvents();
+
+        var chip = Assert.Single(box.GetChips());
+        Assert.Equal(RecipientValidationState.Indeterminate, chip.ValidationState);
+        Assert.True(chip.CanProbe);
+
+        var button = Assert.IsType<Button>(box.ChipPanel.Children[0]);
+        button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        DoEvents();
+
+        Assert.Equal(RecipientValidationState.Valid, chip.ValidationState);
+        Assert.False(chip.CanProbe);
+        Assert.Equal([false, true], calls);
     }
 
     private static void EnsureApplication()

@@ -208,6 +208,7 @@ public partial class MainWindow : Window
     private readonly IBugReportService? _bugReportService;
     private readonly ConnectionTruthProbe? _truthProbe;
     private readonly INotificationService? _notificationService;
+    private readonly IRecipientValidationService? _recipientValidationService;
 
     // ── Close-to-tray / run-in-background ──────────────────────────────────────
     // Created lazily the first time the window hides to the tray; disposed in OnClosed.
@@ -275,7 +276,8 @@ public partial class MainWindow : Window
         IRowLayoutService? rowLayoutService = null,
         IWatchService? watchService = null,
         ProfileContext? profileContext = null,
-        IOutgoingMailQueue? outgoingQueue = null)
+        IOutgoingMailQueue? outgoingQueue = null,
+        IRecipientValidationService? recipientValidationService = null)
     {
         _vm = vm;
         _watchService = watchService;
@@ -303,6 +305,7 @@ public partial class MainWindow : Window
         _ruleService = ruleService;
         _templateService = templateService;
         _outgoingQueue = outgoingQueue;
+        _recipientValidationService = recipientValidationService;
         _featureGate = featureGate;
         _flagService = flagService;
         _customDictionary = customDictionary;
@@ -941,6 +944,7 @@ public partial class MainWindow : Window
         if (currentApplication?.Dispatcher.CheckAccess() == true)
             (currentApplication as App)?.BeginShutdown();
         _statusClockTimer.Stop();
+        _backupPollTimer?.Stop();
         _statusClockTimer.Tick -= StatusClockTimer_Tick;
         _undoSendTimer?.Stop();
         _vm.FolderSelectionDataReady -= OnFolderSelectionDataReady;
@@ -7087,7 +7091,7 @@ public partial class MainWindow : Window
     {
         composeVm.UndoSendAvailable += ShowUndoSend;
         var window = new ComposeWindow(composeVm, _contactService, _templateService, _configService,
-            _customDictionary, _themeService);
+            _customDictionary, _themeService, _recipientValidationService);
         if (_configService.Load().Windowing.ComposeOpenMode == ComposeOpenMode.DockedTab)
         {
             var content = window.DetachForDockedHost(this);
@@ -7100,6 +7104,7 @@ public partial class MainWindow : Window
             }, window.ForceDisposeDockedHost,
                 () => composeVm.AddAttachmentsCommand.Execute(null),
                 window.IsEditingDraft, window.DiscardDeletedDraft);
+            tab.PrepareForBackupAsync = window.PrepareForBackupAsync;
             composeVm.PropertyChanged += (_, e) =>
             {
                 if (e.PropertyName == nameof(ComposeViewModel.TabTitle) && tab is not null)

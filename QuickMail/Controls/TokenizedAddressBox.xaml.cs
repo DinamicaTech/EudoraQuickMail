@@ -9,6 +9,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using MimeKit;
 using QuickMail.Models;
+using QuickMail.Services;
 using QuickMail.Views;
 
 namespace QuickMail.Controls;
@@ -76,6 +77,12 @@ public partial class TokenizedAddressBox : UserControl
     /// Parameters are (displayName, emailAddress). The delegate may be async.
     /// </summary>
     public Func<string, string, Task>? AddToContactsRequested { get; set; }
+
+    /// <summary>
+    /// Performs either the quiet syntax/DNS classification (<c>false</c>) or the explicit SMTP
+    /// probe requested by clicking a yellow chip (<c>true</c>).
+    /// </summary>
+    public Func<string, bool, Task<RecipientValidationResult>>? ValidateAddressRequested { get; set; }
 
     public TokenizedAddressBox()
     {
@@ -162,8 +169,16 @@ public partial class TokenizedAddressBox : UserControl
         _chips[index].DisplayName = displayName;
         _chips[index].EmailAddress = emailAddress;
         _chips[index].IsInvalid = isInvalid;
+        _chips[index].ValidationState = isInvalid
+            ? RecipientValidationState.Invalid
+            : RecipientValidationState.Indeterminate;
+        _chips[index].ValidationDetail = isInvalid
+            ? "Invalid or unrecognized recipient."
+            : "Checking recipient…";
+        _chips[index].CanProbe = false;
         RefreshChipButton(index);
         UpdateAddressText();
+        if (!isInvalid) QueueValidation(_chips[index]);
     }
 
     // ── Parsing ───────────────────────────────────────────────────────────────
@@ -192,6 +207,7 @@ public partial class TokenizedAddressBox : UserControl
                 };
                 _chips.Add(chip);
                 ChipPanel.Children.Insert(ChipPanel.Children.Count - 1, CreateChipButton(chip, _chips.Count - 1));
+                QueueValidation(chip);
             }
         }
         else
@@ -258,6 +274,7 @@ public partial class TokenizedAddressBox : UserControl
         _chips.Add(chip);
         ChipPanel.Children.Insert(ChipPanel.Children.Count - 1, CreateChipButton(chip, _chips.Count - 1));
         UpdateAddressText();
+        QueueValidation(chip);
     }
 
     private void RemoveChipAt(int index)
@@ -274,8 +291,16 @@ public partial class TokenizedAddressBox : UserControl
             ((Button)ChipPanel.Children[Math.Min(index, _chips.Count - 1)]).Focus();
     }
 
-    private static string ChipAccessibleName(AddressChipModel chip) =>
-        chip.IsInvalid ? $"Unrecognized: {chip.FullAddress}" : chip.FullAddress;
+    private static string ChipAccessibleName(AddressChipModel chip)
+    {
+        var state = chip.ValidationState switch
+        {
+            RecipientValidationState.Valid => "Validated recipient",
+            RecipientValidationState.Invalid => "Invalid recipient",
+            _ => "Recipient not verified"
+        };
+        return $"{state}: {chip.FullAddress}. {chip.ValidationDetail}";
+    }
 
     private Button CreateChipButton(AddressChipModel chip, int index)
     {
@@ -284,14 +309,20 @@ public partial class TokenizedAddressBox : UserControl
         {
             Content = chip.Label,
             Tag = index,
-            ToolTip = fullAddress,
+            ToolTip = ChipToolTip(chip),
             Style = (Style)FindResource("ChipStyle")
         };
-        ApplyChipValidationStyle(btn, chip.IsInvalid);
+        ApplyChipValidationStyle(btn, chip.ValidationState);
         // Accessible name is the full address; prefix "Unrecognized:" when validation fails
         // so screen readers convey the error state without relying on colour alone.
         AutomationProperties.SetName(btn, ChipAccessibleName(chip));
-        btn.Click += (_, _) => { ClearChipSelection(); btn.Focus(); };
+        btn.Click += async (_, _) =>
+        {
+            ClearChipSelection();
+            btn.Focus();
+            if (chip.ValidationState == RecipientValidationState.Indeterminate && chip.CanProbe)
+                await ValidateChipAsync(chip, smtpProbe: true);
+        };
         btn.PreviewKeyDown += ChipButton_PreviewKeyDown;
         btn.ContextMenu = CreateChipContextMenu(chip, btn);
         return btn;
@@ -303,26 +334,78 @@ public partial class TokenizedAddressBox : UserControl
         var chip = _chips[index];
         var btn = (Button)ChipPanel.Children[index];
         btn.Content = chip.Label;
-        var fullAddress = chip.FullAddress;
-        btn.ToolTip = fullAddress;
-        ApplyChipValidationStyle(btn, chip.IsInvalid);
+        btn.ToolTip = ChipToolTip(chip);
+        ApplyChipValidationStyle(btn, chip.ValidationState);
         AutomationProperties.SetName(btn, ChipAccessibleName(chip));
         btn.ContextMenu = CreateChipContextMenu(chip, btn);
     }
 
-    private static void ApplyChipValidationStyle(Button btn, bool isInvalid)
+    private static string ChipToolTip(AddressChipModel chip) =>
+        string.IsNullOrWhiteSpace(chip.ValidationDetail)
+            ? chip.FullAddress
+            : chip.FullAddress + Environment.NewLine + chip.ValidationDetail;
+
+    private static void ApplyChipValidationStyle(Button btn, RecipientValidationState state)
     {
-        if (isInvalid)
+        switch (state)
         {
-            // Resource references (not brush copies) so the error state restyles
-            // live on theme change and stays visually distinct in every theme.
-            btn.SetResourceReference(BackgroundProperty, Theming.ThemeKeys.ErrorBackground);
-            btn.SetResourceReference(BorderBrushProperty, Theming.ThemeKeys.Error);
+            case RecipientValidationState.Valid:
+                btn.SetResourceReference(BackgroundProperty, Theming.ThemeKeys.SuccessBackground);
+                btn.SetResourceReference(BorderBrushProperty, Theming.ThemeKeys.Success);
+                break;
+            case RecipientValidationState.Invalid:
+                btn.SetResourceReference(BackgroundProperty, Theming.ThemeKeys.ErrorBackground);
+                btn.SetResourceReference(BorderBrushProperty, Theming.ThemeKeys.Error);
+                break;
+            default:
+                btn.SetResourceReference(BackgroundProperty, Theming.ThemeKeys.WarningBackground);
+                btn.SetResourceReference(BorderBrushProperty, Theming.ThemeKeys.Warning);
+                break;
         }
-        else
+    }
+
+    private void QueueValidation(AddressChipModel chip)
+    {
+        if (ValidateAddressRequested is null) return;
+        _ = ValidateChipAsync(chip, smtpProbe: false);
+    }
+
+    private async Task ValidateChipAsync(AddressChipModel chip, bool smtpProbe)
+    {
+        var callback = ValidateAddressRequested;
+        if (callback is null) return;
+
+        chip.CanProbe = false;
+        chip.ValidationDetail = smtpProbe ? "Running one-time SMTP check…" : "Checking recipient…";
+        var pendingIndex = _chips.IndexOf(chip);
+        if (pendingIndex >= 0) RefreshChipButton(pendingIndex);
+
+        RecipientValidationResult result;
+        try
         {
-            btn.ClearValue(BackgroundProperty);
-            btn.ClearValue(BorderBrushProperty);
+            result = await callback(chip.EmailAddress, smtpProbe);
+        }
+        catch (Exception ex)
+        {
+            LogService.Log("Validate compose recipient", ex);
+            result = new(RecipientValidationState.Indeterminate,
+                "The recipient could not be checked. Click to retry.", CanProbe: true);
+        }
+
+        var index = _chips.IndexOf(chip);
+        if (index < 0) return; // removed or replaced while the asynchronous check was running
+        chip.ValidationState = result.State;
+        chip.IsInvalid = result.State == RecipientValidationState.Invalid;
+        chip.ValidationDetail = result.Detail;
+        chip.CanProbe = result.CanProbe;
+        RefreshChipButton(index);
+        // Quiet DNS classification runs for every completed address; announcing every yellow
+        // result would drown out the compose experience for screen-reader users. Explicit probes
+        // and actionable red results are still announced.
+        if (smtpProbe || result.State == RecipientValidationState.Invalid)
+        {
+            AccessibilityHelper.Announce(this, ChipAccessibleName(chip),
+                category: AnnouncementCategory.Result);
         }
     }
 
@@ -340,7 +423,7 @@ public partial class TokenizedAddressBox : UserControl
         else
         {
             btn.ClearValue(ForegroundProperty);
-            ApplyChipValidationStyle(btn, _chips[index].IsInvalid);
+            ApplyChipValidationStyle(btn, _chips[index].ValidationState);
         }
     }
 

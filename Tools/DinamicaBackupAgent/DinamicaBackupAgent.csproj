@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework><OutputType>WinExe</OutputType><UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable><ImplicitUsings>enable</ImplicitUsings><Version>0.1.3</Version>
+    <AssemblyName>DinamicaBackupAgent</AssemblyName><StartupObject>DinamicaBackupAgent.Program</StartupObject>
+    <ApplicationIcon>Assets\DinamicaBackup.ico</ApplicationIcon>
+  </PropertyGroup>
+  <ItemGroup><ProjectReference Include="../DinamicaBackup.Core/DinamicaBackup.Core.csproj" /></ItemGroup>
+  <ItemGroup><Resource Include="Assets\DinamicaBackup.ico" /></ItemGroup>
+</Project>
