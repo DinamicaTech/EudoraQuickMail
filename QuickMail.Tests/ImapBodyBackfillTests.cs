@@ -3,6 +3,7 @@ using QuickMail.Models;
 using QuickMail.Services;
 using QuickMail.ViewModels;
 using System.IO;
+using System.Globalization;
 
 namespace QuickMail.Tests;
 
@@ -115,6 +116,7 @@ public sealed class ImapBodyBackfillTests : IDisposable
     [Fact]
     public async Task DateSearchRuleRemovalKeepsCollectionOrderAndNextMessage()
     {
+        using var culture = new SpanishDateCulture();
         Directory.CreateDirectory(_directory);
         var store = new LocalStoreService(new ProfileContext(_directory));
         store.Initialize();
@@ -184,6 +186,7 @@ public sealed class ImapBodyBackfillTests : IDisposable
     [Fact]
     public async Task RecoveryDeleteKeepsDateSearchAndItsSurvivingRows()
     {
+        using var culture = new SpanishDateCulture();
         Directory.CreateDirectory(_directory);
         var store = new LocalStoreService(new ProfileContext(_directory));
         store.Initialize();
@@ -232,6 +235,13 @@ public sealed class ImapBodyBackfillTests : IDisposable
         Assert.Same(collection, vm.Messages);
         Assert.Equal(new[] { "1", "2" }, vm.Messages.Select(m => m.MessageId));
         Assert.Same(first, vm.SelectedMessage);
+    }
+
+    private sealed class SpanishDateCulture : IDisposable
+    {
+        private readonly CultureInfo _previous = CultureInfo.CurrentCulture;
+        public SpanishDateCulture() => CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("es-ES");
+        public void Dispose() => CultureInfo.CurrentCulture = _previous;
     }
 
     private static MailMessageSummary Summary(Guid accountId, string folder, string uid,
