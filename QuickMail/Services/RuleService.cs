@@ -104,6 +104,7 @@ public class RuleService : IRuleService
     }
 
     private static string SemanticKey(MailRule r) => string.Join('\u001f',
+        r.IsSpamFilter, r.SpamBlockDomain,
         r.Name, r.IsEnabled, r.ApplyAutomatically, r.AlsoFilterOutMailbox,
         r.UseFromCondition, r.FromContains,
         r.UseToCondition, r.ToContains, r.AlsoCcBcc,
@@ -113,6 +114,7 @@ public class RuleService : IRuleService
 
     public void SaveRules(List<MailRule> rules)
     {
+        foreach (var rule in rules) SpamPolicy.Validate(rule);
         _cache = rules;
         var dir = Path.GetDirectoryName(_filePath)!;
         Directory.CreateDirectory(dir);
@@ -148,6 +150,7 @@ public class RuleService : IRuleService
         var rules = LoadRules();
         var criterion = candidate.FromContains.Trim();
         var existing = rules.FirstOrDefault(rule =>
+            !rule.IsSpamFilter &&
             rule.Action == RuleAction.MoveToFolder &&
             rule.AccountId is null &&
             rule.UseFromCondition &&
@@ -194,13 +197,14 @@ public class RuleService : IRuleService
         var perf = $"account={accountId}; messages={incoming.Count}; automaticOnly={automaticOnly}";
         PerformanceLogService.Marker("Rules: apply batch BEGIN", perf);
         var rules = LoadRules();
-        var enabledRules = rules.Where(r => r.IsEnabled && (!automaticOnly || r.ApplyAutomatically)).ToList();
+        var enabledRules = rules.Where(r => r.IsEnabled && (!automaticOnly || r.ApplyAutomatically))
+            .OrderByDescending(r => r.IsSpamFilter).ToList();
         // Automatic rules are an incoming-mail pipeline. Keep this guard here as well as at the
         // sync callers so a future caller cannot accidentally apply an automatic move/delete rule
         // to an outgoing message (for example, a freshly materialized Sent copy).
         var candidates = automaticOnly
             ? incoming.Where(message => message.Direction != MessageDirection.Outgoing).ToList()
-            : incoming;
+            : incoming.ToList();
         var excludedOutgoing = incoming.Count - candidates.Count;
         LogService.Debug($"ApplyRulesAsync: {enabledRules.Count} enabled rules, {candidates.Count} candidate messages for account {accountId} (automatic={automaticOnly}, outgoing excluded={excludedOutgoing})");
         if (enabledRules.Count == 0)
@@ -247,10 +251,14 @@ public class RuleService : IRuleService
                     LogService.Debug($"    Match: From='{m.From}' Subject='{m.Subject}' UID={m.MessageId} Folder={m.FolderName}");
             }
             if (matched.Count == 0) continue;
+            // A failed SPAM move must not fall through to an unrelated normal rule.
+            if (rule.IsSpamFilter)
+                candidates.RemoveAll(m => matched.Contains(m));
 
             try
             {
-                await ExecuteActionAsync(rule, matched, accountId, ct);
+                await FilterOperationTrace.RunAsync("Rules: action", $"account={accountId}; action={rule.Action}; messages={matched.Count}",
+                    $"Applying {rule.Action} to {matched.Count:N0} message(s)…", () => ExecuteActionAsync(rule, matched, accountId, ct));
                 foreach (var m in matched)
                     affectedKeys.Add((m.MessageId, m.AccountId, m.FolderName));
 
@@ -263,6 +271,7 @@ public class RuleService : IRuleService
                         matchedKeys.Add((m.MessageId, m.AccountId, m.FolderName));
                     incoming.RemoveAll(m => matchedKeys.Contains((m.MessageId, m.AccountId, m.FolderName)));
                     removedMessages.AddRange(matched);
+                    candidates.RemoveAll(m => matchedKeys.Contains((m.MessageId, m.AccountId, m.FolderName)));
                 }
             }
             catch (OperationCanceledException) { throw; }
@@ -325,7 +334,7 @@ public class RuleService : IRuleService
         foreach (var group in matched.GroupBy(m => m.AccountId))
             await ExecuteActionAsync(rule, group.ToList(), group.Key, ct);
 
-        if (rule.Action is RuleAction.MoveToFolder or RuleAction.Delete)
+        if (!rule.IsSpamFilter && rule.Action is RuleAction.MoveToFolder or RuleAction.Delete)
         {
             foreach (var group in matched.GroupBy(m => (m.AccountId, m.FolderName)))
                 await store.DeleteSummariesAsync(group.Key.AccountId, group.Key.FolderName,
@@ -343,6 +352,7 @@ public class RuleService : IRuleService
     private static bool MatchesRule(MailRule rule, MailMessageSummary msg, string? completeBody = null,
         string? storedCc = null, string? storedBcc = null)
     {
+        if (rule.IsSpamFilter) return SpamPolicy.Matches(rule, msg);
         var fromCandidate = msg.Direction == MessageDirection.Outgoing ? msg.To : msg.From;
         if (rule.UseFromCondition
             && !string.IsNullOrEmpty(rule.FromContains)
@@ -408,8 +418,22 @@ public class RuleService : IRuleService
         Guid accountId,
         CancellationToken ct)
     {
+        if (rule.IsSpamFilter)
+        {
+            SpamPolicy.Validate(rule);
+            if (_store is not LocalStoreService spamStore)
+                throw new InvalidOperationException("SPAM classification requires a persistent local store.");
+            var folders = await _imap.GetFoldersAsync(accountId, ct);
+            var junk = folders.FirstOrDefault(f => f.Kind == SpecialFolderKind.Junk)
+                ?? throw new InvalidOperationException("No Junk folder is available for this account.");
+            foreach (var message in matched)
+                await spamStore.SetSpamAsync(message, true, ct);
+            await MoveToFolderAsync(matched, junk.FullName, ct);
+            return;
+        }
         if (rule.AlsoMarkAsRead && rule.Action != RuleAction.MarkAsRead)
-            await MarkAsReadAsync(matched, ct);
+            await FilterOperationTrace.RunAsync("Rules: mark as read", $"account={accountId}; messages={matched.Count}",
+                $"Marking {matched.Count:N0} message(s) as read…", () => MarkAsReadAsync(matched, ct));
         switch (rule.Action)
         {
             case RuleAction.MarkAsRead:
@@ -482,7 +506,9 @@ public class RuleService : IRuleService
         {
             ct.ThrowIfCancellationRequested();
             var uids = group.Select(m => m.MessageId).ToList();
-            var physicalTarget = await ResolveTargetFolderAsync(targetFolder, group.Key.AccountId);
+            var physicalTarget = await FilterOperationTrace.RunAsync("Rules: resolve destination", $"account={group.Key.AccountId}; messages={uids.Count}",
+                "Resolving the filter destination…", () => ResolveTargetFolderAsync(targetFolder, group.Key.AccountId));
+            if (group.Key.FolderName.Equals(physicalTarget, StringComparison.Ordinal)) continue;
             try
             {
                 await _imap.MoveMessagesAsync(
@@ -583,7 +609,7 @@ public class RuleService : IRuleService
         CancellationToken ct)
     {
         var rules = LoadRules();
-        var enabledRules = rules.Where(r => r.IsEnabled).ToList();
+        var enabledRules = rules.Where(r => r.IsEnabled).OrderByDescending(r => r.IsSpamFilter).ToList();
         if (enabledRules.Count == 0) return [];
 
         var removedMessages = new List<MailMessageSummary>();
@@ -622,10 +648,12 @@ public class RuleService : IRuleService
 
             LogService.Debug($"  Rule '{rule.Name}': {matched.Count} matched in existing mail (action={rule.Action})");
             if (matched.Count == 0) continue;
+            if (rule.IsSpamFilter) inboxMessages.RemoveAll(m => matched.Contains(m));
 
             try
             {
-                await ExecuteActionAsync(rule, matched, matched[0].AccountId, ct);
+                foreach (var accountGroup in matched.GroupBy(m => m.AccountId))
+                    await ExecuteActionAsync(rule, accountGroup.ToList(), accountGroup.Key, ct);
 
                 if (rule.Action is RuleAction.MoveToFolder or RuleAction.Delete)
                 {

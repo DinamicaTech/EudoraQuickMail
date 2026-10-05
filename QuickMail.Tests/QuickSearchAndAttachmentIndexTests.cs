@@ -74,6 +74,16 @@ public class QuickSearchParserTests
         Assert.Equal(4, month.End.ToLocalTime().Month);
     }
 
+    [Fact]
+    public void DistinguishesIndexedPrefixFromSlowSubstringWildcard()
+    {
+        Assert.False(QuickSearchParser.HasSlowWildcard("chocola*"));
+        Assert.False(QuickSearchParser.HasSlowWildcard("B:chocola*;N"));
+        Assert.True(QuickSearchParser.HasSlowWildcard("*chocola*"));
+        Assert.True(QuickSearchParser.HasSlowWildcard("S:*chocola*"));
+        Assert.True(QuickSearchParser.HasSlowWildcard("B:cho?olate"));
+    }
+
     [Theory]
     [InlineData("today", 0)]
     [InlineData("yesterday", -1)]
@@ -259,6 +269,12 @@ public class QuickSearchStoreTests
 
             Assert.Equal(1, (await store.SearchLocalMessagesAsync(new("T:@dinamica;A#=1;D=2026"), TestContext.Current.CancellationToken)).TotalMatches);
             Assert.Equal(1, (await store.SearchLocalMessagesAsync(new("B:cho?olate"), TestContext.Current.CancellationToken)).TotalMatches);
+            Assert.Equal(1, (await store.SearchLocalMessagesAsync(new("B:chox*"), TestContext.Current.CancellationToken)).TotalMatches);
+            Assert.Equal(1, (await store.SearchLocalMessagesAsync(new("chox*"), TestContext.Current.CancellationToken)).TotalMatches);
+            Assert.Equal(1, (await store.SearchLocalMessagesAsync(new("B:*oxola*"), TestContext.Current.CancellationToken)).TotalMatches);
+            Assert.Equal(0, (await store.SearchLocalMessagesAsync(new("B:oxola*"), TestContext.Current.CancellationToken)).TotalMatches);
+            Assert.Equal(1, (await store.SearchLocalMessagesAsync(new("AC:Choco*"), TestContext.Current.CancellationToken)).TotalMatches);
+            Assert.Equal(1, (await store.SearchLocalMessagesAsync(new("S:*nnu*"), TestContext.Current.CancellationToken)).TotalMatches);
             Assert.Equal(1, (await store.SearchLocalMessagesAsync(new("AN:report"), TestContext.Current.CancellationToken)).TotalMatches);
             Assert.Equal(1, (await store.SearchLocalMessagesAsync(new("AC:Chocolate"), TestContext.Current.CancellationToken)).TotalMatches);
             Assert.Equal(1, (await store.SearchLocalMessagesAsync(new("O"), TestContext.Current.CancellationToken)).TotalMatches);

@@ -11,6 +11,7 @@ public sealed class Runner(BackupJob job, IProgress<ProgressInfo>? progress = nu
     public Func<string, (string User, string Password)>? ReadCredential { get; set; }
     public Action? ConnectDestination { get; set; }
     public Action? ReopenApplication { get; set; }
+    public bool RequestInteractiveWatcher { get; set; }
 
     public async Task<RunResult> RunAsync(string kind, CancellationToken ct, string? archive = null,
         string? restoreDestination = null, RestoreMode restoreMode = RestoreMode.Database,
@@ -46,7 +47,7 @@ public sealed class Runner(BackupJob job, IProgress<ProgressInfo>? progress = nu
                     using (new FileStream(probe, FileMode.CreateNew, FileAccess.Write, FileShare.None)) { }
                     File.Delete(probe);
                 }
-                (lease, closed) = await ProfileLease.AcquireAsync(job, progress, ct, response => closed = response);
+                (lease, closed) = await ProfileLease.AcquireAsync(job, progress, ct, response => closed = response, RequestInteractiveWatcher);
             }
             var engine = new BackupEngine(job, progress);
             switch (kind)
@@ -81,7 +82,9 @@ public sealed class Runner(BackupJob job, IProgress<ProgressInfo>? progress = nu
                 case "Maintenance":
                     var until = MaintenanceEnd(DateTime.Now) ?? DateTime.Now.AddMinutes(job.MaintenanceMinutes);
                     await WaitUntil(until, ct);
-                    run.Detail = "External maintenance interval completed; external backup success is not known.";
+                    run.Detail = "External backup window completed; external backup success is not known.";
+                    run.VerificationDetails.Add("EQM remained closed through the configured external maintenance interval.");
+                    run.VerificationDetails.Add("No external backup was launched or verified by Dinamica Backup Agent.");
                     break;
                 default: throw new ArgumentException("Unknown operation: " + kind);
             }
@@ -91,7 +94,9 @@ public sealed class Runner(BackupJob job, IProgress<ProgressInfo>? progress = nu
                 await WaitUntil(end, ct);
                 run.CompletedMaintenanceOccurrence = occurrence.ToString("O");
                 catalog.Set("schedule-Maintenance", occurrence.ToString("O"));
-                catalog.Save(new RunResult { Kind = "Maintenance", StartedUtc = new DateTimeOffset(occurrence), FinishedUtc = DateTimeOffset.UtcNow, Status = "Success", Detail = "External maintenance interval held after " + kind + "; external backup success is unknown." });
+                var completedMaintenance = new RunResult { Kind = "Maintenance", StartedUtc = new DateTimeOffset(occurrence), FinishedUtc = DateTimeOffset.UtcNow, Status = "Success", Detail = "External backup window held after " + kind + "; external backup success is unknown.",
+                    VerificationDetails = ["EQM remained closed through the configured external maintenance interval.", "No external backup was launched or verified by Dinamica Backup Agent."] };
+                catalog.Save(completedMaintenance);
             }
             run.Status = run.Warnings.Count == 0 ? "Success" : "Warning";
         }
@@ -112,7 +117,7 @@ public sealed class Runner(BackupJob job, IProgress<ProgressInfo>? progress = nu
                 {
                     for (var attempt = 0; attempt < 20 && ProfileLease.IsAlive(closed); attempt++) await Task.Delay(250);
                     if (ProfileLease.IsAlive(closed)) throw new IOException("Application is still completing shutdown; reopen it manually after it exits.");
-                    ReopenApplication?.Invoke();
+                    if (!closed.InteractiveWatcherStarted) ReopenApplication?.Invoke();
                 }
                 catch (Exception ex) { run.Warnings.Add("Could not reopen application: " + ex.Message); if (run.Status == "Success") run.Status = "Warning"; }
             }
@@ -122,7 +127,7 @@ public sealed class Runner(BackupJob job, IProgress<ProgressInfo>? progress = nu
             JsonFiles.Write(Path.Combine(job.ProfileDirectory, "backup-agent-last-run.json"), run);
             JsonFiles.Write(Path.Combine(job.ProfileDirectory, ".backup-history", job.Id, "run-" + run.Id + ".json"), run);
         }
-        if (job.Notification.Enabled)
+        if (job.Notification.Enabled && kind != "Maintenance")
         {
             try { await Notify(run, catalog?.Recent() ?? [run], CancellationToken.None); }
             catch (Exception ex) { run.NotificationError = ex.Message; }
@@ -168,17 +173,26 @@ public sealed class Runner(BackupJob job, IProgress<ProgressInfo>? progress = nu
     {
         var n = job.Notification;
         var body = new StringBuilder("<html><body><h2>" + WebUtility.HtmlEncode(job.Name) + " — " + result.Status + "</h2>");
-        body.Append("<p>Started: " + result.StartedUtc.ToLocalTime().ToString("g") + "<br>Duration: " + ReportFormatting.Duration(result.FinishedUtc - result.StartedUtc) + "<br>Files copied: " + result.FilesCopied + "</p><p>" + WebUtility.HtmlEncode(result.Detail) + "</p>");
+        body.Append("<p>Operation: " + WebUtility.HtmlEncode(result.DisplayKind) + "<br>Started: " + result.StartedUtc.ToLocalTime().ToString("g") + "<br>Duration: " + ReportFormatting.Duration(result.FinishedUtc - result.StartedUtc));
+        if (result.Kind != "Maintenance") body.Append("<br>Files copied: " + result.FilesCopied);
+        body.Append("</p><p>" + WebUtility.HtmlEncode(result.Detail) + "</p>");
+        if (result.VerificationDetails.Count > 0)
+        {
+            body.Append("<h3>Checks performed</h3><table><tr><th>Result</th></tr>");
+            foreach (var detail in result.VerificationDetails)
+                body.Append("<tr><td>" + WebUtility.HtmlEncode(detail) + "</td></tr>");
+            body.Append("</table>");
+        }
         foreach (var warning in result.Warnings) body.Append("<p>" + WebUtility.HtmlEncode(warning) + "</p>");
         body.Append("<table><tr><th>Status</th><th>Operation</th><th>Started</th><th>Duration</th></tr>");
         foreach (var r in recent.Take(31))
         {
             var color = r.Status switch { "Success" => "green", "Warning" => "#c99a00", "Failed" => "red", _ => "gray" };
-            body.Append($"<tr><td><span style='color:{color}'>■</span> {WebUtility.HtmlEncode(r.Status)}</td><td>{WebUtility.HtmlEncode(r.Kind)}</td><td>{r.StartedUtc.ToLocalTime():g}</td><td>{ReportFormatting.Duration(r.FinishedUtc - r.StartedUtc)}</td></tr>");
+            body.Append($"<tr><td><span style='color:{color}'>■</span> {WebUtility.HtmlEncode(r.Status)}</td><td>{WebUtility.HtmlEncode(r.DisplayKind)}</td><td>{r.StartedUtc.ToLocalTime():g}</td><td>{ReportFormatting.Duration(r.FinishedUtc - r.StartedUtc)}</td></tr>");
         }
         body.Append("</table></body></html>");
         var message = new MimeMessage(); message.From.Add(NotificationAddresses.Sender(n)); message.To.AddRange(NotificationAddresses.Recipients(n));
-        message.Subject = job.Name + (result.Kind == "Email test" ? " — Test email" : " backup: " + result.Status); message.Body = new TextPart("html") { Text = body.ToString() };
+        message.Subject = job.Name + (result.Kind == "Email test" ? " — Test email" : " — " + result.DisplayKind + ": " + result.Status); message.Body = new TextPart("html") { Text = body.ToString() };
         using var client = new MailKit.Net.Smtp.SmtpClient { Timeout = 30000 };
         await client.ConnectAsync(n.Host, n.Port, n.ImplicitTls ? SecureSocketOptions.SslOnConnect : SecureSocketOptions.StartTls, ct);
         if (!string.IsNullOrWhiteSpace(n.Credential)) { var secret = ReadCredential?.Invoke(n.Credential) ?? throw new IOException("SMTP credential unavailable."); await client.AuthenticateAsync(secret.User, secret.Password, ct); }

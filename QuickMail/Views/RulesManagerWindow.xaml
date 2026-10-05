@@ -76,6 +76,8 @@
                         <ColumnDefinition Width="*"/>
                     </Grid.ColumnDefinitions>
                     <StackPanel Grid.Column="0">
+                        <CheckBox Content="SPAM blocks" IsChecked="{Binding ShowSpamFilters}"
+                                  ToolTip="Show global sender/domain blocks separately from normal filters."/>
                         <CheckBox Content="See all filters"
                                   IsChecked="{Binding SeeAllFilters}"
                                   Visibility="{Binding HasCompatibilityMessage, Converter={StaticResource BoolToVisibilityConverter}}"
@@ -131,7 +133,17 @@
                        user could tab onto an empty Account combo with nothing behind it. The button row
                        below stays OUTSIDE this so Close is always available; Test/Save gate themselves
                        via CanExecute. -->
-                  <StackPanel IsEnabled="{Binding HasSelectedRule}">
+                  <StackPanel>
+                    <StackPanel.Style>
+                      <Style TargetType="StackPanel">
+                        <Setter Property="IsEnabled" Value="{Binding HasSelectedRule}"/>
+                        <Style.Triggers>
+                          <DataTrigger Binding="{Binding SelectedRule.IsSpamFilter}" Value="True">
+                            <Setter Property="IsEnabled" Value="False"/>
+                          </DataTrigger>
+                        </Style.Triggers>
+                      </Style>
+                    </StackPanel.Style>
                     <!-- Rule Name -->
                     <TextBlock Text="Rule Name" FontWeight="SemiBold" Margin="0,8,0,2"/>
                     <TextBox Text="{Binding SelectedRule.Name, UpdateSourceTrigger=PropertyChanged}"

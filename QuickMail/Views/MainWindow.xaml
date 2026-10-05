@@ -224,6 +224,10 @@
                 <MenuItem Header="Until this _evening" Tag="evening" Click="MessageContextMenu_Snooze_Click"/>
                 <MenuItem Header="Until _tomorrow morning" Tag="tomorrow" Click="MessageContextMenu_Snooze_Click"/>
                 <MenuItem Header="Until next _week" Tag="week" Click="MessageContextMenu_Snooze_Click"/>
+                <MenuItem Header="In _30 days" Tag="30days" Click="MessageContextMenu_Snooze_Click"/>
+                <MenuItem Header="In three months (_90 days)" Tag="90days" Click="MessageContextMenu_Snooze_Click"/>
+                <MenuItem Header="In six months (_180 days)" Tag="180days" Click="MessageContextMenu_Snooze_Click"/>
+                <MenuItem Header="In one _year" Tag="year" Click="MessageContextMenu_Snooze_Click"/>
                 <Separator/>
                 <MenuItem Header="Choose date and _time…" Tag="custom" Click="MessageContextMenu_Snooze_Click"/>
             </MenuItem>
@@ -257,6 +261,8 @@
                       AutomationProperties.Name="Filter all like this"
                       AutomationProperties.AcceleratorKey="Ctrl+Shift+A"
                       Command="{Binding FilterAllLikeThisCommand}"/>
+            <MenuItem Header="Block sender / SPAM…" Click="SpamBlock_Click"/>
+            <MenuItem Header="Not SPAM…" Click="NotSpam_Click"/>
             <Separator/>
             <MenuItem Header="View _Source"
                       AutomationProperties.Name="View message source"
@@ -317,6 +323,7 @@
             <Separator/>
             <MenuItem Header="Empty _Trash" Tag="empty-trash"
                       Visibility="Collapsed" Click="FolderContextMenu_EmptySystemFolder_Click"/>
+            <MenuItem Header="Delete only EQM SPAM…" Tag="empty-spam" Click="EmptySpam_Click"/>
             <MenuItem Header="Empty _Junk" Tag="empty-junk"
                       Visibility="Collapsed" Click="FolderContextMenu_EmptySystemFolder_Click"/>
             <MenuItem Header="Empty _RecoveryDeleted" Tag="empty-recovery"
@@ -1224,6 +1231,13 @@
                                       Margin="0,3,0,0" Padding="8,3" Visibility="Collapsed"
                                       Click="MaintainSubscription_Click"
                                       AutomationProperties.Name="Keep subscription and hide unsubscribe controls for this sender"/>
+                                <Button x:Name="SpamBadge" Content="SPAM — Not SPAM…" Visibility="Collapsed"
+                                        Margin="0,5,0,0" Click="NotSpam_Click"
+                                        ToolTip="Classified as SPAM by an explicit EQM block. Click to unblock and return to In."/>
+                                <Button x:Name="SpamBlockButton" Content="Block / SPAM…" Visibility="Collapsed"
+                                        Margin="0,5,0,0" Padding="10,4" Click="SpamBlock_Click"
+                                        Background="{DynamicResource Theme.WarningBackground}"
+                                        ToolTip="First contact from this address. Block only if you do not want future mail; this is not a security warning."/>
                               </StackPanel>
                             </Grid>
 

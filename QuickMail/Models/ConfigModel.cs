@@ -355,6 +355,7 @@ public class ConfigModel
     /// purging. The default is one day so an accidental Shift+Delete remains recoverable.
     /// </summary>
     public int RecoveryDeletedRetentionDays { get; set; } = 1;
+    public int SpamRetentionDays { get; set; } = 30;
 
     // ── Notifications ─────────────────────────────────────────────────────────────
 

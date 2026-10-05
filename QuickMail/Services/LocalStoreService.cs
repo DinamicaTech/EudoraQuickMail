@@ -1013,6 +1013,23 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
             );
             CREATE INDEX IF NOT EXISTS idx_recovery_deleted_first_seen
                 ON RecoveryDeletedState(first_seen_ticks);
+            CREATE TABLE IF NOT EXISTS SpamMessageState (
+                account_id TEXT NOT NULL,
+                identity TEXT NOT NULL,
+                classified_ticks INTEGER NOT NULL,
+                PRIMARY KEY(account_id,identity)
+            );
+            CREATE TABLE IF NOT EXISTS SpamJunkAge (
+                account_id TEXT NOT NULL,
+                folder_name TEXT NOT NULL,
+                unique_id TEXT NOT NULL,
+                first_seen_ticks INTEGER NOT NULL,
+                PRIMARY KEY(account_id,folder_name,unique_id)
+            );
+            CREATE TABLE IF NOT EXISTS SpamSenderPrompt (
+                address TEXT PRIMARY KEY,
+                offered INTEGER NOT NULL
+            );
             CREATE TRIGGER IF NOT EXISTS trg_summary_delete_snooze
             AFTER DELETE ON MessageSummary BEGIN
                 DELETE FROM SnoozedMessage
@@ -1281,6 +1298,7 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
         RecordStage("final folder additive migration");
 
         RunDataMigrations(conn);
+        InitializeSpamTriggers(conn);
         RecordStage("versioned data migrations", $"finalUserVersion={GetUserVersion(conn)}");
 
         // Run after versioned migrations because the v1→v2 conversion rebuilds MessageSummary and

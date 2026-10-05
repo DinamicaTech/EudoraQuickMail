@@ -306,6 +306,10 @@ public class ConfigService : IConfigService
                         if (int.TryParse(value, out var recoveryDays))
                             config.RecoveryDeletedRetentionDays = Math.Clamp(recoveryDays, 0, 3650);
                         break;
+                    case "spamretentiondays":
+                        if (int.TryParse(value, out var spamDays))
+                            config.SpamRetentionDays = Math.Clamp(spamDays, 0, 3650);
+                        break;
                     case "notifyonnewmail":      config.NotifyOnNewMail      = ParseBool(value); break;
                     case "notifytrayicononnewmail": config.NotifyTrayIconOnNewMail = ParseBool(value); break;
                 case "notifyonwatchedconversation": config.NotifyOnWatchedConversation = ParseBool(value); break;
@@ -784,6 +788,7 @@ public class ConfigService : IConfigService
         sb.AppendLine();
 
         sb.AppendLine($"RecoveryDeletedRetentionDays = {Math.Clamp(config.RecoveryDeletedRetentionDays, 0, 3650)}");
+        sb.AppendLine($"SpamRetentionDays = {Math.Clamp(config.SpamRetentionDays, 0, 3650)}");
         sb.AppendLine("# Days Shift+Delete messages remain recoverable. Zero disables automatic deletion.");
         sb.AppendLine();
 

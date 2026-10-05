@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework><OutputType>WinExe</OutputType><UseWPF>true</UseWPF>
+    <ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable>
+    <AssemblyName>QuickMail.Updater</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup><Compile Include="../../QuickMail/Services/PortableUpdateFiles.cs" Link="PortableUpdateFiles.cs" /></ItemGroup>
+</Project>

@@ -456,6 +456,34 @@ public sealed class LocalFirstMailTests : IDisposable
     }
 
     [Fact]
+    public async Task ShiftDelete_MarksMessageReadBeforeMovingToRecoveryDeleted()
+    {
+        var accountId = Guid.NewGuid();
+        var account = new AccountModel
+        {
+            Id = accountId, AccountName = "Local", Username = "local@example.test",
+            BackendKind = BackendKind.Pop3Smtp, IsActive = true,
+            FolderTreeRootId = accountId, FolderTreeRootName = "Eudora",
+        };
+        var store = CreateStore();
+        await store.EnsureLocalSystemFoldersAsync([account]);
+        await store.SaveLocalMessageAsync(Message(accountId, "In", "recover-read", "handled mail"));
+        var summary = Assert.Single((await store.LoadLocalPageAsync(accountId, "In", 10, 0)).Messages);
+        Assert.False(summary.IsRead);
+
+        using var vm = new MainViewModel(
+            new LocalMailService(store), new StubAccountService(), new StubCredentialService(),
+            store, new StubOAuthService(), new StubSyncService(), new StubConfigService(),
+            new StubCommandRegistry(), new StubViewService(), new StubRuleService(), new StubSmtpService());
+        vm.LoadAccountList([account]);
+        await vm.DeleteMessagesAsync([summary], toRecoveryDeleted: true);
+
+        var recovered = Assert.Single((await store.LoadLocalPageAsync(accountId, "RecoveryDeleted", 10, 0)).Messages);
+        Assert.True(recovered.IsRead);
+        Assert.True(summary.IsRead);
+    }
+
+    [Fact]
     public async Task RecoveryDeletedRetention_UsesFirstObservationInsteadOfMessageDate()
     {
         var accountId = Guid.NewGuid();
@@ -1049,6 +1077,10 @@ public sealed class LocalFirstMailTests : IDisposable
         await vm.SelectFolderCommand.ExecuteAsync(inbox);
         Assert.Single(vm.Messages);
 
+        var visibleRows = vm.Messages;
+        var selected = vm.Messages[0];
+        vm.SelectedMessage = selected;
+
         var delivered = Message(accountId, "In", "second", "second body");
         await store.SaveLocalMessageAsync(delivered);
 
@@ -1057,6 +1089,8 @@ public sealed class LocalFirstMailTests : IDisposable
 
         Assert.Equal(2, vm.Messages.Count);
         Assert.Contains(vm.Messages, message => message.MessageId == "second");
+        Assert.Same(visibleRows, vm.Messages);
+        Assert.Same(selected, vm.SelectedMessage);
         vm.Dispose();
     }
 

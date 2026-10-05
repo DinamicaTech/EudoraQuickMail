@@ -114,6 +114,8 @@ public partial class SettingsViewModel : ObservableObject
 
     [ObservableProperty]
     private int _recoveryDeletedRetentionDays = 1;
+    [ObservableProperty]
+    private int _spamRetentionDays = 30;
 
     [ObservableProperty]
     private bool _notifyOnNewMail;
@@ -517,6 +519,7 @@ public partial class SettingsViewModel : ObservableObject
         CalendarReminderMinutes          = cfg.CalendarReminderMinutes;
         ConfirmEmptyTrash                = cfg.ConfirmEmptyTrash;
         RecoveryDeletedRetentionDays     = cfg.RecoveryDeletedRetentionDays;
+        SpamRetentionDays = cfg.SpamRetentionDays;
         NotifyOnNewMail                  = cfg.NotifyOnNewMail;
         NotifyTrayIconOnNewMail          = cfg.NotifyTrayIconOnNewMail;
         NotifyOnWatchedConversation      = cfg.NotifyOnWatchedConversation;
@@ -621,6 +624,7 @@ public partial class SettingsViewModel : ObservableObject
         cfg.CalendarReminderMinutes          = Math.Clamp(CalendarReminderMinutes, 1, 1440);
         cfg.ConfirmEmptyTrash                = ConfirmEmptyTrash;
         cfg.RecoveryDeletedRetentionDays     = Math.Clamp(RecoveryDeletedRetentionDays, 0, 3650);
+        cfg.SpamRetentionDays = Math.Clamp(SpamRetentionDays, 0, 3650);
         cfg.NotifyOnNewMail                  = NotifyOnNewMail;
         cfg.NotifyTrayIconOnNewMail          = NotifyTrayIconOnNewMail;
         cfg.NotifyOnWatchedConversation      = NotifyOnWatchedConversation;

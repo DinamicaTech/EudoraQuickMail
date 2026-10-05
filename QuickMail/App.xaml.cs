@@ -112,6 +112,19 @@ public partial class App : Application
     [STAThread]
     public static void Main(string[] args)
     {
+        // Portable updater holds this only while waiting for shutdown/applying files.
+        // A second launch must not open the database during binary replacement.
+        var updateLock = Path.Combine(AppContext.BaseDirectory, ".quickmail-update.lock");
+        if (File.Exists(updateLock))
+        {
+            try { using var probe = new FileStream(updateLock, FileMode.Open, FileAccess.Read, FileShare.ReadWrite); }
+            catch (IOException)
+            {
+                MessageBox.Show("An application update is in progress. Please wait for QuickMail to restart.",
+                    "Eudora QuickMail Update", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+        }
         Velopack.VelopackApp.Build()
             .OnBeforeUninstallFastCallback(_ => LaunchUninstallDataPrompt())
             .Run();

@@ -6,6 +6,30 @@ namespace DinamicaBackup;
 /// <summary>Small, disposable index. Run receipts and manifests are independently readable.</summary>
 public sealed class Catalog : IDisposable
 {
+    /// <summary>Read history without opening or updating the destination SQLite catalog.</summary>
+    public static List<RunResult> ReadRecentReceipts(BackupJob job, int limit, bool includeDestination = true)
+    {
+        var runs = new Dictionary<string, RunResult>(StringComparer.OrdinalIgnoreCase);
+        if (includeDestination && !string.IsNullOrWhiteSpace(job.Destination))
+        {
+            var remote = SafePaths.Child(job.Destination, ".dinamica-backup/" + job.Id);
+            if (!Directory.Exists(remote)) throw new DirectoryNotFoundException("Backup history is not accessible at " + remote);
+            foreach (var path in Directory.EnumerateFiles(remote, "run-*.json"))
+            {
+                var run = JsonFiles.Read<RunResult>(path);
+                runs[run.Id] = run;
+            }
+        }
+        var local = Path.Combine(job.ProfileDirectory, ".backup-history", job.Id);
+        if (Directory.Exists(local))
+            foreach (var path in Directory.EnumerateFiles(local, "run-*.json"))
+            {
+                var run = JsonFiles.Read<RunResult>(path);
+                runs[run.Id] = run; // The local receipt may contain a newer notification status.
+            }
+        return runs.Values.OrderByDescending(x => x.StartedUtc).Take(limit).ToList();
+    }
+
     private readonly SqliteConnection _db;
     private readonly string _directory;
     private readonly string _localHistory;

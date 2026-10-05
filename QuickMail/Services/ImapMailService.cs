@@ -490,12 +490,26 @@ public class ImapMailService : IMailService, IChangeNotifier, IConnectionProbe
     public async Task MarkReadBatchAsync(Guid accountId, string folderName, IList<string> messageIds, CancellationToken ct = default)
     {
         if (messageIds.Count == 0) return;
-        using var lease = await RentClientAsync(accountId, ImapLeasePriority.Foreground, ct);
+        var perf = $"account={accountId}; folder={folderName}; messages={messageIds.Count}";
+        using var lease = await FilterOperationTrace.RunAsync("IMAP: mark read/rent connection", perf,
+            "Waiting for an IMAP connection to mark messages as read…",
+            () => RentClientAsync(accountId, ImapLeasePriority.Foreground, ct));
         var client = lease.Client;
-        var folder = await client.GetFolderAsync(folderName, ct);
-        await folder.OpenAsync(FolderAccess.ReadWrite, ct);
-        try   { await folder.AddFlagsAsync(messageIds.Select(ToUid).ToList(), MessageFlags.Seen, true, ct); }
-        finally { await folder.CloseAsync(false, ct); }
+        var folder = await FilterOperationTrace.RunAsync("IMAP: mark read/resolve folder", perf,
+            "Locating the IMAP source folder…", () => client.GetFolderAsync(folderName, ct));
+        await FilterOperationTrace.RunAsync("IMAP: mark read/open folder", perf,
+            "Opening the IMAP folder to mark messages as read…", () => folder.OpenAsync(FolderAccess.ReadWrite, ct));
+        try
+        {
+            await FilterOperationTrace.RunAsync("IMAP: mark read/STORE", perf,
+                $"Marking {messageIds.Count:N0} message(s) as read on the server…",
+                () => folder.AddFlagsAsync(messageIds.Select(ToUid).ToList(), MessageFlags.Seen, true, ct));
+        }
+        finally
+        {
+            await FilterOperationTrace.RunAsync("IMAP: mark read/close folder", perf,
+                "Closing the IMAP read-status operation…", () => folder.CloseAsync(false, ct));
+        }
     }
 
     public async Task SetMessageFlaggedAsync(Guid accountId, string folderName, string messageId, bool flagged, CancellationToken ct = default)
@@ -635,19 +649,34 @@ public class ImapMailService : IMailService, IChangeNotifier, IConnectionProbe
         var started = Stopwatch.GetTimestamp();
         var perf = $"account={accountId}; source={folderName}; destination={destinationFolder}; messages={messageIds.Count}";
         PerformanceLogService.Marker("IMAP: move messages BEGIN", perf);
-        using var lease = await RentClientAsync(accountId, ImapLeasePriority.Foreground, ct);
+        using var lease = await FilterOperationTrace.RunAsync("IMAP: move/rent connection", perf,
+            "Waiting for an IMAP connection to move messages…",
+            () => RentClientAsync(accountId, ImapLeasePriority.Foreground, ct));
         var connected = Stopwatch.GetTimestamp();
         PerformanceLogService.Record("IMAP: move messages/rent connection",
             Stopwatch.GetElapsedTime(started, connected), perf);
         var client = lease.Client;
-        var folder = await client.GetFolderAsync(folderName, ct);
-        var dest   = await GetOrCreateFolderPathAsync(client, destinationFolder, ct);
+        var folder = await FilterOperationTrace.RunAsync("IMAP: move/resolve source", perf,
+            "Locating the IMAP source folder…", () => client.GetFolderAsync(folderName, ct));
+        var dest = await FilterOperationTrace.RunAsync("IMAP: move/resolve destination", perf,
+            "Locating or creating the IMAP destination folder…",
+            () => GetOrCreateFolderPathAsync(client, destinationFolder, ct));
         var foldersReady = Stopwatch.GetTimestamp();
         PerformanceLogService.Record("IMAP: move messages/resolve folders",
             Stopwatch.GetElapsedTime(connected, foldersReady), perf);
-        await folder.OpenAsync(FolderAccess.ReadWrite, ct);
-        try   { await folder.MoveToAsync(messageIds.Select(ToUid).ToList(), dest, ct); }
-        finally { await folder.CloseAsync(false, ct); }
+        await FilterOperationTrace.RunAsync("IMAP: move/open folder", perf,
+            "Opening the IMAP source folder…", () => folder.OpenAsync(FolderAccess.ReadWrite, ct));
+        try
+        {
+            await FilterOperationTrace.RunAsync("IMAP: move/MOVE", perf,
+                $"Moving {messageIds.Count:N0} message(s) on the IMAP server…",
+                () => folder.MoveToAsync(messageIds.Select(ToUid).ToList(), dest, ct));
+        }
+        finally
+        {
+            await FilterOperationTrace.RunAsync("IMAP: move/close folder", perf,
+                "Closing the IMAP move operation…", () => folder.CloseAsync(false, ct));
+        }
         PerformanceLogService.Record("IMAP: move messages END",
             Stopwatch.GetElapsedTime(started), perf);
     }
@@ -780,7 +809,7 @@ public class ImapMailService : IMailService, IChangeNotifier, IConnectionProbe
     {
         using var lease = await RentClientAsync(accountId, ImapLeasePriority.Foreground, ct);
         var client = lease.Client;
-        var trash  = await FindSpecialFolderAsync(client, ct, SpecialFolder.Trash, SpecialFolder.Junk);
+        var trash  = await FindSpecialFolderAsync(client, ct, SpecialFolder.Trash);
 
         if (trash == null)
         {
@@ -1255,20 +1284,27 @@ public class ImapMailService : IMailService, IChangeNotifier, IConnectionProbe
                 () => $"port={account.ImapPort} ssl={ssl} auth={account.AuthType} " +
                       HostConnectionCensus.Describe(account.ImapHost));
 
-            await client.ConnectAsync(account.ImapHost, account.ImapPort, ssl, ct);
+            var perf = $"account={account.Id}; host={account.ImapHost}";
+            await FilterOperationTrace.RunAsync("IMAP: connect/TCP-TLS", perf,
+                "Connecting to the IMAP server…", () => client.ConnectAsync(account.ImapHost, account.ImapPort, ssl, ct));
             connected = true;
             HostConnectionCensus.Opened(account.ImapHost, account.Id, client);
 
             if (account.AuthType is AuthType.OAuth2Microsoft or AuthType.OAuth2Google)
             {
-                var token = await _oauth.GetAccessTokenAsync(account, ct);
-                await client.AuthenticateAsync(new SaslMechanismOAuth2(account.Username, token), ct);
+                var token = await FilterOperationTrace.RunAsync("IMAP: connect/OAuth token", perf,
+                    "Obtaining IMAP authorization…", () => _oauth.GetAccessTokenAsync(account, ct));
+                await FilterOperationTrace.RunAsync("IMAP: connect/authenticate", perf,
+                    "Authenticating with the IMAP server…",
+                    () => client.AuthenticateAsync(new SaslMechanismOAuth2(account.Username, token), ct));
             }
             else
             {
                 if (password is null)
                     throw new InvalidOperationException($"No password is available for account {account.Username}.");
-                await client.AuthenticateAsync(account.AuthUsername, password, ct);
+                await FilterOperationTrace.RunAsync("IMAP: connect/authenticate", perf,
+                    "Authenticating with the IMAP server…",
+                    () => client.AuthenticateAsync(account.AuthUsername, password, ct));
             }
 
             LogService.Log($"Connected. Capabilities: {client.Capabilities}");
@@ -2013,8 +2049,16 @@ public class ImapMailService : IMailService, IChangeNotifier, IConnectionProbe
             try
             {
                 var uidList = messageIds.Select(ToUid).ToList();
+                var supportsSelectiveExpunge = (client.Capabilities & ImapCapabilities.UidPlus) != 0;
+                if (!supportsSelectiveExpunge &&
+                    GetSpecialFolderKind(folder.Attributes, folder.FullName) == SpecialFolderKind.Junk)
+                    throw new NotSupportedException(
+                        "This IMAP server does not support selective deletion (UIDPLUS). No Junk messages were deleted.");
                 await folder.AddFlagsAsync(uidList, MessageFlags.Deleted, true, token);
-                await folder.ExpungeAsync(token);
+                if (supportsSelectiveExpunge)
+                    await folder.ExpungeAsync(uidList, token);
+                else
+                    await folder.ExpungeAsync(token);
             }
             finally { await folder.CloseAsync(false, token); }
         }, ct);
@@ -2042,7 +2086,7 @@ public class ImapMailService : IMailService, IChangeNotifier, IConnectionProbe
         {
             using var lease = await RentClientAsync(accountId, ImapLeasePriority.Background, ct);
             var client = lease.Client;
-            var trashFolder = await FindSpecialFolderAsync(client, ct, SpecialFolder.Trash, SpecialFolder.Junk);
+            var trashFolder = await FindSpecialFolderAsync(client, ct, SpecialFolder.Trash);
             if (trashFolder == null) return 0;
 
             await trashFolder.OpenAsync(FolderAccess.ReadOnly, ct);

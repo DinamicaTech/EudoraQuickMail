@@ -141,7 +141,7 @@ public partial class RulesManagerViewModel : ObservableObject
         }
         else if (Rules.Count > 0)
         {
-            SelectedRule = Rules[0];
+            SelectedRule = RulesView.Cast<MailRule>().FirstOrDefault();
         }
         NotifyVisibleRuleCount();
     }
@@ -155,6 +155,14 @@ public partial class RulesManagerViewModel : ObservableObject
 
     [ObservableProperty]
     private bool _seeAllFilters;
+    [ObservableProperty]
+    private bool _showSpamFilters;
+    partial void OnShowSpamFiltersChanged(bool value)
+    {
+        RulesView.Refresh();
+        EnsureVisibleSelection();
+        NotifyVisibleRuleCount();
+    }
 
     partial void OnSeeAllFiltersChanged(bool value)
     {
@@ -203,6 +211,7 @@ public partial class RulesManagerViewModel : ObservableObject
     private bool IsRuleVisible(object item)
     {
         if (item is not MailRule rule) return false;
+        if (rule.IsSpamFilter != ShowSpamFilters) return false;
         if (_targetFolderFilter is { Count: > 0 } &&
             (rule.Action != RuleAction.MoveToFolder || rule.TargetFolder == null ||
              !_targetFolderFilter.Contains(rule.TargetFolder)))
@@ -228,6 +237,7 @@ public partial class RulesManagerViewModel : ObservableObject
     {
         var rule = Rules.FirstOrDefault(candidate => candidate.Id == ruleId);
         if (rule == null) return;
+        ShowSpamFilters = rule.IsSpamFilter;
         // A direct request to show an existing match must make it visible even if another search or
         // target-folder filter was left active in the modeless manager.
         _targetFolderFilter = null;
@@ -310,7 +320,7 @@ public partial class RulesManagerViewModel : ObservableObject
     private void Cleanup()
     {
         var movesToIn = Rules.Where(TargetIsIn).ToList();
-        var orphaned = Rules.Where(rule => rule.Action == RuleAction.MoveToFolder
+        var orphaned = Rules.Where(rule => !rule.IsSpamFilter && rule.Action == RuleAction.MoveToFolder
             && !TargetIsIn(rule)
             && (string.IsNullOrWhiteSpace(rule.TargetFolder) || !TargetFolderExists(rule))).ToList();
 
@@ -491,6 +501,7 @@ public partial class RulesManagerViewModel : ObservableObject
     [RelayCommand]
     private void NewRule()
     {
+        ShowSpamFilters = false;
         // New rules default to the global "All accounts" scope; the operator can narrow one when
         // needed. (No accounts is a
         // degenerate state in which rules aren't usable anyway.)
@@ -583,7 +594,7 @@ public partial class RulesManagerViewModel : ObservableObject
             _originalRules.RemoveAll(rule => rule.Id == id);
             _ruleService.SaveRules(CloneRules(_originalRules));
         }
-        SelectedRule = Rules.FirstOrDefault();
+        SelectedRule = RulesView.Cast<MailRule>().FirstOrDefault();
         Announce($"Rule '{name}' deleted.", AnnouncementCategory.Result);
     }
 

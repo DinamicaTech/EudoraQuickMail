@@ -433,11 +433,11 @@ public partial class ComposeWindow : Window
         };
         vm.PromptScheduleTimeRequested = suggested =>
         {
-            var dialog = new TextPromptWindow("Send Later", "Local date and time:", suggested.ToString("g"))
+            var dialog = new TextPromptWindow("Send Later", "Local date and time (date only = 09:00):", suggested.ToString("g"))
             { Owner = DialogOwner };
             if (dialog.ShowDialog() != true) return null;
-            if (DateTime.TryParse(dialog.Value, System.Globalization.CultureInfo.CurrentCulture,
-                    System.Globalization.DateTimeStyles.AllowWhiteSpaces, out var value)) return value;
+            if (ScheduledDateParser.TryParse(dialog.Value, System.Globalization.CultureInfo.CurrentCulture,
+                    out var value)) return value;
             MessageBox.Show(DialogOwner, "Enter a valid local date and time.", "Send Later",
                 MessageBoxButton.OK, MessageBoxImage.Warning);
             return null;

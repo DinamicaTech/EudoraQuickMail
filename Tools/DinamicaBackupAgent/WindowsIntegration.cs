@@ -65,6 +65,32 @@ internal static class NasConnection
 }
 internal static class WindowsScheduler
 {
+    // This action must use a password-logon task, not the interactive user's SMB session.
+    public static void RunManual(string jobPath, string jobId, Action submit)
+    {
+        object? scheduler = null;
+        try
+        {
+            scheduler = Activator.CreateInstance(Type.GetTypeFromProgID("Schedule.Service")!);
+            dynamic service = scheduler!; service.Connect();
+            dynamic task = service.GetFolder("\\").GetTask("DinamicaBackup-" + jobId);
+            if (!task.Enabled) throw new InvalidOperationException("Enable the Windows backup task first.");
+            if ((int)task.Definition.Principal.LogonType != 1)
+                throw new InvalidOperationException("Register the task with Windows username and password (run whether logged on or not). An interactive task cannot isolate NAS credentials.");
+            if ((int)task.State is 2 or 4) throw new InvalidOperationException("The Windows task is already queued or running. Wait for it to finish before requesting a manual operation.");
+            dynamic action = task.Definition.Actions.Item(1);
+            var expected = "/scheduled /job \"" + System.IO.Path.GetFullPath(jobPath) + "\"";
+            if (!string.Equals((string)action.Path, Environment.ProcessPath, StringComparison.OrdinalIgnoreCase)
+                || !string.Equals((string)action.Arguments, expected, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("The registered task points to another agent or configuration. Register / Update Windows task from this installation first.");
+            submit();
+            task.Run(null);
+        }
+        finally
+        {
+            if (scheduler != null && Marshal.IsComObject(scheduler)) Marshal.FinalReleaseComObject(scheduler);
+        }
+    }
     public static void Register(string jobPath, string jobId, string? user = null, string? password = null)
     {
         var stage = "Resolve Windows account";

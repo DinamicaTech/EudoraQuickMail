@@ -19,6 +19,7 @@ public sealed class BackupJob
     public string AttachmentDestination { get; set; } = "";
     public List<string> AttachmentDirectories { get; set; } = ["Attachments"];
     public bool CopyAttachments { get; set; }
+    public bool IncludeLegacyEudoraAttachments { get; set; }
     public bool DeleteMissingAttachments { get; set; }
     public double MaximumDeletionPercent { get; set; } = 5;
     public int ShutdownTimeoutSeconds { get; set; } = 300;
@@ -105,6 +106,7 @@ public sealed class Manifest
     public List<FileRecord> Files { get; set; } = [];
     public List<FileRecord> Attachments { get; set; } = [];
     public bool IncludesAttachments { get; set; }
+    public string LegacyAttachmentSourceRoot { get; set; } = "";
     public long SchemaVersion { get; set; }
     public Dictionary<string, string?> ProbeValues { get; set; } = [];
     public List<SqlProbe> Probes { get; set; } = [];
@@ -113,6 +115,12 @@ public sealed class RunResult
 {
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
     public string Kind { get; set; } = "Backup";
+    [JsonIgnore] public string DisplayKind => Kind switch
+    {
+        "Maintenance" => "External backup window",
+        "Test" => "Restore test",
+        _ => Kind
+    };
     public DateTimeOffset StartedUtc { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? FinishedUtc { get; set; }
     public string Status { get; set; } = "Running";
@@ -120,12 +128,13 @@ public sealed class RunResult
     public string Artifact { get; set; } = "";
     public int FilesCopied { get; set; }
     public List<string> Warnings { get; set; } = [];
+    public List<string> VerificationDetails { get; set; } = [];
     public string NotificationError { get; set; } = "";
     public string? CompletedMaintenanceOccurrence { get; set; }
 }
 public sealed record ProgressInfo(string Stage, long Completed = 0, long Total = 0);
-public sealed record MaintenanceRequest(string Id, DateTimeOffset ExpiresUtc);
-public sealed record MaintenanceResponse(string Id, int ProcessId, long StartUtcTicks);
+public sealed record MaintenanceRequest(string Id, DateTimeOffset ExpiresUtc, bool InteractiveWatcherRequested = false);
+public sealed record MaintenanceResponse(string Id, int ProcessId, long StartUtcTicks, bool InteractiveWatcherStarted = false);
 public static class JsonFiles
 {
     public static readonly JsonSerializerOptions Options = new() { WriteIndented = true, Converters = { new JsonStringEnumConverter() } };

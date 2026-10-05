@@ -126,6 +126,60 @@ public sealed class BackupTests : IDisposable
     {
         await Backup(); var second = await Backup(); Assert.Equal(2, second.FilesCopied);
     }
+    [Fact] public async Task HistoryRefreshReadsReceiptsWithoutWritingToDestination()
+    {
+        var backup = await Backup();
+        var catalogPath = Path.Combine(_job.Destination, ".dinamica-backup", _job.Id, "backup-catalog.db");
+        File.Delete(catalogPath);
+        var history = Catalog.ReadRecentReceipts(_job, 100);
+        Assert.Contains(history, run => run.Id == backup.Id);
+        Assert.False(File.Exists(catalogPath));
+        var local = Catalog.ReadRecentReceipts(_job, 100, includeDestination: false);
+        Assert.Contains(local, run => run.Id == backup.Id);
+    }
+    [Fact] public async Task OptionalLegacyEudoraSourceIsMirroredSeparately()
+    {
+        var eudora = Path.Combine(_root, "Eudora");
+        var attach = Path.Combine(eudora, "Attach2026");
+        Directory.CreateDirectory(attach);
+        File.WriteAllText(Path.Combine(attach, "legacy.pdf"), "legacy fixture");
+        JsonFiles.Write(Path.Combine(_job.ProfileDirectory, "eudora-import-settings.json"),
+            new { SourceRoot = eudora, AttachmentMode = "keep", ImportedAt = DateTimeOffset.UtcNow });
+        Assert.NotNull(LegacyAttachmentSource.Detect(_job.ProfileDirectory));
+        _job.IncludeLegacyEudoraAttachments = true;
+        var backup = await Backup();
+        var manifest = BackupEngine.ReadManifest(backup.Artifact);
+        Assert.Equal(eudora, manifest.LegacyAttachmentSourceRoot);
+        Assert.Contains(manifest.Attachments, file => file.Path == "LegacyEudora/Attach2026/legacy.pdf");
+        Assert.True(File.Exists(Path.Combine(_job.AttachmentDestination, "LegacyEudora", "Attach2026", "legacy.pdf")));
+        Assert.Contains(manifest.Files, file => file.Path == "eudora-import-settings.json");
+        _job.IncludeLegacyEudoraAttachments = false;
+        _job.DeleteMissingAttachments = true;
+        _job.MaximumDeletionPercent = 100;
+        var withoutLegacy = await Backup();
+        Assert.DoesNotContain(BackupEngine.ReadManifest(withoutLegacy.Artifact).Attachments,
+            file => file.Path.StartsWith(LegacyAttachmentSource.BackupPrefix, StringComparison.OrdinalIgnoreCase));
+        Assert.True(File.Exists(Path.Combine(_job.AttachmentDestination, "LegacyEudora", "Attach2026", "legacy.pdf")));
+    }
+    [Fact] public async Task RestoreTestRecordsIndividualProbeAndAttachmentChecks()
+    {
+        var backup = await Backup();
+        var result = await new Runner(_job).RunAsync("Test", Ct, backup.Artifact);
+        Assert.Equal("Success", result.Status);
+        Assert.Contains(result.VerificationDetails, detail => detail.Contains("Messages", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(result.VerificationDetails, detail => detail.Contains("invoice.pdf", StringComparison.OrdinalIgnoreCase));
+    }
+    [Fact] public async Task ExternalBackupWindowKeepsLegacyKindButDoesNotSendCompletionEmail()
+    {
+        _job.Notification.Enabled = true;
+        using var cancel = new CancellationTokenSource();
+        cancel.Cancel();
+        var result = await new Runner(_job).RunAsync("Maintenance", cancel.Token);
+        Assert.Equal("Maintenance", result.Kind);
+        Assert.Equal("External backup window", result.DisplayKind);
+        Assert.Equal("Cancelled", result.Status);
+        Assert.Empty(result.NotificationError);
+    }
     [Fact] public async Task ModifiedAttachmentReplacesCurrentMirror()
     {
         await Backup(); File.WriteAllText(SafePaths.Child(_job.ProfileDirectory, "Attachments/2026/invoice.pdf"), "modified fixture content");

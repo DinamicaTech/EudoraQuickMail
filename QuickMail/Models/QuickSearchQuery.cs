@@ -3,7 +3,7 @@ using System.Text;
 
 namespace QuickMail.Models;
 
-public enum QuickSearchField { Any, To, From, Cc, Subject, Body, AttachmentCount, AttachmentName, AttachmentContent, Date, Unread, Flagged, Incoming, Outgoing }
+public enum QuickSearchField { Any, To, From, Cc, Subject, Body, AttachmentCount, AttachmentName, AttachmentContent, Date, Unread, Flagged, Incoming, Outgoing, Spam }
 
 public sealed record QuickSearchTerm(QuickSearchField Field, string Operator, string Value);
 public sealed record QuickSearchGroup(IReadOnlyList<QuickSearchTerm> Alternatives);
@@ -12,6 +12,15 @@ public sealed record ParsedQuickSearch(IReadOnlyList<QuickSearchGroup> Groups);
 /// <summary>Parser for the compact search language used by the main search box.</summary>
 public static class QuickSearchParser
 {
+    /// <summary>Leading or embedded * requires a scan of indexed text instead of an FTS prefix lookup.</summary>
+    public static bool HasSlowWildcard(string input) =>
+        Parse(input).Groups.SelectMany(group => group.Alternatives).Any(term =>
+            (term.Field is QuickSearchField.Any or QuickSearchField.To or QuickSearchField.From
+                or QuickSearchField.Cc or QuickSearchField.Subject or QuickSearchField.Body
+                or QuickSearchField.AttachmentName or QuickSearchField.AttachmentContent)
+            && (term.Value.Contains('?') || term.Value.Contains('*') &&
+                !(term.Value.EndsWith('*') && term.Value.Count(ch => ch == '*') == 1)));
+
     public static ParsedQuickSearch Parse(string input)
     {
         if (string.IsNullOrWhiteSpace(input)) return new([]);
@@ -20,6 +29,11 @@ public static class QuickSearchParser
         {
             var token = raw.Trim();
             if (token.Length == 0) continue;
+            if (token.Equals("is:spam", StringComparison.OrdinalIgnoreCase))
+            {
+                groups.Add(new([new(QuickSearchField.Spam, string.Empty, string.Empty)]));
+                continue;
+            }
             if (token.Equals("N", StringComparison.OrdinalIgnoreCase))
             {
                 groups.Add(new([new(QuickSearchField.Unread, string.Empty, string.Empty)]));

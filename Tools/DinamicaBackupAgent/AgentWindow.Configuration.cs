@@ -9,6 +9,7 @@ public sealed partial class AgentWindow
 {
     private ComboBox _application = null!;
     private CheckBox _nativeEnabled = null!;
+    private CheckBox _copyAttachments = null!, _legacyAttachments = null!;
     private StackPanel _nativeSettings = null!;
     private TextBox _profileBox = null!, _databaseBox = null!, _executableBox = null!, _argumentsBox = null!, _filesBox = null!, _attachmentsBox = null!, _probesBox = null!;
     private string _lastDetectedFolder = "";
@@ -51,23 +52,28 @@ public sealed partial class AgentWindow
         Button(application, "Register / Update Windows task…", RegisterTask);
         Info(application, "Saving does not register a Windows task. Register it explicitly after reviewing schedules. Stored credentials must be available to the Windows identity running the task.");
 
-        var external = Tab("External Backup");
-        Info(external, "Closes the application safely during this interval for an external backup program. It does not launch or verify that external backup.");
-        ScheduleFields(external, "External backup", job.MaintenanceSchedule);
-        Number(external, "External maintenance duration (minutes)", () => job.MaintenanceMinutes.ToString(), x => job.MaintenanceMinutes = int.Parse(x));
+        var external = Tab("External backup windows");
+        Info(external, "Closes the application safely during this interval for an external backup program. It does not launch or verify that external backup, and it does not send a completion email.");
+        ScheduleFields(external, "External backup window", job.MaintenanceSchedule);
+        Number(external, "External backup window duration (minutes)", () => job.MaintenanceMinutes.ToString(), x => job.MaintenanceMinutes = int.Parse(x));
         Number(external, "Wait for application shutdown (seconds)", () => job.ShutdownTimeoutSeconds.ToString(), x => job.ShutdownTimeoutSeconds = int.Parse(x));
-        Button(external, "Maintenance now", () => Start("Maintenance"));
+        Button(external, "Start external backup window now", () => Start("Maintenance"));
 
         var native = Tab("Native Backup");
         _nativeEnabled = Check(native, "Native backup enabled", () => job.BackupSchedule.Enabled, x => job.BackupSchedule.Enabled = x);
         _nativeSettings = new StackPanel(); native.Children.Add(_nativeSettings);
         var general = _nativeSettings;
         Info(general, "Full independent ZIP backups of the database. Attachments are copied in native format without history. Currently the application remains closed throughout the backup.");
-        Folder(general, "Database backup directory", () => job.Destination, x => job.Destination = x, () => EditNasCredentials(false));
-        Check(general, "Copy attachments", () => job.CopyAttachments, x => job.CopyAttachments = x);
-        Folder(general, "Attachment backup directory", () => job.AttachmentDestination, x => job.AttachmentDestination = x, () => EditNasCredentials(true));
+        Info(general, "Back up now and Test access use the registered Windows task, outside the Explorer session. Register the task with a Windows username/password first. NAS/SMTP credentials must be saved for that Windows account. Test access creates and removes one small probe file in an existing UNC directory; it does not run a backup.");
+        Folder(general, "Database backup directory", () => job.Destination, x => job.Destination = x, () => EditNasCredentials(false), () => StartManual("TestDatabaseAccess"));
+        _copyAttachments = Check(general, "Copy attachments", () => job.CopyAttachments, x => job.CopyAttachments = x);
+        _legacyAttachments = Check(general, "Also copy linked Eudora legacy attachments", () => job.IncludeLegacyEudoraAttachments, x => job.IncludeLegacyEudoraAttachments = x);
+        _copyAttachments.Checked += (_, _) => UpdateEnabledState();
+        _copyAttachments.Unchecked += (_, _) => UpdateEnabledState();
+        _profileBox.TextChanged += (_, _) => UpdateEnabledState();
+        Folder(general, "Attachment backup directory", () => job.AttachmentDestination, x => job.AttachmentDestination = x, () => EditNasCredentials(true), () => StartManual("TestAttachmentAccess"));
         Check(general, "Delete destination attachments missing from source", () => job.DeleteMissingAttachments, x => job.DeleteMissingAttachments = x);
-        Info(general, "Deleted or replaced attachments are unavailable to older backups. Linked files outside the profile (for example in Eudora) are not automatically included.");
+        Info(general, "Deleted or replaced attachments are unavailable to older backups. Eudora legacy files are copied only when the optional source above is enabled; their original external paths are not rewritten by restore.");
         Number(general, "Suspend removals above this percentage", () => job.MaximumDeletionPercent.ToString(System.Globalization.CultureInfo.InvariantCulture), x => job.MaximumDeletionPercent = double.Parse(x, System.Globalization.CultureInfo.InvariantCulture));
         Number(general, "Keep daily copies", () => job.KeepDaily.ToString(), x => job.KeepDaily = int.Parse(x));
         Number(general, "Keep weekly copies", () => job.KeepWeekly.ToString(), x => job.KeepWeekly = int.Parse(x));
@@ -77,7 +83,7 @@ public sealed partial class AgentWindow
         Text(general, "After-success PowerShell command", () => job.AfterScript, x => job.AfterScript = x, true);
         Text(general, "Finally PowerShell command (also failure/cancel)", () => job.FinallyScript, x => job.FinallyScript = x, true);
         Number(general, "Script timeout (seconds)", () => job.ScriptTimeoutSeconds.ToString(), x => job.ScriptTimeoutSeconds = int.Parse(x));
-        Button(general, "Back up now", () => Start("Backup"));
+        Button(general, "Back up now", () => StartManual("Backup"));
         _nativeEnabled.Checked += (_, _) => UpdateEnabledState();
         _nativeEnabled.Unchecked += (_, _) => UpdateEnabledState();
 
@@ -110,7 +116,7 @@ public sealed partial class AgentWindow
         var historyActions = new StackPanel { Orientation = Orientation.Horizontal };
         DockPanel.SetDock(historyActions, Dock.Bottom); history.Children.Add(historyActions);
         Button(historyActions, "Refresh history", RefreshHistory);
-        foreach (var (header, property) in new[] { ("Operation", "Kind"), ("Status", "Status"), ("Started (UTC)", "StartedUtc"), ("Finished (UTC)", "FinishedUtc"), ("Files", "FilesCopied"), ("Detail", "Detail") })
+        foreach (var (header, property) in new[] { ("Operation", "DisplayKind"), ("Status", "Status"), ("Started (UTC)", "StartedUtc"), ("Finished (UTC)", "FinishedUtc"), ("Files", "FilesCopied"), ("Detail", "Detail") })
             _history.Columns.Add(new DataGridTextColumn { Header = header, Binding = new System.Windows.Data.Binding(property), Width = new DataGridLength(1, DataGridLengthUnitType.Star) });
         _history.ToolTip = "Latest operations, status, UTC times, files copied and error details.";
         history.Children.Add(_history);
@@ -130,6 +136,16 @@ public sealed partial class AgentWindow
     private void UpdateEnabledState()
     {
         if (_nativeSettings != null) _nativeSettings.IsEnabled = _application.SelectedIndex == 0 && _nativeEnabled.IsChecked == true;
+        if (_legacyAttachments != null && _copyAttachments != null && _profileBox != null)
+        {
+            LegacyAttachmentSource? source;
+            try { source = LegacyAttachmentSource.Detect(_profileBox.Text.Trim()); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Text.Json.JsonException or ArgumentException) { source = null; }
+            _legacyAttachments.IsEnabled = _nativeSettings?.IsEnabled == true && _copyAttachments.IsChecked == true && source is not null;
+            _legacyAttachments.ToolTip = source is null
+                ? "No linked Eudora Attach/AttachYYYY directory was found in this profile's import metadata."
+                : "Copy " + source.Directories.Count + " Eudora attachment directories from " + source.Root + " into LegacyEudora/ in the attachment mirror.";
+        }
     }
     private void EnsureSupportedApplication()
     {

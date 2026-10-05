@@ -10,6 +10,10 @@ public partial class QuickSearchHelpWindow : Window
         DataContext = new[]
         {
             new Row("(none)", "From, To, Cc, Subject and message body", "chocolate"),
+            new Row("*", "End of a word prefix (fast, indexed)", "chocola*"),
+            new Row("*…*", "Contains text anywhere (slow scan; confirmation shown)", "*chocola*"),
+            new Row("?", "Exactly one character (slow scan)", "B:cho?olate"),
+            new Row("%", "Normal text, not a search wildcard", "B:100%"),
             new Row("T", "To recipients", "T:person@example.com"),
             new Row("F", "From sender", "F:@paypal.es"),
             new Row("F", "Messages with any flag (no operator or value)", "F"),
@@ -21,6 +25,7 @@ public partial class QuickSearchHelpWindow : Window
             new Row("AC", "Extracted attachment content", "AC:contract"),
             new Row("D", "Message date; relative days accept ':'", "D:today"),
             new Row("N", "Unread messages (no operator or value)", "N"),
+            new Row("is:spam", "Messages explicitly classified as SPAM by EQM", "is:spam"),
             new Row("I", "Incoming messages (no operator or value)", "I"),
             new Row("O", "Outgoing messages (no operator or value)", "O"),
         };

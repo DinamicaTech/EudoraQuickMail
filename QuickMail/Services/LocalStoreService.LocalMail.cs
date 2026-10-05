@@ -709,6 +709,11 @@ public partial class LocalStoreService
             var alternatives = new List<string>();
             foreach (var term in group.Alternatives)
             {
+                if (term.Field == QuickSearchField.Spam)
+                {
+                    alternatives.Add(SpamPredicate);
+                    continue;
+                }
                 if (term.Field == QuickSearchField.Unread)
                 {
                     alternatives.Add("s.is_read=0");
@@ -757,12 +762,18 @@ public partial class LocalStoreService
                     continue;
                 }
 
-                var wildcard = term.Value.Contains('?');
-                var value = wildcard ? "%" + EscapeLike(term.Value).Replace("?", "_") + "%"
-                    : "\"" + term.Value.Replace("\"", "\"\"") + "\"";
+                var prefix = term.Value.EndsWith('*') && term.Value.Count(ch => ch == '*') == 1
+                    && !term.Value.Contains('?');
+                var wildcard = !prefix && (term.Value.Contains('?') || term.Value.Contains('*'));
+                if ((prefix || wildcard) &&
+                    term.Value.Count(ch => char.IsLetterOrDigit(ch)) < 3)
+                    throw new FormatException("Wildcard searches require at least three letters or digits.");
+                var likeValue = "%" + EscapeLike(term.Value).Replace("*", "%").Replace("?", "_") + "%";
+                var quoted = "\"" + (prefix ? term.Value[..^1] : term.Value).Replace("\"", "\"\"") + "\"";
+                var value = wildcard ? likeValue : prefix ? quoted + "*" : quoted;
                 command.Parameters.AddWithValue(p, value);
                 if (term.Field is QuickSearchField.AttachmentName or QuickSearchField.AttachmentContent)
-                    command.Parameters.AddWithValue(p + "l", "%" + EscapeLike(term.Value).Replace("?", "_") + "%");
+                    command.Parameters.AddWithValue(p + "l", likeValue);
                 string FieldPredicate(string column, string ftsColumn) => wildcard
                     ? $"{column} LIKE {p} ESCAPE '\\' COLLATE NOCASE"
                     : $"f.rowid IN (SELECT rowid FROM LocalMessageFts WHERE LocalMessageFts MATCH '{ftsColumn}:' || {p})";

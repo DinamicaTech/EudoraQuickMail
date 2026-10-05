@@ -20,9 +20,9 @@
          System.Windows(.Media) types this codebase uses unqualified (Point, Size, Color, Brush,
          Application, MessageBox, ...). -->
     <UseWindowsForms>true</UseWindowsForms>
-    <Version>0.8.77</Version>
-    <AssemblyVersion>0.8.77</AssemblyVersion>
-    <FileVersion>0.8.77</FileVersion>
+    <Version>0.8.79</Version>
+    <AssemblyVersion>0.8.79</AssemblyVersion>
+    <FileVersion>0.8.79</FileVersion>
     <!-- Velopack needs a hand-written Main that runs VelopackApp.Build().Run() before WPF
          initializes (install/update/uninstall hooks run and may exit the process). App.xaml
          therefore compiles as Page (no generated Main) and the entry point is declared here. -->
@@ -67,6 +67,12 @@
          not match, which is why the first attempt at this (#383) had no effect. -->
     <DefaultItemExcludes>$(DefaultItemExcludes);bin/**;obj/**</DefaultItemExcludes>
   </PropertyGroup>
+
+  <!-- Local builds can inject a private temporary source without replacing the CI/default file. -->
+  <ItemGroup Condition="'$(GoogleOAuthCredentialsFile)' != ''">
+    <Compile Remove="Services\GoogleOAuthService.Credentials.cs" />
+    <Compile Include="$(GoogleOAuthCredentialsFile)" Link="Services\GoogleOAuthService.Credentials.cs" />
+  </ItemGroup>
 
   <ItemGroup>
     <!-- Compile App.xaml as Page instead of ApplicationDefinition so the SDK does not
@@ -155,5 +161,11 @@
       <BackupAgentPublishDirectory>$([System.IO.Path]::GetFullPath('$(PublishDir)BackupAgent', '$(MSBuildProjectDirectory)'))</BackupAgentPublishDirectory>
     </PropertyGroup>
     <Exec Command="dotnet publish &quot;$(MSBuildProjectDirectory)\..\Tools\DinamicaBackupAgent\DinamicaBackupAgent.csproj&quot; -c $(Configuration) -r $(RuntimeIdentifier) --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o &quot;$(BackupAgentPublishDirectory)&quot; --nologo" />
+  </Target>
+  <Target Name="PublishPortableUpdater" AfterTargets="Publish" Condition="'$(DesignTimeBuild)' != 'true'">
+    <PropertyGroup>
+      <UpdaterPublishDirectory>$([System.IO.Path]::GetFullPath('$(PublishDir)Updater', '$(MSBuildProjectDirectory)'))</UpdaterPublishDirectory>
+    </PropertyGroup>
+    <Exec Command="dotnet publish &quot;$(MSBuildProjectDirectory)\..\Tools\QuickMail.Updater\QuickMail.Updater.csproj&quot; -c $(Configuration) -r $(RuntimeIdentifier) --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o &quot;$(UpdaterPublishDirectory)&quot; --nologo" />
   </Target>
 </Project>

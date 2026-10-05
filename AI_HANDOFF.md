@@ -10,6 +10,25 @@
 
 ## 1. Purpose
 
+### Local OAuth publishing (2026-09-28)
+
+`scripts/Local-OAuthBuild.ps1` imports the existing official Desktop client JSON into
+an external DPAPI CurrentUser store and publishes with a private temporary source via
+`GoogleOAuthCredentialsFile`. See `docs/local-oauth-builds.md`. This workflow rejects
+missing/invalid credentials before building and requires an explicit numeric version.
+It does not change CI credentials, application tokens, production data or GitHub releases.
+The official JSON still needs to be supplied once by its owner; no actual credentials
+were available during development. Tests use synthetic credentials only.
+
+### Explicit SPAM blocks (2026-09-28, not yet released)
+
+See docs/spam-blocking.md for the accepted blocking, recovery and retention contract.
+SPAM blocks reuse MailRule with IsSpamFilter/SpamBlockDomain and exact sender matching;
+shared provider domains are protected. Classification is separate from user flags.
+The is:spam global saved view and Junk-only selective deletion never infer that all
+existing Junk mail is SPAM. Retention defaults to 30 days (0 disables).
+No production database or live mailbox was changed while implementing this feature.
+
 ### Backup agent development (2026-09-27)
 
 `Tools/DinamicaBackup.Core`, `Tools/DinamicaBackupAgent` and `Tools/DinamicaBackup.Tests`
@@ -825,3 +844,23 @@ Recreation from original QuickMail plus this specification succeeds only if it c
 - install on another Windows PC with operator-selected program/data paths.
 
 Those behaviors—not incidental class names—are the durable product contract.
+
+## 26. In-app update follow-up (after 0.8.77)
+
+See [in-app-updates.md](docs/in-app-updates.md) for installed/portable download, integrity checking,
+drained shutdown, rollback, preserved profiles and first-adoption requirements. The previous
+portable release-page-only behaviour is replaced where an official verified ZIP is available.
+
+## 27. Stable message results (October 2026)
+
+Quick/advanced searches retain the displayed result page in memory. Rule moves/deletes remove
+only confirmed affected rows; successful deletion does not reload the mailbox. Surviving rows
+retain order and selection advances to the next survivor. Read/unread reconciliation updates
+properties without changing membership. Explicit search, F5, paging or reopening the view
+reevaluates the query. Sorting a filtered page sorts its current rows without a new query.
+Unfiltered In continues accepting arrivals in the selected order; the UI preserves the visible
+top-row anchor around batched arrivals. No temporary SQLite table or schema change is required.
+
+Snooze additionally offers 30, 90 and 180 days, and one calendar year, all at 09:00 local time.
+Custom Snooze and Send Later date-only inputs default to 09:00; an explicitly supplied time,
+including 00:00, is preserved. Existing future-date validation still applies.

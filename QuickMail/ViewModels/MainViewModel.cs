@@ -1164,7 +1164,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         // ApplyListState suppresses the rebuild, and the fields it just changed are not the ones
         // the calling handler is about to rebuild for — so drive one here.
-        ApplyFiltersAndSearch();
+        if (!_hasMaterializedSearch || changed != ListField.Sort)
+            ApplyFiltersAndSearch();
     }
 
     private void RememberCurrentListState()
@@ -1333,6 +1334,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private CancellationTokenSource? _localSearchCts;
     private IReadOnlyList<AdvancedSearchCriterion>? _advancedSearchCriteria;
     private bool _searchEverywhere;
+    // SQLite has already evaluated the search grammar for this page. Keep its membership
+    // stable until navigation, an explicit search, paging or refresh replaces it.
+    private bool _hasMaterializedSearch;
+    private bool HasStableResultSet => _hasMaterializedSearch || ActiveFilter != MessageFilter.All
+        || ActiveDayLimit.HasValue || !string.IsNullOrWhiteSpace(SearchText);
     public bool SearchEverywhere => _searchEverywhere;
     private bool _suppressSearchTextExecution;
 
@@ -1379,13 +1385,17 @@ public partial class MainViewModel : ObservableObject, IDisposable
         var cts = _localSearchCts!;
         if (string.IsNullOrWhiteSpace(value))
         {
+            _hasMaterializedSearch = false;
             ApplyFiltersAndSearch();
             return;
         }
         try
         {
             IsBusy = true;
-            StatusText = "Searching messages…";
+            var slowWildcard = QuickSearchParser.HasSlowWildcard(value);
+            StatusText = slowWildcard
+                ? "Scanning message text; wildcard search may take a while…"
+                : "Searching messages…";
             var sort = LocalSortFor(ActiveSort);
             Guid? accountScope = _searchEverywhere ? null : SelectedFolder switch
             {
@@ -1406,7 +1416,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
             var query = new LocalSearchQuery(value, accountScope, realFolder,
                 LocalMailConstants.MaxRenderedMessages, LocalPageOffset, sort,
                 !_searchEverywhere && SelectedFolder?.IsContainer == true, rootAccountIds, folderScopes, excludedFolderScopes);
-            var found = await ((ILocalMailboxStore)_localStore).SearchLocalMessagesAsync(query, cts.Token);
+            var store = (ILocalMailboxStore)_localStore;
+            // Microsoft.Data.Sqlite executes much of its async API synchronously. Keep a
+            // leading-wildcard scan off the UI thread so the indicator can render.
+            var found = slowWildcard
+                ? await Task.Run(() => store.SearchLocalMessagesAsync(query, cts.Token), cts.Token)
+                : await store.SearchLocalMessagesAsync(query, cts.Token);
             if (cts.IsCancellationRequested) return;
             var aggregateScope = rootAccountIds != null || folderScopes != null;
             var logicalMessages = CollapseAggregateSearchPage(found, aggregateScope,
@@ -1414,24 +1429,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
             await ResolveFlagNamesAsync(logicalMessages);
             IEnumerable<MailMessageSummary> visible = logicalMessages;
             if (ActiveFilter != MessageFilter.All) visible = visible.Where(MatchesFilter);
-            visible = ActiveSort switch
-            {
-                MessageSort.DateAscending => visible.OrderBy(m => m.Date),
-                MessageSort.AlphaAscending => visible.OrderBy(m => m.Subject, StringComparer.OrdinalIgnoreCase),
-                MessageSort.AlphaDescending => visible.OrderByDescending(m => m.Subject, StringComparer.OrdinalIgnoreCase),
-                MessageSort.FromAscending => visible.OrderBy(m => m.From, StringComparer.OrdinalIgnoreCase),
-                MessageSort.FromDescending => visible.OrderByDescending(m => m.From, StringComparer.OrdinalIgnoreCase),
-                MessageSort.ReadStateAscending => visible.OrderBy(m => m.IsRead).ThenByDescending(m => m.Date),
-                MessageSort.ReadStateDescending => visible.OrderByDescending(m => m.IsRead).ThenByDescending(m => m.Date),
-                MessageSort.StatusAscending => visible.OrderBy(m => m.StatusDisplay, StringComparer.CurrentCultureIgnoreCase).ThenByDescending(m => m.Date),
-                MessageSort.StatusDescending => visible.OrderByDescending(m => m.StatusDisplay, StringComparer.CurrentCultureIgnoreCase).ThenByDescending(m => m.Date),
-                MessageSort.DirectionAscending => visible.OrderBy(m => m.Direction).ThenByDescending(m => m.Date),
-                MessageSort.DirectionDescending => visible.OrderByDescending(m => m.Direction).ThenByDescending(m => m.Date),
-                MessageSort.AttachmentsFirst => visible.OrderByDescending(m => m.HasAttachments).ThenByDescending(m => m.Date),
-                MessageSort.AttachmentsLast => visible.OrderBy(m => m.HasAttachments).ThenByDescending(m => m.Date),
-                _ => visible.OrderByDescending(m => m.Date),
-            };
+            visible = SortMaterializedMessages(visible);
             Messages = new BatchObservableCollection<MailMessageSummary>(visible);
+            _rawMessages = logicalMessages.ToList();
+            _hasMaterializedSearch = true;
             var shown = Messages.Count;
             LocalTotalMessages = logicalTotal;
             StatusText = logicalTotal > shown
@@ -1470,6 +1471,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
             rootAccountIds != null || folderScopes != null, 0, LocalMailConstants.MaxRenderedMessages,
             out var logicalTotal);
         Messages = new BatchObservableCollection<MailMessageSummary>(logicalMessages);
+        _rawMessages = Messages.ToList();
+        _hasMaterializedSearch = true;
         _advancedSearchCriteria = criteria.ToList();
         LocalPageOffset = 0;
         LocalTotalMessages = logicalTotal;
@@ -2439,7 +2442,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         UpdateRulesStatusText();
         if (!OnlineMode)
             _recoveryDeletedPurgeTimer = new System.Threading.Timer(
-                _ => _ui.Post(() => PurgeExpiredRecoveryDeletedAsync().LogFaults("RecoveryDeleted purge")),
+                _ => _ui.Post(() => PurgeDeletedAndSpamAsync().LogFaults("Deleted/SPAM purge")),
                 null, TimeSpan.FromSeconds(30), TimeSpan.FromHours(1));
     }
 
@@ -4243,6 +4246,21 @@ public partial class MainViewModel : ObservableObject, IDisposable
         var selected = SelectedFolder;
         if (selected == null) return;
 
+        if (HasStableResultSet)
+        {
+            // Update existing rows, but do not admit new matches or expel changed ones.
+            var freshByKey = incoming.GroupBy(MessageDeduplicator.PerFolderKeyFor)
+                .ToDictionary(group => group.Key, group => group.Last());
+            foreach (var row in Messages)
+                if (freshByKey.TryGetValue(MessageDeduplicator.PerFolderKeyFor(row), out var fresh))
+                {
+                    row.IsRead = fresh.IsRead;
+                    row.IsReplied = fresh.IsReplied;
+                    row.IsForwarded = fresh.IsForwarded;
+                }
+            return;
+        }
+
         IEnumerable<MailMessageSummary> relevant;
         if (selected.FullName == AllMailFolder.FullName)
         {
@@ -4280,6 +4298,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
             relevant = incoming.Where(m =>
                 matchingFolderKeys.Contains((m.AccountId, m.FolderName.ToUpperInvariant())));
         }
+        else if (TryParseRootMail(selected.FullName, out _))
+        {
+            var accountIds = RootAccountIdsFor(selected)?.ToHashSet() ?? [];
+            relevant = incoming.Where(m => accountIds.Contains(m.AccountId));
+        }
         else if (TryGetContactMailFromSentinel(selected.FullName, out var contactAddress, out var contactDirection))
         {
             // Contact mail results (#370) — only accept messages that still match the address, and
@@ -4315,10 +4338,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
         // Collect truly new messages; add them to _rawMessages immediately so the
         // search pool stays in sync with what the list will eventually show.
         var toInsert = new List<MailMessageSummary>();
-        // Existing messages whose read-state was reconciled from the server (#269). Their filter
-        // membership may have changed (e.g. now-read messages must leave the Unread view), so their
-        // presence in the visible list is reconciled after the loop.
-        var readReconciled = new List<MailMessageSummary>();
         foreach (var msg in relevant.OrderByDescending(m => m.Date))
         {
             // Reconcile server-flagged state for new incoming messages: a message with
@@ -4341,7 +4360,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
                     if (existing.IsRead != msg.IsRead)
                     {
                         existing.IsRead = msg.IsRead;
-                        readReconciled.Add(existing); // its filter membership may have changed
                     }
 
                     // Flags are local-first metadata. A sync can introduce the built-in flag when
@@ -4389,29 +4407,19 @@ public partial class MainViewModel : ObservableObject, IDisposable
         // transiently when the Reset fires (the Selector deselects before re-validating).
         // Save the reference so it can be restored if that happens.
         var prevSelected = SelectedMessage;
+        if (toInsert.Count > 0) MessageListBatchStarting?.Invoke();
         using (Messages.BeginBatchScope())
         {
             foreach (var msg in toInsert)
                 InsertMessageSorted(msg);
 
-            // #269: reconcile the visible list for messages whose read-state changed externally. A
-            // now-read message must leave the Unread view; a now-unread one must (re)appear if it
-            // matches. Done inside the batch so it costs one Reset, not one event per change.
-            foreach (var m in readReconciled)
-            {
-                var shouldShow = MatchesFilter(m) && MatchesDayLimit(m)
-                    && (string.IsNullOrWhiteSpace(SearchText) || MatchesSearch(m));
-                var isShown = Messages.Contains(m);
-                if (shouldShow && !isShown)
-                    InsertMessageSorted(m);
-                else if (!shouldShow && isShown)
-                    Messages.Remove(m);
-            }
+            // Existing rows retain their position and membership when their state changes.
         }
         // If WPF cleared SelectedMessage during the Reset but the message is still in
         // the list, restore it so the reading pane header and command guards stay correct.
         if (prevSelected != null && SelectedMessage == null && Messages.Contains(prevSelected))
             SelectedMessage = prevSelected;
+        if (toInsert.Count > 0) MessageListBatchCompleted?.Invoke();
 
         if (toInsert.Count > 0)
         {
@@ -4451,32 +4459,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
             foreach (var m in changed)
                 newReadByKey[MessageDeduplicator.PerFolderKeyFor(m)] = m.IsRead;
 
-            var affected = new List<MailMessageSummary>();
             foreach (var existing in _rawMessages)
                 if (newReadByKey.TryGetValue(MessageDeduplicator.PerFolderKeyFor(existing), out var isRead)
                     && existing.IsRead != isRead)
                 {
                     existing.IsRead = isRead;
-                    affected.Add(existing);
                 }
-
-            if (affected.Count > 0)
-            {
-                // A now-read message must leave the Unread view; a now-unread one must (re)appear if it
-                // matches. Batched so it costs one Reset, not one event per change (screen-reader-friendly).
-                using (Messages.BeginBatchScope())
-                {
-                    foreach (var m in affected)
-                    {
-                        var shouldShow = MatchesFilter(m) && MatchesDayLimit(m)
-                            && (string.IsNullOrWhiteSpace(SearchText) || MatchesSearch(m));
-                        var isShown = Messages.Contains(m);
-                        if (shouldShow && !isShown) InsertMessageSorted(m);
-                        else if (!shouldShow && isShown) Messages.Remove(m);
-                    }
-                }
-                RebuildActiveGroupView();
-            }
         }
 
         // Nudge the folder-tree unread badges. NOTE this only acts on IMAP/SMTP accounts — Graph folder
@@ -4665,12 +4653,41 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 Stopwatch.GetElapsedTime(stage),
                 $"account={account.AccountLabel}; canonicalFolders={_canonicalFolders.Count}");
 
-            // Preserve the active quick/advanced search, sorting and paging. This is the same local
-            // page reload used by paging itself and avoids a network refresh or a folder-tree rebuild.
-            if (!IsCalendarView && SelectedFolder != null)
+            // Search membership is frozen until an explicit refresh. An ordinary mailbox
+            // accepts new rows through the same incremental path as IMAP.
+            if (!IsCalendarView && !HasStableResultSet && SelectedFolder is { } folder
+                && _localStore is ILocalMailboxStore store)
             {
                 stage = Stopwatch.GetTimestamp();
-                await ReloadCurrentLocalPageAsync();
+                var collection = Messages;
+                var scopes = SearchFolderScopesFor(folder);
+                LocalSearchResult page;
+                if (scopes != null)
+                {
+                    var rows = new List<MailMessageSummary>();
+                    long total = 0;
+                    foreach (var scope in scopes)
+                    {
+                        var part = await store.LoadLocalPageAsync(scope.AccountId, scope.FolderName,
+                            LocalMailConstants.MaxRenderedMessages, 0, LocalSortFor(ActiveSort), scope.IncludeDescendants);
+                        rows.AddRange(part.Messages);
+                        total += part.TotalMatches;
+                    }
+                    page = new LocalSearchResult(SortMaterializedMessages(rows)
+                        .Take(LocalMailConstants.MaxRenderedMessages).ToList(), total);
+                }
+                else
+                    page = await store.LoadLocalPageAsync(
+                        !IsVirtualFolder(folder) && folder.AccountId != Guid.Empty ? folder.AccountId : null,
+                        !IsVirtualFolder(folder) ? folder.FullName : null,
+                        LocalMailConstants.MaxRenderedMessages, LocalPageOffset, LocalSortFor(ActiveSort),
+                        folder.IsContainer, accountIds: RootAccountIdsFor(folder),
+                        excludedFolderScopes: RootExcludedFolderScopesFor(folder));
+                if (ReferenceEquals(collection, Messages) && ReferenceEquals(folder, SelectedFolder))
+                {
+                    OnFolderSynced(page.Messages);
+                    LocalTotalMessages = page.TotalMatches;
+                }
                 PerformanceLogService.Record("POP3 receive refresh: visible SQLite page and grid",
                     Stopwatch.GetElapsedTime(stage),
                     $"account={account.AccountLabel}; folder={SelectedFolder.DisplayName}; rows={Messages.Count}; total={LocalTotalMessages}");
@@ -4735,6 +4752,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
 #pragma warning disable CA1859
     private void OnMessagesRemoved(IReadOnlyList<MailMessageSummary> removed)
     {
+        var selectedBefore = SelectedMessage;
+        var continuationIndex = selectedBefore == null ? 0 : Math.Max(0, Messages.IndexOf(selectedBefore));
+        var previousCount = Messages.Count;
         // Build a key→item map once so each removed key is an O(1) lookup
         // instead of a Messages.FirstOrDefault scan per item.
         var byKey = new Dictionary<(string, Guid, string), MailMessageSummary>(Messages.Count);
@@ -4745,6 +4765,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
         var removedKeys = new HashSet<(string, Guid, string)>(removed.Count);
         foreach (var msg in removed)
             removedKeys.Add((msg.MessageId, msg.AccountId, msg.FolderName));
+        var next = Messages.Skip(continuationIndex)
+            .FirstOrDefault(m => !removedKeys.Contains((m.MessageId, m.AccountId, m.FolderName)));
 
         // Capture which messages are still in _rawMessages before removal so we only
         // decrement inbox counts for messages we're actually removing here.  Messages
@@ -4767,20 +4789,21 @@ public partial class MainViewModel : ObservableObject, IDisposable
             var key = (msg.MessageId, msg.AccountId, msg.FolderName);
             if (!byKey.TryGetValue(key, out var existing)) continue;
 
-            if (SelectedMessage == existing) removedOpen = true;
+            if (selectedBefore == existing) removedOpen = true;
             Messages.Remove(existing);
             byKey.Remove(key);
         }
 
         if (removedOpen)
         {
-            SelectedMessage = Messages.Count > 0 ? Messages[0] : null;
+            SelectedMessage = next ?? Messages.LastOrDefault();
             MessageDetail   = null;
             IsMessageOpen   = false;
         }
 
         if (removed.Count > 0)
             StatusText = $"{Messages.Count} messages";
+        LocalTotalMessages = Math.Max(0, LocalTotalMessages - (previousCount - Messages.Count));
 
         RebuildActiveGroupView();
     }
@@ -4788,11 +4811,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     /// <summary>
     /// Applies a confirmed move/delete result to the currently materialized page. Rule execution
-    /// uses this before reloading the folder so no stale row can request a source message that has
-    /// already moved in the local database.
+    /// uses this without reloading the folder, preserving the remaining rows and their order.
     /// </summary>
     public void RemoveMessagesFromActiveView(IReadOnlyList<MailMessageSummary> removed) =>
         OnMessagesRemoved(removed);
+
+    public event Action? MessageListBatchStarting;
+    public event Action? MessageListBatchCompleted;
 
     private int _lastRulesMatchCount;
     private DateTime _lastRulesRunTime;
@@ -4828,6 +4853,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     // Stores raw messages and applies all active filters.
     private void SetMessages(IEnumerable<MailMessageSummary> messages)
     {
+        _hasMaterializedSearch = false;
         var list = messages as List<MailMessageSummary> ?? messages.ToList();
         // Aggregate/virtual views union multiple folders, so one physical message can arrive as
         // several per-folder copies (notably Gmail: INBOX + All Mail + labels). Collapse them to one
@@ -4984,42 +5010,19 @@ public partial class MainViewModel : ObservableObject, IDisposable
             result = result.Where(m => m.FlagId == _activeFlagFilterId);
         if (ActiveDayLimit.HasValue)
             result = result.Where(MatchesDayLimit);
-        if (!string.IsNullOrWhiteSpace(SearchText))
+        if (!_hasMaterializedSearch && !string.IsNullOrWhiteSpace(SearchText))
             result = result.Where(MatchesSearch);
-        result = ActiveSort switch
-        {
-            MessageSort.DateAscending   => result.OrderBy(m => m.Date),
-            MessageSort.AlphaAscending  => result.OrderBy(m => m.Subject, StringComparer.OrdinalIgnoreCase),
-            MessageSort.AlphaDescending => result.OrderByDescending(m => m.Subject, StringComparer.OrdinalIgnoreCase),
-            MessageSort.FlaggedFirst    => result.OrderBy(m => m.IsFlagged ? 0 : 1).ThenByDescending(m => m.Date),
-            MessageSort.FromAscending   => result.OrderBy(m => m.From, StringComparer.OrdinalIgnoreCase),
-            MessageSort.FromDescending  => result.OrderByDescending(m => m.From, StringComparer.OrdinalIgnoreCase),
-            MessageSort.ReadStateAscending => result.OrderBy(m => m.IsRead).ThenByDescending(m => m.Date),
-            MessageSort.ReadStateDescending => result.OrderByDescending(m => m.IsRead).ThenByDescending(m => m.Date),
-            MessageSort.StatusAscending => result.OrderBy(m => m.StatusDisplay, StringComparer.CurrentCultureIgnoreCase).ThenByDescending(m => m.Date),
-            MessageSort.StatusDescending => result.OrderByDescending(m => m.StatusDisplay, StringComparer.CurrentCultureIgnoreCase).ThenByDescending(m => m.Date),
-            MessageSort.DirectionAscending => result.OrderBy(m => m.Direction).ThenByDescending(m => m.Date),
-            MessageSort.DirectionDescending => result.OrderByDescending(m => m.Direction).ThenByDescending(m => m.Date),
-            MessageSort.AttachmentsFirst => result.OrderByDescending(m => m.HasAttachments).ThenByDescending(m => m.Date),
-            MessageSort.AttachmentsLast => result.OrderBy(m => m.HasAttachments).ThenByDescending(m => m.Date),
-            _                           => result.OrderByDescending(m => m.Date),
-        };
+        result = SortMaterializedMessages(result);
         Messages = new BatchObservableCollection<MailMessageSummary>(result);
 
-        // Keep the status bar count in sync with whatever is currently visible.
-        // Folder-load methods set a more descriptive status text immediately after
-        // calling SetMessages, so this value is overwritten during loads and only
-        // "sticks" for user-triggered changes (filter, search, sort).
         var n = Messages.Count;
         StatusText = n == 0 ? "No messages" : $"{n} {(n == 1 ? "message" : "messages")}";
-
         if (IsSearchActive && !string.IsNullOrWhiteSpace(SearchText))
-        {
-            SearchAnnouncement = n == 0
-                ? "No messages found"
-                : $"{n} {(n == 1 ? "message" : "messages")} found";
-        }
+            SearchAnnouncement = n == 0 ? "No messages found" : $"{n} {(n == 1 ? "message" : "messages")} found";
     }
+
+    private IEnumerable<MailMessageSummary> SortMaterializedMessages(IEnumerable<MailMessageSummary> result) =>
+        SortMessageSequence(result, ActiveSort);
 
     private bool MatchesSearch(MailMessageSummary msg)
     {
@@ -5069,7 +5072,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
     }
 
-    // Binary-insert into the descending-by-date Messages collection.
+    // Insert according to the user's current order without rebuilding the existing rows.
     private void InsertMessageSorted(MailMessageSummary msg)
     {
         if (!_showPreview) msg.Preview = string.Empty;
@@ -5078,7 +5081,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         while (lo < hi)
         {
             int mid = (lo + hi) / 2;
-            if (Messages[mid].Date >= msg.Date) lo = mid + 1;
+            if (ReferenceEquals(SortMaterializedMessages(new[] { Messages[mid], msg }).First(), Messages[mid])) lo = mid + 1;
             else hi = mid;
         }
         Messages.Insert(lo, msg);
@@ -5734,7 +5737,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         if (ViewMode == ViewMode.Messages)
         {
-            if (_localStore is ILocalMailboxStore
+            if (HasStableResultSet)
+            {
+                var selected = SelectedMessage;
+                Messages = new BatchObservableCollection<MailMessageSummary>(SortMaterializedMessages(Messages));
+                if (selected != null && Messages.Contains(selected)) SelectedMessage = selected;
+            }
+            else if (_localStore is ILocalMailboxStore
                 && (IsVirtualFolder(SelectedFolder)
                     || SelectedFolder?.AccountId is { } aid && Accounts.Any(a => a.Id == aid
                         && a.BackendKind is BackendKind.Pop3Smtp or BackendKind.LocalArchive)))
@@ -5990,6 +5999,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         _suppressFilterRebuild = true;
         _advancedSearchCriteria = null;
+        _hasMaterializedSearch = false;
         SearchText          = string.Empty;
         IsSearchActive      = false;
         ActiveView          = null;
@@ -6466,6 +6476,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
             Stopwatch.GetElapsedTime(foldersStarted), refreshDetails);
 
         var contentStarted = Stopwatch.GetTimestamp();
+        if (_hasMaterializedSearch)
+        {
+            await ReloadCurrentLocalPageAsync();
+            return;
+        }
         if (ActiveView != null)
         {
             await ApplyViewAsync(ActiveView);
@@ -6487,7 +6502,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// leave the UI responsive even when a remote account is slow or temporarily unavailable.
     /// F5 and Check Mail remain the explicit network refresh entry points.
     /// </summary>
-    public async Task RefreshAfterLocalMutationAsync(string reason)
+    public async Task RefreshAfterLocalMutationAsync(string reason, bool preserveMessageList = false)
     {
         var operationId = Guid.NewGuid().ToString("N")[..8];
         var details = $"id={operationId}; reason={reason}; folder={SelectedFolder?.DisplayName ?? "none"}";
@@ -6500,6 +6515,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
             // source and the optional filtered-destination tab; this also updates live tree counts.
             if (_canonicalLocalTree != null)
                 await RefreshCanonicalFolderCountsAsync();
+
+            if (preserveMessageList)
+            {
+                PerformanceLogService.Marker("Mailbox: retained materialized rows", details + $"; rows={Messages.Count}");
+                return;
+            }
 
             if (ActiveView is { SearchQuery: { } savedQuery } savedSearch &&
                 !string.IsNullOrWhiteSpace(savedQuery))
@@ -8621,6 +8642,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private static IOrderedEnumerable<MailMessageSummary> SortMessageSequence(
         IEnumerable<MailMessageSummary> messages, MessageSort sort) => sort switch
     {
+        MessageSort.FlaggedFirst => messages.OrderBy(m => m.IsFlagged ? 0 : 1).ThenByDescending(m => m.Date),
         MessageSort.DateAscending => messages.OrderBy(m => m.Date),
         MessageSort.AlphaAscending => messages.OrderBy(m => m.Subject, StringComparer.OrdinalIgnoreCase),
         MessageSort.AlphaDescending => messages.OrderByDescending(m => m.Subject, StringComparer.OrdinalIgnoreCase),
@@ -8849,6 +8871,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         MessagesDeleting?.Invoke(toDelete);
 
         var minIdx = toDelete.Min(m => Messages.IndexOf(m));
+        var removedUnreadMessages = toDelete.Any(m => !m.IsRead);
         var label  = toDelete.Count == 1 ? "message" : $"{toDelete.Count} messages";
         // Delete/archive progress + outcome go through the MessageAction category (issue #317) so users
         // can silence this frequent chatter — it can interrupt the screen reader reading the next message.
@@ -8868,6 +8891,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             if (Messages.Remove(msg)) removed++;
         }
+        LocalTotalMessages = Math.Max(0, LocalTotalMessages - removed);
 
         // Remove from _rawMessages so OnMessagesRemoved (fired by background sync) won't
         // double-count these messages when updating inbox totals.
@@ -8931,6 +8955,17 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
                 if (toRecoveryDeleted && sourceKind is not SpecialFolderKind.RecoveryDeleted)
                 {
+                    // Shift+Delete means "handled": mark the source as read before moving it.
+                    // Await the server mutation so IMAP/Graph cannot MOVE an unread message first.
+                    var unread = group.Where(message => !message.IsRead).ToList();
+                    if (unread.Count > 0)
+                    {
+                        await _imap.MarkReadBatchAsync(group.Key.AccountId, group.Key.FolderName,
+                            unread.Select(message => message.MessageId).ToList(), ct);
+                        await _localStore.UpdateIsReadBatchAsync(unread.Select(message =>
+                            (message.AccountId, message.FolderName, message.MessageId)), true);
+                        foreach (var message in unread) message.IsRead = true;
+                    }
                     var recovery = await EnsureRecoveryDeletedFolderAsync(group.Key.AccountId, ct);
                     await _imap.MoveMessagesAsync(
                         group.Key.AccountId, group.Key.FolderName, uids, recovery.FullName, ct);
@@ -8951,7 +8986,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             // unread message actually left a folder (deleting a read message changes no count).
             // Scheduled here, not before the await, so the debounced STATUS sweep can't read a
             // pre-delete count and clobber the optimistic decrement (#227 follow-up).
-            if (toDelete.Any(m => !m.IsRead))
+            if (removedUnreadMessages)
                 foreach (var acctId in toDelete.Select(m => m.AccountId).Distinct())
                     ScheduleFolderCountRefresh(acctId);
 
@@ -8966,10 +9001,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 foreach (var acctId in toDelete.Select(m => m.AccountId).Distinct())
                     await RefreshFolderListAsync(acctId);
 
-                if (SelectedFolder != null && IsVirtualFolder(SelectedFolder))
-                    await FetchVirtualAsync(SelectedFolder);
-                else if (SelectedFolder != null)
-                    await FetchFolderAsync();
+                // The rows were already removed above. Reload only the tree metadata;
+                // fetching the mailbox again loses the current search, order and position.
             }
 
             var count = toDelete.Count;
@@ -11343,6 +11376,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private async Task ClearSearchAsync()
     {
+        _hasMaterializedSearch = false;
         _searchEverywhere = false;
         _advancedSearchCriteria = null;
         ActiveFilter = MessageFilter.All;
@@ -12342,19 +12376,21 @@ public partial class MainViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>
-    /// Applies the downloaded update and restarts QuickMail. On success the process exits
-    /// inside this call. On failure the user hears an accurate outcome and the app keeps
-    /// running; a cancellation (the update dialog was dismissed) is silent. The token lets
-    /// the dialog retract a restart that is waiting on a slow download.
+    /// Stages update files before the view requests a drained shutdown.
     /// </summary>
-    public async Task RestartToUpdateAsync(CancellationToken cancellationToken)
+    public Task PrepareUpdateAsync(IProgress<string>? progress, CancellationToken cancellationToken) =>
+        _updateCheckService?.PrepareUpdateAsync(progress, cancellationToken)
+        ?? Task.FromException(new InvalidOperationException("Update service is unavailable."));
+
+    public async Task<bool> RestartToUpdateAsync(CancellationToken cancellationToken)
     {
-        if (_updateCheckService is null) return;
+        if (_updateCheckService is null) return false;
         var ok = await _updateCheckService.RestartToUpdateAsync(cancellationToken);
         if (!ok && !cancellationToken.IsCancellationRequested)
             // No promise of a next-start install: when the download failed, nothing is
             // staged — the next launch re-checks and tries the download again.
             Announce("The update could not be applied right now. QuickMail will try again the next time it starts.", AnnouncementCategory.Result);
+        return ok;
     }
 
     // Startup check: silent when already up to date (announcing "no updates" on every launch

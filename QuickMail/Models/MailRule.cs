@@ -10,6 +10,8 @@ namespace QuickMail.Models;
 /// </summary>
 public class MailRule
 {
+    public bool IsSpamFilter { get; set; }
+    public bool SpamBlockDomain { get; set; }
     public Guid Id { get; set; } = Guid.NewGuid();
 
     /// <summary>User-visible name for this rule. Required — validated on save.</summary>

@@ -60,6 +60,10 @@ public sealed class PeriodicPop3Receiver : IDisposable
                     {
                         var rulesStarted = Stopwatch.GetTimestamp();
                         await _rules.ApplyAutomaticRulesAsync(result.NewMessages.ToList(), account.Id, _stop.Token);
+                        // Keep download statistics, but never notify for an explicitly blocked sender.
+                        var spamRules = _rules.LoadRules().Where(r => r.IsSpamFilter && r.IsEnabled).ToList();
+                        result = result with { NewMessages = result.NewMessages
+                            .Where(m => !spamRules.Any(r => SpamPolicy.Matches(r, m))).ToList() };
                         PerformanceLogService.Record("POP3 sweep: automatic rules",
                             Stopwatch.GetElapsedTime(rulesStarted),
                             $"account={account.AccountLabel}; messages={result.NewMessages.Count}");

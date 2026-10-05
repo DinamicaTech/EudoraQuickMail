@@ -45,6 +45,16 @@ public sealed class RestoreEngine(BackupJob job, IProgress<ProgressInfo>? progre
         run.Artifact = directory;
         var manifest = await ExtractAsync(archive, directory, ct);
         run.FilesCopied = manifest.Files.Count;
+        run.VerificationDetails.Add("OK — Database ZIP extracted and SHA-256 verified; SQLite " +
+            (job.FullIntegrityCheck ? "full integrity" : "quick integrity") + ", foreign keys and schema checked.");
+        foreach (var probe in manifest.ProbeValues.OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase))
+        {
+            var value = probe.Value ?? "(null)";
+            if (probe.Key.Contains("date", StringComparison.OrdinalIgnoreCase) &&
+                long.TryParse(value, out var ticks) && ticks >= DateTime.MinValue.Ticks && ticks <= DateTime.MaxValue.Ticks)
+                value = new DateTime(ticks, DateTimeKind.Utc).ToLocalTime().ToString("g") + " (UTC ticks " + value + ")";
+            run.VerificationDetails.Add("OK — " + probe.Key + ": " + value + " matches the restored database.");
+        }
         if (manifest.IncludesAttachments && job.AttachmentSampleSize > 0)
         {
             if (string.IsNullOrWhiteSpace(job.AttachmentDestination)) throw new IOException("Attachment repository is not configured.");
@@ -59,7 +69,10 @@ public sealed class RestoreEngine(BackupJob job, IProgress<ProgressInfo>? progre
                 if (!Directory.Exists(SafePaths.Child(job.AttachmentDestination, attachmentDirectory))) missingDirectories.Add(attachmentDirectory);
             }
             if (missingDirectories.Count > 0)
+            {
                 run.Warnings.Add($"Missing attachment directories: {missingDirectories.Count}. " + string.Join(", ", missingDirectories.Take(10)));
+                foreach (var missing in missingDirectories) run.VerificationDetails.Add("MISSING — Attachment directory: " + missing);
+            }
             // Half stratified random, half least-recently checked. Never sample actual surviving files.
             var first = inventory.GroupBy(x => Path.GetDirectoryName(x.Path) ?? "")
                 .OrderBy(_ => random.Next()).Select(g => g.ElementAt(random.Next(g.Count())))
@@ -72,8 +85,15 @@ public sealed class RestoreEngine(BackupJob job, IProgress<ProgressInfo>? progre
                 ct.ThrowIfCancellationRequested(); progress?.Report(new("Checking attachment " + item.Path, completed++, sample.Length));
                 var path = SafePaths.Child(job.AttachmentDestination, item.Path);
                 if (!File.Exists(path) || new FileInfo(path).Length != item.Length || await BackupEngine.HashAsync(path, ct) != item.Sha256)
+                {
                     run.Warnings.Add("Attachment missing or changed since this backup: " + item.Path);
-                else catalog.Verified(item.Path);
+                    run.VerificationDetails.Add("FAILED — Attachment: " + item.Path);
+                }
+                else
+                {
+                    catalog.Verified(item.Path);
+                    run.VerificationDetails.Add("OK — Attachment: " + item.Path);
+                }
             }
         }
         run.Detail = "Tested backup " + Path.GetFileName(archive) + ". Database extracted, hashed and checked.";
@@ -112,6 +132,8 @@ public sealed class RestoreEngine(BackupJob job, IProgress<ProgressInfo>? progre
             if (!manifest.IncludesAttachments) throw new InvalidOperationException("This backup has no attachment inventory.");
             var inventory = manifest.Attachments.Where(x => mode != RestoreMode.SelectedAttachments || selected.Contains(x.Path, StringComparer.OrdinalIgnoreCase)).ToArray();
             if (mode == RestoreMode.SelectedAttachments && (inventory.Length == 0 || inventory.Length != selected.Distinct(StringComparer.OrdinalIgnoreCase).Count())) throw new InvalidDataException("Select valid attachment paths from the manifest.");
+            if (inventory.Any(x => x.Path.StartsWith(LegacyAttachmentSource.BackupPrefix, StringComparison.OrdinalIgnoreCase)))
+                run.Warnings.Add("Eudora legacy attachments will be restored under the selected destination's LegacyEudora folder. Their original absolute paths in the database are not rewritten.");
             SafePaths.CheckSpace(destination, inventory.Sum(x => x.Length));
             foreach (var file in inventory)
             {

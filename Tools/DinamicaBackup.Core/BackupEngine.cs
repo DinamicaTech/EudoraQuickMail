@@ -32,14 +32,24 @@ public sealed class BackupEngine(BackupJob job, IProgress<ProgressInfo>? progres
         Directory.CreateDirectory(job.Destination);
         SqliteValidation.Checkpoint(database, progress);
         var inspection = SqliteValidation.Inspect(database, job.Probes, false, ct, progress);
-        var manifest = new Manifest { JobId = job.Id, DatabaseName = job.DatabaseName, SourceProfile = job.ProfileDirectory, JobConfiguration = job, SchemaVersion = inspection.Version, ProbeValues = inspection.Probes, Probes = job.Probes.ToList(), IncludesAttachments = job.CopyAttachments };
+        var legacy = job.CopyAttachments && job.IncludeLegacyEudoraAttachments
+            ? LegacyAttachmentSource.Detect(job.ProfileDirectory) ?? throw new DirectoryNotFoundException("Eudora legacy attachment directories are unavailable. Check the original Eudora source path.")
+            : null;
+        if (legacy is not null)
+        {
+            SafePaths.Separate(legacy.Root, job.Destination);
+            SafePaths.Separate(legacy.Root, job.AttachmentDestination);
+        }
+        var manifest = new Manifest { JobId = job.Id, DatabaseName = job.DatabaseName, SourceProfile = job.ProfileDirectory, JobConfiguration = job, SchemaVersion = inspection.Version, ProbeValues = inspection.Probes, Probes = job.Probes.ToList(), IncludesAttachments = job.CopyAttachments, LegacyAttachmentSourceRoot = legacy?.Root ?? "" };
         var final = SafePaths.Child(job.Destination, $"backup-{manifest.CreatedUtc:yyyyMMdd-HHmmss}-{manifest.BackupId}.zip");
         var temporary = final + ".partial";
         try
         {
             using (var zip = ZipFile.Open(temporary, ZipArchiveMode.Create))
             {
-                foreach (var relative in job.ProfileFiles.Prepend(job.DatabaseName).Distinct(StringComparer.OrdinalIgnoreCase))
+                foreach (var relative in job.ProfileFiles.Prepend(job.DatabaseName)
+                    .Concat(legacy is null ? [] : ["eudora-import-settings.json"])
+                    .Distinct(StringComparer.OrdinalIgnoreCase))
                 {
                     ct.ThrowIfCancellationRequested();
                     var path = SafePaths.Child(job.ProfileDirectory, relative);
@@ -55,7 +65,7 @@ public sealed class BackupEngine(BackupJob job, IProgress<ProgressInfo>? progres
                     var result = await CopyHashed(input, output, ct, done => progress?.Report(new("Compressing " + relative, done, info.Length)));
                     manifest.Files.Add(new(relative, result.Length, info.LastWriteTimeUtc, result.Hash)); run.FilesCopied++;
                 }
-                if (job.CopyAttachments) manifest.Attachments = await MirrorAttachments(run, ct);
+                if (job.CopyAttachments) manifest.Attachments = await MirrorAttachments(run, legacy, ct);
                 var metadata = zip.CreateEntry("manifest.json");
                 await using var manifestStream = metadata.Open();
                 await JsonSerializer.SerializeAsync(manifestStream, manifest, JsonFiles.Options, ct);
@@ -71,7 +81,7 @@ public sealed class BackupEngine(BackupJob job, IProgress<ProgressInfo>? progres
         }
         finally { if (File.Exists(temporary)) File.Delete(temporary); }
     }
-    private async Task<List<FileRecord>> MirrorAttachments(RunResult run, CancellationToken ct)
+    private async Task<List<FileRecord>> MirrorAttachments(RunResult run, LegacyAttachmentSource? legacy, CancellationToken ct)
     {
         Directory.CreateDirectory(job.AttachmentDestination);
         var marker = SafePaths.Child(job.AttachmentDestination, ".backup-owner");
@@ -90,14 +100,22 @@ public sealed class BackupEngine(BackupJob job, IProgress<ProgressInfo>? progres
         var result = new List<FileRecord>();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var missingRoots = new List<string>();
-        foreach (var relativeRoot in job.AttachmentDirectories.Distinct(StringComparer.OrdinalIgnoreCase))
+        var sources = job.AttachmentDirectories.Distinct(StringComparer.OrdinalIgnoreCase)
+            .Select(relativeRoot => (Root: SafePaths.Child(job.ProfileDirectory, relativeRoot), Base: job.ProfileDirectory, Prefix: "", Label: relativeRoot))
+            .Concat(legacy is null ? [] : legacy.Directories.Select(directory =>
+                (Root: directory, Base: legacy.Root, Prefix: LegacyAttachmentSource.BackupPrefix, Label: directory)));
+        foreach (var source in sources)
         {
-            var root = SafePaths.Child(job.ProfileDirectory, relativeRoot);
-            if (!Directory.Exists(root)) { missingRoots.Add(relativeRoot); continue; }
-            foreach (var file in SafePaths.Files(root))
+            if (!Directory.Exists(source.Root))
+            {
+                if (source.Prefix == LegacyAttachmentSource.BackupPrefix)
+                    throw new DirectoryNotFoundException("Eudora legacy attachment source disappeared during backup: " + source.Root);
+                missingRoots.Add(source.Label); continue;
+            }
+            foreach (var file in SafePaths.Files(source.Root))
             {
                 ct.ThrowIfCancellationRequested();
-                var relative = Path.GetRelativePath(job.ProfileDirectory, file).Replace('\\', '/');
+                var relative = source.Prefix + Path.GetRelativePath(source.Base, file).Replace('\\', '/');
                 if (!seen.Add(relative)) continue;
                 var target = SafePaths.Child(job.AttachmentDestination, relative);
                 var info = new FileInfo(file); var targetInfo = new FileInfo(target);
@@ -120,7 +138,9 @@ public sealed class BackupEngine(BackupJob job, IProgress<ProgressInfo>? progres
             }
         }
         var names = result.Select(x => x.Path).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var removed = old.Where(x => !names.Contains(x.Path)).ToArray();
+        // Disabling the optional source must not delete its last mirror, even when removal is enabled.
+        var removed = old.Where(x => !names.Contains(x.Path) &&
+            (legacy is not null || !x.Path.StartsWith(LegacyAttachmentSource.BackupPrefix, StringComparison.OrdinalIgnoreCase))).ToArray();
         if (!job.DeleteMissingAttachments && removed.Length > 0 &&
             (missingRoots.Count > 0 || removed.Length * 100.0 / Math.Max(1, old.Count) > job.MaximumDeletionPercent))
             run.Warnings.Add("Source attachment inventory dropped significantly; destination files have been preserved.");

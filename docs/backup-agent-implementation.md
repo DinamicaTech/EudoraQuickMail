@@ -17,9 +17,9 @@ production profile for tests or install scheduled tasks automatically.
   propagation of deletions. Only files in the agent's prior inventory may be deleted.
 - Configurable representative daily/weekly/monthly retention. Keep at least one completed
   ZIP, and prune only after verifying and publishing a newer ZIP.
-- Separate native-backup, external-maintenance and restore-test schedules. EQM stays closed
+- Separate native-backup, external-backup-window and restore-test schedules. EQM stays closed
   for the complete backup and any overlapping external window. External backup success is
-  explicitly unknown; the agent only guarantees its own configured maintenance interval.
+  explicitly unknown; the agent only guarantees its own configured window.
 - Scheduled executions run through Windows Task Scheduler (five-minute polling). Daily,
   weekly and monthly schedules, missed-run catch-up, history of missed occurrences, no overlap.
 - ZIP extraction/hash/SQLite verification, configurable scalar SELECT probes captured at
@@ -107,22 +107,39 @@ unattended execution. NAS/SMTP credentials must be provisioned under that execut
    It does not force-kill EQM. A destination operation lock also serializes agents sharing a NAS.
 6. SQLite performs a checked WAL checkpoint and closes the connection. Database reads are
    shared-read only while compressing. Partial ZIPs never appear as completed backups.
-7. When finished/cancelled, release the profile lease and reopen only the application that
-   acknowledged this request, in an appropriate interactive session. Timeouts withdraw the
+7. For a scheduled run in session 0, EQM starts the Backup Agent in `/watch` mode in its
+   interactive user session before acknowledging shutdown. After EQM exits, this watcher waits
+   for the agent's `.backup-agent.lock` and the exclusive profile lease to be released, then
+   reopens the same EQM executable and profile. It also handles failed or cancelled runs.
+   Interactive/manual runs continue using their existing UI reopen path. Timeouts withdraw the
    request and allow EQM to resume. Crashed agents release OS locks automatically; interrupted
-   restores remain blocked by their persistent recovery journal.
+   restores remain blocked by their persistent recovery journal. A Windows logoff terminates
+   the interactive watcher, so automatic reopening requires the session to remain signed in
+   (it may be locked).
 
 ## Scope and operational limits
 
 - The database engine currently supports SQLite. ProConta can reuse the UI/engine if it uses
   SQLite and implements the cooperation protocol; another DB engine needs an adapter.
-- Attachment sources are configured as paths relative to the application profile. Files linked
-  elsewhere (such as Eudora's untouched Attach directories or arbitrary sent attachments) are
-  not silently copied. Configure a suitable source layout or back those locations up externally.
+- The optional linked-Eudora source is available only for a `keep` import whose original
+  `Attach`/`AttachYYYY` directories still exist. It requires attachment copying and mirrors
+  those directories under `LegacyEudora/` alongside normal profile attachments, without
+  changing EQM's absolute references. Other externally linked files are not silently copied.
+  Disabling the option excludes legacy files from new manifests but never deletes their prior
+  mirror merely because the option was switched off.
 - A relocated SQLite file can still contain absolute attachment paths. Restoring files into a
   test/alternative directory verifies their bytes, but does not rewrite application references.
 - Sampling checks the selected files, not every attachment. Historical mismatches are warnings
   because the native mirror intentionally has no versions. Configure sample size accordingly.
+- Restore tests record each validation probe and each sampled attachment separately in their
+  email report. External backup windows only confirm the period during which EQM stayed closed:
+  the agent cannot claim that an external backup succeeded and does not send a window-completion
+  email. This also applies when a native backup holds an overlapping external window. The
+  internal persisted operation key remains `Maintenance` for compatibility with existing jobs
+  and scheduler history; the UI displays it as `External backup window`.
+- Restoring legacy files through the agent places them under `LegacyEudora/` in the chosen
+  destination; it does not rewrite absolute Eudora links in the restored database. Restore them
+  to their original external locations manually if those links must work.
 - The compressed database ZIP is not encrypted. Destination access controls protect its contents.
   Protected application credentials may require reauthorization on a different Windows account.
 - ZIP compression plus read-back verification and SQLite checks perform several reads. Production
@@ -136,9 +153,9 @@ unattended execution. NAS/SMTP credentials must be provisioned under that execut
 
 ### Configuration UI revision
 
-The UI now has Application, External Backup, Native Backup, Notifications, Restore test and
+The UI now has Application, External backup windows, Native Backup, Notifications, Restore test and
 History tabs. Native Backup's first checkbox enables its settings and schedule independently
-of external maintenance. External-only configurations do not require a ZIP destination.
+of external backup windows. External-only configurations do not require a ZIP destination.
 History fills its tab instead of sitting inside an unconstrained scrolling StackPanel.
 
 EQM detection uses the live profile supplied by EQM when selecting the same installation,
@@ -168,3 +185,45 @@ archive/restore round trips, corruption, individual attachment restoration, miss
 mass-removal guards, cancellation, source locking, retention, scalar queries, foreign-key
 violations, unavailable destination, schedule calculations, catalogue reconstruction and
 interrupted-restore rollback. This is not a claim that the entire EQM suite was run.
+
+## Explicit manual requests and isolated UNC tests (after agent 0.1.3)
+
+`Back up now` saves configuration, creates a unique manual request and triggers the already
+registered five-minute task. The worker processes the request before checking schedules, so it
+does not require a due/enabled backup schedule. It does not advance normal schedule bookkeeping.
+Requests are not credentials or command lines: only a whitelisted operation, job ID, configuration
+SHA-256, unique request ID, expiry and cancellation flag. Editing configuration after submission
+rejects the request rather than unexpectedly applying different destinations/scripts.
+
+The registered task must use password logon (run whether the user is logged on or not), be idle,
+and point to this installed executable and job. Interactive-token tasks are rejected for these
+operations: they would reuse Explorer's SMB session and reproduce Windows error 1219. The
+Windows identity must have access to the job/profile/control files and its own Credential Manager
+entries. Using the same Windows account with password logon isolates the NAS connection while
+retaining access to that account's saved NAS credentials. A different Windows user needs its
+credentials provisioned separately. No credentials are copied between users or written to JSON.
+
+`.backup-manual/<job-id>/` beside the job holds the request/current status and per-ID receipts.
+A short file lock serializes submission/claim/status transitions; the existing scheduler and
+runner locks still prevent overlapping backups. Each request can be claimed only once. Pending
+requests expire after two minutes; cancelled/expired/completed commands never replay. A dead
+worker is marked failed rather than repeating an uncertain backup. A second submission cannot
+overwrite pending/running work. Progress writes are throttled; the UI waits for safe completion
+even after Cancel. The UI reopens EQM in the desktop session when the worker reports it actually
+closed it. If the UI crashes, receipts remain but reopening may need to be done manually.
+
+Both destination rows have `Test access`. This uses the same task session and the selected NAS
+credential, verifies that the credential's share matches the destination, and checks listing,
+creation, read-back and deletion of a unique 128-byte probe. The directory must already exist.
+No EQM shutdown, DB snapshot, backup scripts, report email or real-backup-file modification is
+performed. Network calls can delay cancellation until Windows returns; no existing SMB sessions
+are disconnected. Successful feedback identifies the tested UNC path, Windows task identity and
+NAS username (never password). This tests folder permissions, not all existing files or capacity.
+Two different NAS users still cannot access the same NAS host within one backup worker session.
+
+Validation: 63 core tests and 14 agent/UI tests passed locally. New tests cover at-most-once
+claiming, cancellation, expiry, worker crash detection, status preservation, hash mismatch,
+schedule-independent handling and safe probe cleanup. Real Task Scheduler/NAS credentials were
+not invoked or changed during development; deployment must test using the installed new agent
+and its registered password-logon task. Restore/history/maintenance retain their existing paths;
+only manual native backup and the new access tests are dispatched by this mechanism.

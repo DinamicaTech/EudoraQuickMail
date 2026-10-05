@@ -33,13 +33,13 @@ public static class ProfileLease
         Directory.CreateDirectory(profile);
         return new FileStream(Path.Combine(profile, ".backup-agent.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
     }
-    public static async Task<(FileStream Lease, MaintenanceResponse? Closed)> AcquireAsync(BackupJob job, IProgress<ProgressInfo>? progress, CancellationToken ct, Action<MaintenanceResponse>? onClosing = null)
+    public static async Task<(FileStream Lease, MaintenanceResponse? Closed)> AcquireAsync(BackupJob job, IProgress<ProgressInfo>? progress, CancellationToken ct, Action<MaintenanceResponse>? onClosing = null, bool interactiveWatcherRequested = false)
     {
         EnsureLock(job.ProfileDirectory);
         var id = Guid.NewGuid().ToString("N");
         var deadline = DateTimeOffset.UtcNow.AddSeconds(job.ShutdownTimeoutSeconds);
         var requestPath = Path.Combine(job.ProfileDirectory, RequestName);
-        JsonFiles.Write(requestPath, new MaintenanceRequest(id, deadline));
+        JsonFiles.Write(requestPath, new MaintenanceRequest(id, deadline, interactiveWatcherRequested));
         MaintenanceResponse? closed = null;
         try
         {

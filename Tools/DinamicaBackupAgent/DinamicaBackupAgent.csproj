@@ -7,4 +7,5 @@
   </PropertyGroup>
   <ItemGroup><ProjectReference Include="../DinamicaBackup.Core/DinamicaBackup.Core.csproj" /></ItemGroup>
   <ItemGroup><Resource Include="Assets\DinamicaBackup.ico" /></ItemGroup>
+  <ItemGroup><InternalsVisibleTo Include="DinamicaBackupAgent.Tests" /></ItemGroup>
 </Project>

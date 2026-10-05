@@ -9,7 +9,7 @@ namespace QuickMail.Services;
 /// </summary>
 internal static class BuiltInSavedViewMigration
 {
-    internal const int CurrentVersion = 1;
+    internal const int CurrentVersion = 2;
 
     private static readonly (Guid Id, string Name, string Query)[] Definitions =
     [
@@ -19,6 +19,7 @@ internal static class BuiltInSavedViewMigration
         (Guid.Parse("3757CB5B-5C2E-4B2B-BEB0-F44C5260BB37"), "Received yesterday", "D:yesterday;I"),
         (Guid.Parse("705D5AF0-4F7D-4EB5-9297-B2541CE3A4F1"), "Flagged messages", "F"),
         (Guid.Parse("EF724061-9C0B-48BB-88B7-68D0DA70F4CE"), "Unread messages", "N"),
+        (Guid.Parse("09A67DC7-EDDE-4442-BA8D-4F046B582064"), "SPAM Messages", "is:spam"),
     ];
 
     internal static int Apply(IViewService viewService, IConfigService configService, ConfigModel config)
@@ -29,6 +30,7 @@ internal static class BuiltInSavedViewMigration
         var added = 0;
         foreach (var definition in Definitions)
         {
+            if (config.BuiltInSavedViewsVersion >= 1 && definition.Query != "is:spam") continue;
             // Query + global scope is the identity that matters. This also recognises an equivalent
             // view the user created before the built-in set existed, regardless of its chosen name.
             if (views.Any(view => view.SearchEverywhere &&

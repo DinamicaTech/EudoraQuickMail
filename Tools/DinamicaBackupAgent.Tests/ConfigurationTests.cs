@@ -57,7 +57,7 @@ public sealed class ConfigurationTests
         try
         {
             var tabs = Field<TabControl>(window, "_tabs");
-            Assert.Equal(new[] { "Application", "External Backup", "Native Backup", "Notifications", "Restore test", "History" }, tabs.Items.Cast<TabItem>().Select(x => (string)x.Header));
+            Assert.Equal(new[] { "Application", "External backup windows", "Native Backup", "Notifications", "Restore test", "History" }, tabs.Items.Cast<TabItem>().Select(x => (string)x.Header));
             var body = Field<StackPanel>(window, "_nativeSettings");
             var toggle = Field<CheckBox>(window, "_nativeEnabled");
             Assert.False(body.IsEnabled);
@@ -114,7 +114,7 @@ public sealed class ConfigurationTests
             foreach (var row in rows)
             {
                 var buttons = row.Children.OfType<StackPanel>().Single().Children.OfType<Button>().ToArray();
-                Assert.Equal(new[] { "Browse…", "Credentials…" }, buttons.Select(x => (string)x.Content));
+                Assert.Equal(new[] { "Browse…", "Credentials…", "Test access" }, buttons.Select(x => (string)x.Content));
                 Assert.All(buttons, button => Assert.NotNull(button.ToolTip));
             }
         }

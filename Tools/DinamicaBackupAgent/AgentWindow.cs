@@ -60,7 +60,7 @@ public sealed partial class AgentWindow : Window
         box.TextChanged += (_, _) => UpdateSaveState();
         return box;
     }
-    private TextBox Folder(Panel panel, string label, Func<string> get, Action<string> set, Action? credentials = null)
+    private TextBox Folder(Panel panel, string label, Func<string> get, Action<string> set, Action? credentials = null, Action? testAccess = null)
     {
         var box = Text(panel, label, get, set);
         panel.Children.Remove(box);
@@ -68,6 +68,7 @@ public sealed partial class AgentWindow : Window
         var buttons = new StackPanel { Orientation = Orientation.Horizontal };
         Button(buttons, "Browse…", () => { var dialog = new OpenFolderDialog(); if (dialog.ShowDialog(this) == true) { box.Text = dialog.FolderName; box.Focus(); } });
         if (credentials != null) Button(buttons, "Credentials…", credentials);
+        if (testAccess != null) Button(buttons, "Test access", testAccess);
         DockPanel.SetDock(buttons, Dock.Right); row.Children.Add(buttons); row.Children.Add(box); panel.Children.Add(row);
         return box;
     }
@@ -123,9 +124,16 @@ public sealed partial class AgentWindow : Window
     {
         Commit(); SafePaths.Validate(_job, false);
         var localOnly = string.IsNullOrWhiteSpace(_job.Destination);
-        if (!localOnly) NasConnection.Connect(_job.NasShare, _job.NasCredential);
-        using var catalog = new Catalog(_job, localOnly ? Path.Combine(_job.ProfileDirectory, ".backup-history-index", _job.Id) : null);
-        _history.ItemsSource = catalog.Recent(100);
+        try
+        {
+            _history.ItemsSource = Catalog.ReadRecentReceipts(_job, 100, !localOnly);
+            _status.Text = "History refreshed using the current Windows access (read-only).";
+        }
+        catch (Exception ex) when (!localOnly && ex is IOException or UnauthorizedAccessException)
+        {
+            _history.ItemsSource = Catalog.ReadRecentReceipts(_job, 100, false);
+            _status.Text = "NAS history is unavailable with the current Windows access; showing local history only. " + ex.Message;
+        }
     }
     private void StoreCredential(string name)
     {

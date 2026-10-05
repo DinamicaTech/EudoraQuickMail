@@ -320,6 +320,32 @@ public partial class MainWindow : Window
         _vm.MessagesDeleting += OnMessagesDeleting;
         _vm.FolderSelectionDataReady += OnFolderSelectionDataReady;
         _vm.NewMailArrived += OnNewMailArrived;
+        MailMessageSummary? viewportAnchor = null;
+        double viewportFraction = 0;
+        _vm.MessageListBatchStarting += () =>
+        {
+            viewportAnchor = null;
+            if (_vm.ViewMode != ViewMode.Messages || FindScrollViewer(MessageList) is not { } viewer) return;
+            var index = (int)Math.Floor(viewer.VerticalOffset);
+            if (index >= 0 && index < MessageList.Items.Count)
+            {
+                viewportAnchor = MessageList.Items[index] as MailMessageSummary;
+                viewportFraction = viewer.VerticalOffset - index;
+            }
+        };
+        _vm.MessageListBatchCompleted += () =>
+        {
+            var anchor = viewportAnchor;
+            var fraction = viewportFraction;
+            var collection = _vm.Messages;
+            if (anchor == null) return;
+            _ = Dispatcher.InvokeAsync(() =>
+            {
+                if (!ReferenceEquals(collection, _vm.Messages)) return;
+                var index = MessageList.Items.IndexOf(anchor);
+                if (index >= 0) FindScrollViewer(MessageList)?.ScrollToVerticalOffset(index + fraction);
+            }, DispatcherPriority.Loaded);
+        };
         Loaded += (_, _) => EnsureTrayIcon();
         if (Application.Current is App { MailActivityPolicy: { } activity })
         {
@@ -412,7 +438,7 @@ public partial class MainWindow : Window
         vm.TutorialRequested += (_, _) => ShowTutorial();
         vm.UpdateDialogRequested += (_, info) =>
         {
-            var dialog = new UpdateDialog(info.Version, info.WhatsNewUrl, vm.RestartToUpdateAsync)
+            var dialog = new UpdateDialog(info.Version, info.WhatsNewUrl, InstallUpdateAsync)
             {
                 Owner = this,
             };
@@ -1066,6 +1092,13 @@ public partial class MainWindow : Window
         // selected from history, clearing the observable collection also cleared ComboBox.Text;
         // Search Everywhere then received an empty query and merely reset the result set.
         var query = SearchBox.Text ?? string.Empty;
+        bool slowWildcard;
+        try { slowWildcard = QuickSearchParser.HasSlowWildcard(query); }
+        catch (FormatException) { slowWildcard = false; } // The search itself reports syntax errors.
+        if (slowWildcard && MessageBox.Show(this,
+                "This wildcard search scans message text and may take a while. Continue?",
+                "Slow search", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+            return;
         var updated = QuickSearchHistory.Add(_quickSearchHistory, query);
         _quickSearchHistory.Clear();
         foreach (var search in updated) _quickSearchHistory.Add(search);
@@ -1075,7 +1108,12 @@ public partial class MainWindow : Window
         var config = _configService.Load();
         config.QuickSearchHistory = updated;
         _configService.Save(config);
-        await _vm.RunQuickSearchAsync(query, everywhere);
+        if (slowWildcard)
+            await RunWithDelayedIndicatorAsync("Searching messages…",
+                () => _vm.RunQuickSearchAsync(query, everywhere),
+                () => _vm.StatusText);
+        else
+            await _vm.RunQuickSearchAsync(query, everywhere);
     }
 
     private async void SearchButton_Click(object sender, RoutedEventArgs e) => await ExecuteSearchAsync();
@@ -3718,7 +3756,7 @@ public partial class MainWindow : Window
                 rule, sourceMessages, _localStore, cts.Token);
             if (result.RemovedMessages.Count > 0)
                 _vm.RemoveMessagesFromActiveView(result.RemovedMessages);
-            await _vm.RefreshAfterLocalMutationAsync("quick-filter");
+            await _vm.RefreshAfterLocalMutationAsync("quick-filter", preserveMessageList: true);
             RestoreMessageListContinuation(continuation);
             if (result.RemovedMessages.Count > 0)
                 _vm.ShowLatestFilteredDestination(rule, result.RemovedMessages[0]);
@@ -5258,7 +5296,7 @@ public partial class MainWindow : Window
             if (removed.Count > 0)
                 _vm.RemoveMessagesFromActiveView(removed.DistinctBy(message =>
                     (message.AccountId, message.FolderName, message.MessageId)).ToList());
-            await _vm.RefreshAfterLocalMutationAsync("filter-all-like-this");
+            await _vm.RefreshAfterLocalMutationAsync("filter-all-like-this", preserveMessageList: true);
             RestoreMessageListContinuation(continuation);
             if (latestMoveRule != null)
                 _vm.ShowLatestFilteredDestination(latestMoveRule, latestMovedMessage);
@@ -5318,8 +5356,15 @@ public partial class MainWindow : Window
             : string.Empty;
     }
 
-    private Task ApplyRulesToSelectedMessagesAsync() =>
-        RunWithDelayedIndicatorAsync("Applying filters…", ApplyRulesToSelectedMessagesCoreAsync);
+    private async Task ApplyRulesToSelectedMessagesAsync()
+    {
+        var count = MessageList.SelectedItems.OfType<MailMessageSummary>().Count();
+        var status = $"Filtering {count:N0} selected message(s)…";
+        using var trace = FilterOperationTrace.Begin(text => Volatile.Write(ref status, text));
+        await RunWithDelayedIndicatorAsync("Applying filters…", () =>
+            FilterOperationTrace.RunAsync("Rules: selection", $"selected={count}", status,
+                ApplyRulesToSelectedMessagesCoreAsync), () => Volatile.Read(ref status));
+    }
 
     private async Task ApplyRulesToSelectedMessagesCoreAsync()
     {
@@ -5340,8 +5385,10 @@ public partial class MainWindow : Window
         {
             if (selected.FirstOrDefault() is { } sample)
             {
-                await _vm.EnsureSenderAddressAsync(sample);
-                var body = await LoadCompleteBodyForRuleMatchAsync(sample);
+                await FilterOperationTrace.RunAsync("Rules: selection/resolve sender", $"account={sample.AccountId}",
+                    "Checking the selected sender…", () => _vm.EnsureSenderAddressAsync(sample));
+                var body = await FilterOperationTrace.RunAsync("Rules: selection/load detail", $"account={sample.AccountId}",
+                    "Loading the selected message for filter matching…", () => LoadCompleteBodyForRuleMatchAsync(sample));
                 var compatible = _ruleService.LoadRules().Where(rule =>
                     rule.IsEnabled && _ruleService.IsMatch(rule, sample, body)).ToList();
                 if (compatible.Count == 0)
@@ -5362,8 +5409,10 @@ public partial class MainWindow : Window
             }
             if (destinationRule is { AlsoFilterOutMailbox: true })
             {
+                FilterOperationTrace.Report("Loading Out for the filter's Also filter Out option…");
                 var outgoing = await _vm.LoadOutFolderSummariesForRulesAsync(
                     _vm.SelectedFolder, destinationRule.AccountId);
+                FilterOperationTrace.Report($"Checking {outgoing.Count:N0} outgoing messages (Also filter Out)…");
                 using var outCts = new CancellationTokenSource(TimeSpan.FromMinutes(5));
                 var outResult = await _ruleService.ApplyRuleToMessagesAsync(
                     destinationRule, outgoing, _localStore, outCts.Token);
@@ -5376,7 +5425,8 @@ public partial class MainWindow : Window
                 _vm.RemoveMessagesFromActiveView(removed);
             if (matched > 0)
             {
-                await _vm.RefreshAfterLocalMutationAsync("apply-rules-to-selection");
+                FilterOperationTrace.Report("Refreshing the message list…");
+                await _vm.RefreshAfterLocalMutationAsync("apply-rules-to-selection", preserveMessageList: true);
                 RestoreMessageListContinuation(continuation);
             }
             if (destinationRule != null && removed.Count > 0)
@@ -8617,7 +8667,7 @@ public partial class MainWindow : Window
     /// Shows a compact non-modal progress window only when an explicitly opted-in operation takes
     /// longer than two seconds. Keeping this manual avoids flashing progress UI for ordinary work.
     /// </summary>
-    private async Task RunWithDelayedIndicatorAsync(string title, Func<Task> operation)
+    private async Task RunWithDelayedIndicatorAsync(string title, Func<Task> operation, Func<string>? statusProvider = null)
     {
         var work = operation();
         var delay = Task.Delay(TimeSpan.FromSeconds(2));
@@ -8627,7 +8677,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        var indicator = new SlowOperationWindow(title, () => _vm.StatusText) { Owner = this };
+        var indicator = new SlowOperationWindow(title, statusProvider ?? (() => _vm.StatusText)) { Owner = this };
         indicator.Show();
         try { await work; }
         finally { indicator.Close(); }
@@ -8644,6 +8694,7 @@ public partial class MainWindow : Window
             {
                 ("empty-trash", SpecialFolderKind.Trash) => Visibility.Visible,
                 ("empty-junk", SpecialFolderKind.Junk) => Visibility.Visible,
+                ("empty-spam", SpecialFolderKind.Junk) => Visibility.Visible,
                 ("empty-recovery", SpecialFolderKind.RecoveryDeleted) => Visibility.Visible,
                 _ => Visibility.Collapsed,
             };
@@ -8671,14 +8722,18 @@ public partial class MainWindow : Window
             "evening" => now.Date.AddHours(18) > now ? now.Date.AddHours(18) : now.AddHours(2),
             "tomorrow" => now.Date.AddDays(1).AddHours(9),
             "week" => now.Date.AddDays(7).AddHours(9),
+            "30days" => now.Date.AddDays(30).AddHours(9),
+            "90days" => now.Date.AddDays(90).AddHours(9),
+            "180days" => now.Date.AddDays(180).AddHours(9),
+            "year" => now.Date.AddYears(1).AddHours(9),
             _ => now.AddHours(1),
         };
         if (preset == "custom")
         {
-            var prompt = new TextPromptWindow("Snooze", "Return to the inbox at (local date and time):",
+            var prompt = new TextPromptWindow("Snooze", "Return to the inbox at (local date and time):\nDate only: defaults to 09:00.",
                 now.AddDays(1).Date.AddHours(9).ToString("g", CultureInfo.CurrentCulture)) { Owner = this };
             if (prompt.ShowDialog() != true) return;
-            if (!DateTime.TryParse(prompt.Value, CultureInfo.CurrentCulture, DateTimeStyles.AllowWhiteSpaces,
+            if (!ScheduledDateParser.TryParse(prompt.Value, CultureInfo.CurrentCulture,
                     out wakeLocal) || wakeLocal <= now)
             {
                 MessageBox.Show(this, "Enter a future local date and time.", "Snooze",
@@ -8886,6 +8941,7 @@ public partial class MainWindow : Window
 
     private void UpdateUnsubscribeActions(MailMessageDetail? detail)
     {
+        UpdateSpamPromptAsync(detail).LogFaults("SPAM first sender prompt");
         _unsubscribeCandidate = UnsubscribeDetector.Detect(detail);
         if (_unsubscribeCandidate != null &&
             Application.Current is App { UnsubscribePreferences: { } preferences } &&
@@ -8929,6 +8985,7 @@ public partial class MainWindow : Window
         if (_unsubscribeCandidate is not { } candidate ||
             Application.Current is not App { UnsubscribePreferences: { } preferences }) return;
         preferences.Maintain(candidate.SourceKey);
+        SpamBlockButton.Visibility = Visibility.Collapsed;
         _unsubscribeCandidate = null;
         UnsubscribeButton.Visibility = Visibility.Collapsed;
         MaintainSubscriptionButton.Visibility = Visibility.Collapsed;
@@ -9541,7 +9598,7 @@ public partial class MainWindow : Window
             var result = await _ruleService.ApplyRuleToMessagesAsync(rule, messages, _localStore, cts.Token);
             if (result.RemovedMessages.Count > 0)
                 _vm.RemoveMessagesFromActiveView(result.RemovedMessages);
-            await _vm.RefreshAfterLocalMutationAsync("apply-rule-to-current-folder");
+            await _vm.RefreshAfterLocalMutationAsync("apply-rule-to-current-folder", preserveMessageList: true);
             if (result.RemovedMessages.Count > 0)
                 _vm.ShowLatestFilteredDestination(rule, result.RemovedMessages[0]);
             return result.MatchedCount;
@@ -9633,7 +9690,7 @@ public partial class MainWindow : Window
             if (removed.Count > 0)
             {
                 _vm.RemoveMessagesFromActiveView(removed);
-                await _vm.RefreshAfterLocalMutationAsync("run-rules-on-existing-mail");
+                await _vm.RefreshAfterLocalMutationAsync("run-rules-on-existing-mail", preserveMessageList: true);
             }
             return removed.Count;
         }
