@@ -72,11 +72,32 @@ public static class MimeMessageBuilder
             var plainText = string.IsNullOrWhiteSpace(compose.Body)
                 ? HtmlStripper.ToPlainText(compose.HtmlBody)
                 : compose.Body;
+            MimeEntity htmlPart = new TextPart("html") { Text = compose.HtmlBody };
+            var inline = compose.Attachments.Where(a => a.IsInline).ToList();
+            if (compose.HtmlBody.Contains("blob:", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("The message contains a temporary embedded image. Reinsert it before sending.");
+            if (inline.Count > 0)
+            {
+                var related = new MultipartRelated { htmlPart };
+                foreach (var resource in inline)
+                {
+                    var bytes = resource.Content ?? (Path.IsPathFullyQualified(resource.PartSpecifier ?? "")
+                        ? File.ReadAllBytes(resource.PartSpecifier!) : throw new InvalidOperationException("Embedded image is unavailable."));
+                    if (string.IsNullOrWhiteSpace(resource.ContentId)) throw new InvalidOperationException("Embedded image has no Content-ID.");
+                    related.Add(new MimePart(ContentType.Parse(resource.ContentType))
+                    {
+                        Content = new MimeContent(new MemoryStream(bytes)), ContentId = resource.ContentId,
+                        ContentDisposition = new ContentDisposition(ContentDisposition.Inline),
+                        ContentTransferEncoding = ContentEncoding.Base64, FileName = resource.FileName
+                    });
+                }
+                htmlPart = related;
+            }
             var alternative = new MultipartAlternative
             {
                 // Least-faithful first per RFC 2046 — clients pick the last part they support.
                 new TextPart("plain") { Text = plainText },
-                new TextPart("html")  { Text = compose.HtmlBody },
+                htmlPart,
             };
             bodyEntity = alternative;
         }
@@ -85,7 +106,7 @@ public static class MimeMessageBuilder
             bodyEntity = new TextPart("plain") { Text = compose.Body };
         }
 
-        var loadedAttachments = compose.Attachments.Where(a => a.IsLoaded).ToList();
+        var loadedAttachments = compose.Attachments.Where(a => a.IsLoaded && !a.IsInline).ToList();
         if (loadedAttachments.Count > 0)
         {
             var multipart = new Multipart("mixed");

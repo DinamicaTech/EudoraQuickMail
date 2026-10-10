@@ -22,6 +22,8 @@ public sealed class Runner(BackupJob job, IProgress<ProgressInfo>? progress = nu
         using var agent = ProfileLease.LockAgent(job.ProfileDirectory);
         Catalog? catalog = null;
         var run = new RunResult { Kind = kind };
+        using var startupCancellation = new StartupCancellation(job.ProfileDirectory, run.Id, kind, ct);
+        ct = startupCancellation.Token;
         FileStream? lease = null;
         FileStream? destinationLease = null;
         MaintenanceResponse? closed = null;
@@ -90,6 +92,7 @@ public sealed class Runner(BackupJob job, IProgress<ProgressInfo>? progress = nu
             }
             if (kind is "Backup" or "Restore" && MaintenanceEnd(DateTime.Now) is { } end)
             {
+                if (kind == "Backup") startupCancellation.ReportExternalWindow();
                 var occurrence = job.MaintenanceSchedule.LatestOccurrence(DateTime.Now)!.Value;
                 await WaitUntil(end, ct);
                 run.CompletedMaintenanceOccurrence = occurrence.ToString("O");
@@ -100,7 +103,15 @@ public sealed class Runner(BackupJob job, IProgress<ProgressInfo>? progress = nu
             }
             run.Status = run.Warnings.Count == 0 ? "Success" : "Warning";
         }
-        catch (OperationCanceledException) { run.Status = "Cancelled"; run.Detail = "Cancelled. Incomplete copies are not published."; }
+        catch (OperationCanceledException)
+        {
+            run.Status = "Cancelled";
+            run.Detail = kind == "Maintenance"
+                ? "External backup window ended early by request. No external backup was stopped or verified."
+                : !string.IsNullOrEmpty(run.Artifact)
+                    ? "Backup archive was completed; remaining work or external-window wait was cancelled."
+                    : "Cancelled. Incomplete copies are not published.";
+        }
         catch (Microsoft.Data.Sqlite.SqliteException) when (ct.IsCancellationRequested) { run.Status = "Cancelled"; run.Detail = "SQLite validation cancelled."; }
         catch (Exception ex) { run.Status = "Failed"; run.Detail = ex.Message; }
         finally
@@ -117,7 +128,7 @@ public sealed class Runner(BackupJob job, IProgress<ProgressInfo>? progress = nu
                 {
                     for (var attempt = 0; attempt < 20 && ProfileLease.IsAlive(closed); attempt++) await Task.Delay(250);
                     if (ProfileLease.IsAlive(closed)) throw new IOException("Application is still completing shutdown; reopen it manually after it exits.");
-                    if (!closed.InteractiveWatcherStarted) ReopenApplication?.Invoke();
+                    if (!closed.InteractiveWatcherStarted && !StartupCancellation.HasLiveWaiter(job.ProfileDirectory)) ReopenApplication?.Invoke();
                 }
                 catch (Exception ex) { run.Warnings.Add("Could not reopen application: " + ex.Message); if (run.Status == "Success") run.Status = "Warning"; }
             }

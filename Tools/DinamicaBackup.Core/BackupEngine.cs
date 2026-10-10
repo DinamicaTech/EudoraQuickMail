@@ -100,7 +100,13 @@ public sealed class BackupEngine(BackupJob job, IProgress<ProgressInfo>? progres
         var result = new List<FileRecord>();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var missingRoots = new List<string>();
-        var sources = job.AttachmentDirectories.Distinct(StringComparer.OrdinalIgnoreCase)
+        // Existing EQM jobs predate Embedded. Include it without requiring configuration edits.
+        var roots = job.AttachmentDirectories.AsEnumerable();
+        if (job.ApplicationType.Equals("EQM", StringComparison.OrdinalIgnoreCase) &&
+            (Directory.Exists(SafePaths.Child(job.ProfileDirectory, "Embedded")) ||
+             old.Any(x => x.Path.StartsWith("Embedded/", StringComparison.OrdinalIgnoreCase))))
+            roots = roots.Append("Embedded");
+        var sources = roots.Distinct(StringComparer.OrdinalIgnoreCase)
             .Select(relativeRoot => (Root: SafePaths.Child(job.ProfileDirectory, relativeRoot), Base: job.ProfileDirectory, Prefix: "", Label: relativeRoot))
             .Concat(legacy is null ? [] : legacy.Directories.Select(directory =>
                 (Root: directory, Base: legacy.Root, Prefix: LegacyAttachmentSource.BackupPrefix, Label: directory)));

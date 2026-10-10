@@ -433,6 +433,7 @@ sealed class StubSyncService : ISyncService
 {
     public void RaiseReadStates(IReadOnlyList<MailMessageSummary> rows) => FolderReadStatesReconciled?.Invoke(rows);
     public void RaiseFolderSynced(IReadOnlyList<MailMessageSummary> rows) => FolderSynced?.Invoke(rows);
+    public void RaiseMessagesRemoved(IReadOnlyList<MailMessageSummary> rows) => MessagesRemoved?.Invoke(rows);
 #pragma warning disable CS0067 // events required by interface but never raised in stubs
     public event Action<IReadOnlyList<MailMessageSummary>>? FolderSynced;
     public event Action<IReadOnlyList<MailMessageSummary>>? MessagesRemoved;

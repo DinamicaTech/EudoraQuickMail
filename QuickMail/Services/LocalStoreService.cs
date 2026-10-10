@@ -2801,6 +2801,10 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
 
     public async Task UpsertDetailAsync(MailMessageDetail detail)
     {
+        var inline = detail.Attachments.Where(a => a.IsInline && a.Content != null &&
+            !Path.IsPathFullyQualified(a.PartSpecifier ?? "")).ToList();
+        if (inline.Count > 0)
+            await MaterializePop3ResourcesAsync(new MailMessageDetail { Date = detail.Date, Attachments = inline }, CancellationToken.None);
         if (string.IsNullOrWhiteSpace(detail.Bcc))
             detail.Bcc = ExtractHeaderValue(detail.RawHeaders, "Bcc");
         var attJson = detail.Attachments.Count > 0

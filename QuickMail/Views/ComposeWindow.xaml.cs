@@ -159,6 +159,8 @@ public partial class ComposeWindow : Window
     private bool _htmlEditorRecreating;
     private string? _pendingHtml;
     private RichBodySnapshot _htmlSnapshot = RichBodySnapshot.Empty;
+    private readonly Dictionary<string, TaskCompletionSource> _htmlCaptureRequests = new();
+    private long _htmlSnapshotRevision;
 
     // Track the current spelling error so Alt+1/2/3 can replace it with a suggestion.
     private int _currentSpellingWordStart = -1;
@@ -1012,18 +1014,7 @@ public partial class ComposeWindow : Window
     {
         if (_vm.IsBusy) return false;
         CommitAllAddressInputs();
-        if (_vm.CurrentMode == ComposeMode.Html && _htmlEditorReady && HtmlBodyEditor.CoreWebView2 is not null)
-        {
-            var json = await HtmlBodyEditor.CoreWebView2.ExecuteScriptAsync(
-                "(() => { if (!quickMailEditor) return null; return {html: '<!doctype html><html><head>' + preservedHeadStyles + '</head><body>' + quickMailEditor.getContent() + '</body></html>', plain: quickMailEditor.getContent({format:'text'})}; })()");
-            using var document = System.Text.Json.JsonDocument.Parse(json);
-            if (document.RootElement.ValueKind == System.Text.Json.JsonValueKind.Object)
-            {
-                var html = document.RootElement.GetProperty("html").GetString() ?? "";
-                var plain = document.RootElement.GetProperty("plain").GetString() ?? "";
-                if (_htmlSnapshot.Html != html) { _htmlSnapshot = new RichBodySnapshot(html, plain, plain); _vm.MarkBodyDirty(); }
-            }
-        }
+        await CaptureDurableHtmlAsync();
         if (_vm.IsSent || !_vm.IsDirty) return true;
         await _vm.AutoSaveAsync();
         return !_vm.IsDirty;
@@ -2047,8 +2038,26 @@ public partial class ComposeWindow : Window
         menu.IsOpen = true;
     }
 
+    private async Task CaptureDurableHtmlAsync()
+    {
+        if (_vm.CurrentMode != ComposeMode.Html) return;
+        if (!_htmlEditorReady || HtmlBodyEditor.CoreWebView2 == null)
+            throw new InvalidOperationException("The HTML editor is not ready. Please try again in a moment.");
+        var id = Guid.NewGuid().ToString("N");
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _htmlCaptureRequests.Add(id, completion);
+        try
+        {
+            await HtmlBodyEditor.CoreWebView2.ExecuteScriptAsync($"window.quickmailCaptureSnapshot({JsonSerializer.Serialize(id)})");
+            await completion.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        }
+        finally { _htmlCaptureRequests.Remove(id); }
+    }
+
     private void WireRichCompose()
     {
+        _vm.EmbeddedImages = new EmbeddedImageStore(TranslationProfile);
+        _vm.PrepareRichBodyAsync = CaptureDurableHtmlAsync;
         _vm.RichBodyProvider = () => _vm.CurrentMode == ComposeMode.Html
             ? _htmlSnapshot
             : RichTextDocumentConverter.Snapshot(RichBodyBox.Document);
@@ -2152,14 +2161,19 @@ public partial class ComposeWindow : Window
             };
             HtmlBodyEditor.CoreWebView2.WebMessageReceived += async (_, args) =>
             {
+                string? captureRequest = null;
                 try
                 {
                     using var json = JsonDocument.Parse(args.TryGetWebMessageAsString());
                     var root = json.RootElement;
+                    if (root.TryGetProperty("requestId", out var requestId) && requestId.ValueKind == JsonValueKind.String)
+                        captureRequest = requestId.GetString();
                     if (root.TryGetProperty("type", out var messageType))
                     {
                         switch (messageType.GetString())
                         {
+                            case "snapshot-error":
+                                throw new InvalidOperationException(root.GetProperty("message").GetString());
                             case "catalan-spell":
                                 var words = root.GetProperty("words").EnumerateArray()
                                     .Select(value => value.GetString() ?? string.Empty).ToArray();
@@ -2203,14 +2217,27 @@ public partial class ComposeWindow : Window
                                 return;
                         }
                     }
-                    _htmlSnapshot = new RichBodySnapshot(
-                        root.GetProperty("html").GetString() ?? string.Empty,
-                        root.GetProperty("plain").GetString() ?? string.Empty,
-                        root.GetProperty("plain").GetString() ?? string.Empty);
-                    _vm.MarkBodyDirty();
-                    TryAutoDetectLanguage(root.GetProperty("plain").GetString() ?? string.Empty);
+                    var revision = root.TryGetProperty("revision", out var version) ? version.GetInt64() : 0;
+                    if (revision >= _htmlSnapshotRevision)
+                    {
+                        var html = _vm.PersistEmbeddedHtml(root.GetProperty("html").GetString() ?? string.Empty);
+                        var plain = root.GetProperty("plain").GetString() ?? string.Empty;
+                        var changed = _htmlSnapshot.Html != html;
+                        _htmlSnapshot = new RichBodySnapshot(html, plain, plain);
+                        _htmlSnapshotRevision = revision;
+                        if (changed) _vm.MarkBodyDirty();
+                        TryAutoDetectLanguage(plain);
+                    }
+                    if (captureRequest != null && _htmlCaptureRequests.TryGetValue(captureRequest, out var captured))
+                        captured.TrySetResult();
                 }
-                catch (Exception ex) { LogService.Log("Compose HTML editor message failed", ex); }
+                catch (Exception ex)
+                {
+                    LogService.Log("Compose HTML editor message failed", ex);
+                    _vm.StatusText = "Could not preserve embedded image: " + ex.Message;
+                    if (captureRequest != null && _htmlCaptureRequests.TryGetValue(captureRequest, out var captured))
+                        captured.TrySetException(ex);
+                }
             };
             var ready = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             HtmlBodyEditor.CoreWebView2.NavigationCompleted += (_, args) =>
@@ -2223,6 +2250,7 @@ public partial class ComposeWindow : Window
             // invalidate any response left by an older QuickMail build/profile.
             var editorAssetVersion = typeof(ComposeWindow).Assembly.GetName().Version?.ToString()
                 ?? "current";
+            _htmlSnapshotRevision = 0;
             HtmlBodyEditor.CoreWebView2.Navigate(
                 $"https://quickmail.local/editor.html?v={editorAssetVersion}");
             await ready.Task;
@@ -2404,7 +2432,7 @@ public partial class ComposeWindow : Window
             _pendingHtml = html;
             return;
         }
-        var detail = new MailMessageDetail { HtmlBody = html };
+        var detail = new MailMessageDetail { HtmlBody = html, Attachments = _vm.InlineImages.ToList() };
         var document = await Task.Run(() =>
             MessageBodyHtmlBuilder.BuildMessageHtml(detail, null, false, _themeService));
         _htmlSnapshot = new RichBodySnapshot(document, string.Empty,

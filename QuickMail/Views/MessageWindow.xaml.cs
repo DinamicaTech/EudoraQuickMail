@@ -835,7 +835,7 @@ public partial class MessageWindow : Window
         try
         {
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
-            var path = await AttachmentPathMaterializer.EnsureLocalPathAsync(
+            var path = await AttachmentPathMaterializer.GetPathForCopyAsync(
                 attachment, _vm.MessageDetail, _imap, cts.Token);
             Clipboard.SetText(path);
         }

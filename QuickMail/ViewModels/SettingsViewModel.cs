@@ -355,6 +355,9 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty]
     private bool _showFilteredDestinationTab;
 
+    [ObservableProperty]
+    private bool _openSearchesInResultsTab;
+
     public bool IsLogFormatActionFirst
     {
         get => LogFormat == "actionFirst";
@@ -498,6 +501,7 @@ public partial class SettingsViewModel : ObservableObject
         ShowAccountsPanel = cfg.ShowAccountsPanel;
         ShowTodayAgenda = cfg.ShowTodayAgenda;
         ShowFilteredDestinationTab = cfg.ShowFilteredDestinationTab;
+        OpenSearchesInResultsTab = cfg.OpenSearchesInResultsTab;
         SyncDays = cfg.SyncDays;
         InitialSyncCount = cfg.InitialSyncCount;
         MailSyncPollMinutes = cfg.MailSyncPollMinutes;
@@ -603,6 +607,7 @@ public partial class SettingsViewModel : ObservableObject
         cfg.ShowAccountsPanel = ShowAccountsPanel;
         cfg.ShowTodayAgenda = ShowTodayAgenda;
         cfg.ShowFilteredDestinationTab = ShowFilteredDestinationTab;
+        cfg.OpenSearchesInResultsTab = OpenSearchesInResultsTab;
         cfg.SyncDays = SyncDays;
         cfg.InitialSyncCount = InitialSyncCount;
         cfg.MailSyncPollMinutes = MailSyncPollMinutes;

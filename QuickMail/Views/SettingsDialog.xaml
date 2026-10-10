@@ -139,6 +139,10 @@
                                            Foreground="{DynamicResource Theme.TextSecondary}"
                                            FontSize="{DynamicResource Theme.FontSizeSmall}"
                                            Margin="20,3,0,0"/>
+                                <CheckBox Content="Open searches in a results tab"
+                                          IsChecked="{Binding OpenSearchesInResultsTab, Mode=TwoWay}"
+                                          ToolTip="Keep the original folder and its position. Searches within results reuse that tab; Escape returns to the source."
+                                          Margin="0,6,0,0"/>
                             </StackPanel>
                         </GroupBox>
 

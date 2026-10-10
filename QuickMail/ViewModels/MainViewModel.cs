@@ -1170,6 +1170,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private void RememberCurrentListState()
     {
+        if (ActiveTab is SearchResultsTabViewModel) return;
         if (!_rememberViewPerFolder || _folderViewState == null) return;
 
         var folder = SelectedFolder;
@@ -1427,6 +1428,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             var logicalMessages = CollapseAggregateSearchPage(found, aggregateScope,
                 query.Offset, query.Limit, out var logicalTotal);
             await ResolveFlagNamesAsync(logicalMessages);
+            cts.Token.ThrowIfCancellationRequested();
             IEnumerable<MailMessageSummary> visible = logicalMessages;
             if (ActiveFilter != MessageFilter.All) visible = visible.Where(MatchesFilter);
             visible = SortMaterializedMessages(visible);
@@ -1443,6 +1445,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         catch (OperationCanceledException) { }
         catch (Exception ex)
         {
+            if (cts.IsCancellationRequested) return;
             StatusText = $"Search failed: {ex.Message}";
         }
         finally
@@ -1453,6 +1456,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     public async Task ApplyAdvancedSearchAsync(IReadOnlyList<AdvancedSearchCriterion> criteria)
     {
+        var searchTab = ActiveTab;
+        var folderVersion = _folderLoadVersion;
         using var timing = PerformanceLogService.Measure("Search: advanced",
             $"criteria={criteria.Count}; folder={SelectedFolder?.DisplayName ?? "none"}");
         if (_localStore is not ILocalMailboxStore store || criteria.Count == 0) return;
@@ -1467,6 +1472,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             LocalSortFor(ActiveSort), SelectedFolder?.IsContainer == true,
             rootAccountIds, folderScopes,
             RootExcludedFolderScopesFor(SelectedFolder)));
+        if (searchTab != ActiveTab || folderVersion != _folderLoadVersion) return;
         var logicalMessages = CollapseAggregateSearchPage(found,
             rootAccountIds != null || folderScopes != null, 0, LocalMailConstants.MaxRenderedMessages,
             out var logicalTotal);
@@ -1933,16 +1939,30 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private static readonly string CurrentVersion = Helpers.AppVersion.Display;
     internal static string ProductCaption { get; } = $"Eudora QuickMail v{CurrentVersion}";
 
-    // Resting state of the update entry: no newer release, so surface the running version instead
-    // (issue #169) so the Help menu always answers "what am I running?".
+    // Only a successful check with no newer release may show this status.
     private static readonly string NoUpdateText = $"No updates available — running version {CurrentVersion}";
 
-    // Help-menu label for the update entry. Always shown so users know the check exists and is
-    // available on demand; NoUpdateText is the resting state, replaced with the version
-    // string when a newer release is found. UpdateReleaseUrl being non-empty is the signal that an
-    // update is actually available (drives the status-bar button and the menu's activation behavior).
+    // The menu shows the last result separately from the explicit check action.
+    // UpdateReleaseUrl is non-empty only after a successful discovery of an update.
     [ObservableProperty]
-    private string _updateAvailableText = NoUpdateText;
+    private string _updateAvailableText = $"Updates not checked — running version {CurrentVersion}";
+
+    [ObservableProperty]
+    private string _updateCheckDetails = "Use Check for updates now to query the official release feed.";
+
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(CheckForUpdatesNowCommand))]
+    private bool _isCheckingForUpdates;
+
+    private bool CanCheckForUpdatesNow() => !IsCheckingForUpdates;
+
+    [RelayCommand(CanExecute = nameof(CanCheckForUpdatesNow))]
+    private async Task CheckForUpdatesNowAsync()
+    {
+        await CheckForUpdateInBackgroundAsync();
+        Announce(UpdateAvailableText + ". " + UpdateCheckDetails, AnnouncementCategory.Result);
+        if (!string.IsNullOrEmpty(_updateVersion)) OpenUpdatePage();
+    }
 
     [ObservableProperty]
     private string _updateReleaseUrl = string.Empty;
@@ -2143,7 +2163,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (ActiveTab == tab)
         {
             var msgListTab = OpenTabs.OfType<MessageListTabViewModel>().FirstOrDefault();
-            if (OpenTabs.Count == 0 || (msgListTab != null && OpenTabs.Count == 1))
+            if (tab is SearchResultsTabViewModel searchTab)
+                ActiveTab = OpenTabs.Contains(searchTab.Origin) ? searchTab.Origin : msgListTab;
+            else if (OpenTabs.Count == 0 || (msgListTab != null && OpenTabs.Count == 1))
             {
                 // Only the message list tab (or nothing) remains.
                 ActiveTab     = msgListTab;
@@ -2156,6 +2178,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 ActiveTab = OpenTabs[Math.Min(idx, OpenTabs.Count - 1)];
             }
         }
+        _searchTabStates.Remove(tab);
     }
 
     /// <summary>
@@ -2303,6 +2326,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         else
         {
             tab.Update(folder, movedMessage);
+            if (ActiveTab != tab) _searchTabStates.Remove(tab);
         }
         OnPropertyChanged(nameof(ShowTabStrip));
     }
@@ -4236,6 +4260,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         // (in StartBackgroundSyncAsync) rather than folder-by-folder, so that
         // screen readers don't re-announce the focused message on every insert.
         if (_suppressFolderSyncUpdates) return;
+        UpdateInactiveListTabs(incoming);
 
         if (incoming.Any(m => Accounts.Any(a => a.Id == m.AccountId && a.BackendKind == BackendKind.ImapSmtp)))
             StartImapBodyBackfill();
@@ -4447,6 +4472,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         if (_suppressFolderSyncUpdates) return;
         if (changed.Count == 0) return;
+        var readStates = changed.GroupBy(MessageDeduplicator.PerFolderKeyFor)
+            .ToDictionary(g => g.Key, g => g.Last().IsRead);
+        foreach (var state in _searchTabStates.Values)
+            foreach (var row in state.Raw)
+                if (readStates.TryGetValue(MessageDeduplicator.PerFolderKeyFor(row), out var isRead))
+                    row.IsRead = isRead;
 
         // Refresh the matching visible rows when a folder is selected. Match by per-folder identity
         // (account, folder, uid) — which the changed summaries carry — so a real-folder view and an
@@ -4779,6 +4810,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             .ToList();
 
         _rawMessages.RemoveAll(m => removedKeys.Contains((m.MessageId, m.AccountId, m.FolderName)));
+        RemoveFromInactiveListTabs(removedKeys);
 
         // Update account inbox counts for the messages we actually removed from _rawMessages.
         UpdateAccountCountsAfterRemoval(actuallyRemovedFromRaw);
@@ -5969,6 +6001,22 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private async Task SelectFolderAsync(MailFolderModel? folder)
     {
         if (folder == null || folder.IsHeader) return;
+        if (_searchTabStates.Count > 0 && ActiveTab is not MessageListTabViewModel &&
+            !IsCalendarFolderName(folder.FullName) &&
+            !(ActiveTab is FilteredFolderTabViewModel destination && ReferenceEquals(folder, destination.Folder)))
+            ActiveTab = OpenTabs.OfType<MessageListTabViewModel>().FirstOrDefault();
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        try
+        {
+            FolderSelectionStarted?.Invoke(folder, completion.Task);
+            await SelectFolderCoreAsync(folder);
+        }
+        finally { completion.TrySetResult(); }
+    }
+
+    private async Task SelectFolderCoreAsync(MailFolderModel folder)
+    {
+        StatusText = $"Opening {folder.DisplayName}…";
         var selectionStarted = Stopwatch.GetTimestamp();
         using var selectionTiming = PerformanceLogService.Measure("Folder selection: data and view-model",
             $"folder={folder.DisplayName}; kind={folder.Kind}; container={folder.IsContainer}");
@@ -6062,6 +6110,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
     }
 
     public event Action<MailFolderModel, TimeSpan, int>? FolderSelectionDataReady;
+    /// <summary>Completion ends on success, cancellation or failure; covers every navigation entry point.</summary>
+    public event Action<MailFolderModel, Task>? FolderSelectionStarted;
 
     /// <summary>
     /// Activates the calendar view: clears message-list state, loads calendar events,
@@ -6314,7 +6364,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             IsMessageOpen = MessageOpenMode != MessageOpenMode.Window;
             var wasUnread = !summary.IsRead;
             summary.IsRead = true;
-            summary.HasAttachments = detail.Attachments.Count > 0;
+            summary.HasAttachments = detail.Attachments.Any(a => !a.IsInline);
             // Opening a message marks it read here (not via MarkMessagesReadAsync), so refresh the
             // folder unread counts on this path too — otherwise they stay stale until the next
             // manual refresh (issue #227 follow-up).
@@ -6450,6 +6500,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private async Task RefreshAsync()
     {
+        // A results tab is a local query, not a request to enumerate every remote folder.
+        if (ActiveTab is SearchResultsTabViewModel)
+        {
+            await ReloadCurrentLocalPageAsync();
+            return;
+        }
         var operationId = Guid.NewGuid().ToString("N")[..8];
         var refreshDetails = $"id={operationId}; folder={SelectedFolder?.DisplayName ?? "none"}";
         PerformanceLogService.Marker("Mailbox: refresh BEGIN", refreshDetails);
@@ -8449,9 +8505,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
         var started = Stopwatch.GetTimestamp();
         PerformanceLogService.Marker("Folder selection: remote aggregate sync BEGIN",
             $"kind={kind}; sources={sources.Count}");
+        var sourceIndex = 0;
         foreach (var source in sources)
         {
             ct.ThrowIfCancellationRequested();
+            StatusText = $"Synchronizing {kind}: {source.Account.AccountLabel} / {source.Folder.FullName} ({++sourceIndex}/{sources.Count})…";
             try
             {
                 await _syncService.SyncFolderFullAsync(source.Account, source.Folder, ct);
@@ -8898,6 +8956,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         var toDeleteKeys = new HashSet<(string, Guid, string)>(
             toDelete.Select(m => (m.MessageId, m.AccountId, m.FolderName)));
         _rawMessages.RemoveAll(m => toDeleteKeys.Contains((m.MessageId, m.AccountId, m.FolderName)));
+        RemoveFromInactiveListTabs(toDeleteKeys);
 
         // Immediately update account inbox counts for messages deleted from Inbox-kind folders.
         UpdateAccountCountsAfterRemoval(toDelete);
@@ -9246,6 +9305,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         var actionableKeys = new HashSet<(string, Guid, string)>(
             actionable.Select(m => (m.MessageId, m.AccountId, m.FolderName)));
         _rawMessages.RemoveAll(m => actionableKeys.Contains((m.MessageId, m.AccountId, m.FolderName)));
+        RemoveFromInactiveListTabs(actionableKeys);
 
         RebuildActiveGroupView();
 
@@ -9609,9 +9669,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
             IReadOnlyList<AttachmentModel> selected;
             if (SelectAttachmentsForForwardRequested != null)
             {
-                var result = await SelectAttachmentsForForwardRequested(detail.Attachments);
+                var result = detail.VisibleAttachments.Count == 0 ? Array.Empty<AttachmentModel>()
+                    : await SelectAttachmentsForForwardRequested(detail.VisibleAttachments);
                 if (result == null) return; // user cancelled
-                selected = result;
+                selected = result.Concat(detail.Attachments.Where(a => a.IsInline)).ToList();
             }
             else
             {
@@ -12232,8 +12293,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             _firedReminders.RemoveWhere(f => f.Start < now.AddDays(-1));
     }
 
-    // Releases landing page — used when no specific update is known so the always-present
-    // "No updates available" Help entry still takes users somewhere useful.
+    // Separate releases link: checking from Help must query the feed, not just open a browser.
     private const string ReleasesPageUrl = UpdateCheckService.ReleasesPageUrl;
 
     // The published user guide splits on top-level headings, one page per "## " section, with a
@@ -12251,8 +12311,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// <summary>
     /// Raised for self-updating (installed) copies when the Help update entry is activated:
     /// the View shows the QuickMail Update dialog (restart now / what's new / dismiss).
-    /// Portable copies never raise this — they open the release page instead, because
-    /// updating them really is a manual download.
+    /// Portable copies with an official complete ZIP also use the in-app update dialog.
     /// </summary>
     public event EventHandler<(string Version, string WhatsNewUrl)>? UpdateDialogRequested;
 
@@ -12357,6 +12416,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
         Helpers.ExternalUriPolicy.TryOpenExternal(ArmSwitchGuideUrl);
 #pragma warning restore CA1822
 
+#pragma warning disable CA1822 // RelayCommand target follows the instance-command convention.
+    [RelayCommand]
+    private void OpenReleasesPage() => Helpers.ExternalUriPolicy.TryOpenExternal(ReleasesPageUrl);
+#pragma warning restore CA1822
+
     [RelayCommand]
     private void OpenUpdatePage()
     {
@@ -12397,13 +12461,29 @@ public partial class MainViewModel : ObservableObject, IDisposable
     // would be chatter). Only a found update is announced; the menu entry reflects the result either way.
     public async Task CheckForUpdateInBackgroundAsync()
     {
-        if (_updateCheckService is null) return;
+        if (IsCheckingForUpdates) return;
+        if (_updateCheckService is null)
+        {
+            UpdateAvailableText = "Update checking unavailable";
+            return;
+        }
+        IsCheckingForUpdates = true;
+        UpdateAvailableText = "Checking for updates…";
+        _updateVersion = string.Empty;
+        UpdateReleaseUrl = string.Empty;
         try
         {
+            if (_updateCheckService.DisabledReason is { } disabled)
+            {
+                UpdateAvailableText = "Updates disabled — test installation marker";
+                UpdateCheckDetails = disabled;
+                return;
+            }
             // Scoped token gives the caller an explicit cancellation bound. The service also
             // cancels its own internal token on Dispose (app exit), so either path stops the request.
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
             var info = await _updateCheckService.CheckForUpdateAsync(cts.Token);
+            UpdateCheckDetails = $"Last checked: {DateTime.Now:g}. Running version: {CurrentVersion}. Official stable releases only.";
             if (info is not null)
             {
                 _updateVersion      = info.Version;
@@ -12422,7 +12502,15 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
         catch (Exception ex)
         {
+            UpdateAvailableText = "Could not check for updates — retry";
+            UpdateCheckDetails = ex is OperationCanceledException
+                ? "The update check timed out or was cancelled. Check your connection and try again."
+                : $"The update check failed: {ex.Message}";
             LogService.Debug($"CheckForUpdate: {ex.Message}");
+        }
+        finally
+        {
+            IsCheckingForUpdates = false;
         }
     }
 }

@@ -281,8 +281,9 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
         SpellLanguage = model.SpellLanguage ?? string.Empty;
 
         Attachments.Clear();
+        _inlineImages = model.Attachments.Where(a => a.IsInline).ToList();
         foreach (var att in model.Attachments)
-            Attachments.Add(att);
+            if (!att.IsInline) Attachments.Add(att);
 
         // Remember the original mode so the View can restore it after wiring up event handlers.
         _seededMode    = model.Mode;
@@ -434,6 +435,7 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
         if (_draftFolderName == null)
             throw new DraftFolderMissingException();
 
+        if (PrepareRichBodyAsync != null) await PrepareRichBodyAsync();
         var compose = BuildComposeModel(account.Id);
         _draftMessageId = await _imap.AppendDraftAsync(account.Id, compose, _draftMessageId, combined.Token);
         _isDirty = false;
@@ -585,6 +587,7 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
         {
             ComposeModel compose;
             var stageStarted = Stopwatch.GetTimestamp();
+            if (PrepareRichBodyAsync != null) await PrepareRichBodyAsync();
             compose = BuildComposeModel(account.Id);
             PerformanceLogService.Record("Send compose: build model",
                 Stopwatch.GetElapsedTime(stageStarted), sendDetails);
@@ -738,7 +741,18 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
         if (local <= DateTime.Now) { SetStatusOutcome("Enter a future local date and time for scheduled sending."); return; }
         if (ResolveOutgoingQueue() is not { } scheduler)
         { SetStatusOutcome("Scheduled sending is unavailable."); return; }
-        var compose = BuildComposeModel(account.Id);
+        ComposeModel compose;
+        try
+        {
+            if (PrepareRichBodyAsync != null) await PrepareRichBodyAsync();
+            compose = BuildComposeModel(account.Id);
+        }
+        catch (Exception ex)
+        {
+            SetStatusOutcome("Could not prepare the message: " + ex.Message);
+            ErrorDialogRequested?.Invoke("Message could not be scheduled", ex.Message);
+            return;
+        }
         if (_scheduledId is { } scheduledId)
             await scheduler.ReplaceAsync(scheduledId, compose, new DateTimeOffset(local));
         else
@@ -802,6 +816,7 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
         SetProgress("Saving message…");
         try
         {
+            if (PrepareRichBodyAsync != null) await PrepareRichBodyAsync();
             var model = BuildComposeModel(_storedMessageAccountId);
             model.StoredMessageId = _storedMessageId;
             model.StoredFolderName = _storedFolderName;
@@ -832,6 +847,18 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
     /// HTML, Markdown, and plain text. Null until the View wires it.
     /// </summary>
     public Func<RichBodySnapshot>? RichBodyProvider { get; set; }
+    public Func<Task>? PrepareRichBodyAsync { get; set; }
+    public EmbeddedImageStore? EmbeddedImages { get; set; }
+    private List<AttachmentModel> _inlineImages = [];
+    public IReadOnlyList<AttachmentModel> InlineImages => _inlineImages;
+
+    public string PersistEmbeddedHtml(string html)
+    {
+        if (EmbeddedImages == null) return html;
+        var result = EmbeddedImages.Persist(html, _inlineImages);
+        _inlineImages = result.Resources;
+        return result.Html;
+    }
 
     /// <summary>
     /// Raised when content must flow into the rich editor (entering HTML mode).
@@ -1175,6 +1202,7 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
                 break;
         }
 
+        if (!string.IsNullOrEmpty(htmlBody)) htmlBody = PersistEmbeddedHtml(htmlBody);
         var model = new ComposeModel
         {
             AccountId           = accountId,
@@ -1192,7 +1220,7 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
             ReplySourceMessageId = _replySourceMessageId,
             DraftMessageId      = _draftMessageId,
             DraftFolderName     = _draftFolderName,
-            Attachments         = Attachments.ToList(),
+            Attachments         = Attachments.Concat(string.IsNullOrEmpty(htmlBody) ? [] : _inlineImages).ToList(),
         };
         return model;
     }
@@ -1239,6 +1267,7 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
         {
             model.HtmlBody = BuildReplyHtmlDocument(detail);
             model.Mode = ComposeMode.Html;
+            model.Attachments = detail.Attachments.Where(a => a.IsInline).ToList();
         }
 
         return model;
@@ -1309,6 +1338,7 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
         {
             model.HtmlBody = BuildForwardedHtmlBlock(detail);
             model.Mode     = ComposeMode.Html;
+            model.Attachments = detail.Attachments.Where(a => a.IsInline).ToList();
         }
 
         return model;

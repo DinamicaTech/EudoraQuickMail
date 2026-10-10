@@ -413,6 +413,26 @@ public class ImapMailService : IMailService, IChangeNotifier, IConnectionProbe
                 await folder.AddFlagsAsync(mailKitUid, MessageFlags.Seen, true, ct);
 
             var attachments = ExtractAttachments(s.Body);
+            long inlineBytes = 0;
+            foreach (var resource in attachments.Where(a => a.IsInline && a.ContentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase)))
+            {
+                if (resource.FileSize > 20 * 1024 * 1024 || inlineBytes + resource.FileSize > 20 * 1024 * 1024) continue;
+                var part = FindBodyPartBySpecifier(s.Body, resource.PartSpecifier!);
+                if (part == null) continue;
+                try
+                {
+                    var decoded = await folder.GetBodyPartAsync(mailKitUid, part, ct);
+                    if (decoded is MimePart { Content: not null } image)
+                    {
+                        using var buffer = new MemoryStream();
+                        await image.Content.DecodeToAsync(buffer, ct);
+                        inlineBytes += buffer.Length;
+                        if (inlineBytes <= 20 * 1024 * 1024) resource.Content = buffer.ToArray();
+                    }
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                { LogService.Log("Unable to fetch inline image: " + ex.Message); }
+            }
 
             // Detect text/calendar parts and generically typed .ics attachments. Only the fetch is done
             // here; parsing and field assignment live in PopulateCalendar so the invariant
@@ -1156,6 +1176,7 @@ public class ImapMailService : IMailService, IChangeNotifier, IConnectionProbe
     public async Task<byte[]> DownloadAttachmentAsync(
         Guid accountId, string folderName, string messageId, string partSpecifier, CancellationToken ct = default)
     {
+        if (Path.IsPathFullyQualified(partSpecifier)) return await File.ReadAllBytesAsync(partSpecifier, ct);
         using var lease = await RentClientAsync(accountId, ImapLeasePriority.Foreground, ct);
         var client = lease.Client;
         var folder = await client.GetFolderAsync(folderName, ct);
@@ -1877,15 +1898,7 @@ public class ImapMailService : IMailService, IChangeNotifier, IConnectionProbe
     {
         if (part is BodyPartMultipart multi)
         {
-            // Skip alternative (body variants) and related (inline images) — recurse into everything else
-            var subtype = multi.ContentType.MediaSubtype;
-            if (subtype.Equals("alternative", StringComparison.OrdinalIgnoreCase) ||
-                subtype.Equals("related",     StringComparison.OrdinalIgnoreCase))
-            {
-                foreach (var child in multi.BodyParts)
-                    CollectCalendarAttachments(child, result);
-                return;
-            }
+            // Related images are resources, not visible file attachments. Keep their CID.
             foreach (var child in multi.BodyParts)
                 CollectAttachments(child, result);
         }
@@ -1895,12 +1908,14 @@ public class ImapMailService : IMailService, IChangeNotifier, IConnectionProbe
             var fileName    = basic.ContentDisposition?.FileName ?? basic.ContentType.Name;
 
             bool isExplicit = disposition.Equals("attachment", StringComparison.OrdinalIgnoreCase);
+            bool isInline = !isExplicit && !string.IsNullOrWhiteSpace(basic.ContentId) &&
+                basic.ContentType.MediaType.Equals("image", StringComparison.OrdinalIgnoreCase);
             bool isCalendar = IsCalendarPart(basic);
             bool isTextBody = basic is BodyPartText bt &&
                               (bt.ContentType.MediaSubtype.Equals("plain", StringComparison.OrdinalIgnoreCase) ||
                                bt.ContentType.MediaSubtype.Equals("html",  StringComparison.OrdinalIgnoreCase));
 
-            if (isCalendar || isExplicit || (!isTextBody && !string.IsNullOrEmpty(fileName)))
+            if (isInline || isCalendar || isExplicit || (!isTextBody && !string.IsNullOrEmpty(fileName)))
             {
                 result.Add(new AttachmentModel
                 {
@@ -1908,6 +1923,8 @@ public class ImapMailService : IMailService, IChangeNotifier, IConnectionProbe
                     ContentType   = basic.ContentType.MimeType,
                     FileSize      = (long)basic.Octets,
                     PartSpecifier = basic.PartSpecifier,
+                    ContentId = basic.ContentId?.Trim('<', '>'),
+                    IsInline = isInline,
                 });
             }
         }

@@ -11,6 +11,7 @@ public enum TabKind
     Calendar,
     Compose,
     Unknown,
+    SearchResults,
 }
 
 /// <summary>

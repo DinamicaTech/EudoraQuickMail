@@ -777,8 +777,13 @@
 
             <!-- Help -->
             <MenuItem Header="_Help">
+                <MenuItem Header="_Check for updates now…"
+                          Command="{Binding CheckForUpdatesNowCommand}"/>
                 <MenuItem Header="{Binding UpdateAvailableText, Mode=OneWay}"
-                          Command="{Binding OpenUpdatePageCommand}"/>
+                          ToolTip="{Binding UpdateCheckDetails}"
+                          Command="{Binding CheckForUpdatesNowCommand}"/>
+                <MenuItem Header="View releases on _GitHub"
+                          Command="{Binding OpenReleasesPageCommand}"/>
                 <!-- Only on an ARM64 PC running the x64 build: nothing migrates an install
                      across architectures, so this entry is how those users find the native
                      build. Hidden everywhere else. -->

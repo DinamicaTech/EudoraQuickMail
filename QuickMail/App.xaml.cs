@@ -305,12 +305,28 @@ public partial class App : Application
         Profile = profile;
 
         try { _backupProfileLease = DinamicaBackup.ProfileLease.OpenApplication(profile.ProfileDir); }
-        catch (IOException ex)
+        catch (IOException)
         {
+            var previousShutdownMode = ShutdownMode;
+            ShutdownMode = ShutdownMode.OnExplicitShutdown;
             _startupSplash?.Close(); _startupSplash = null;
-            MessageBox.Show("This profile is unavailable during backup or maintenance.\n\n" + ex.Message,
-                "Eudora QuickMail — maintenance", MessageBoxButton.OK, MessageBoxImage.Information);
-            Shutdown(); return;
+            var wait = new QuickMail.Views.BackupStartupWindow(profile.ProfileDir);
+            MainWindow = wait;
+            // A second launch must acknowledge this responsive wait dialog, not offer to kill it.
+            _singleInstance?.ListenForActivation(activationArgs => Dispatcher.Invoke(() =>
+            {
+                if (MainWindow is QuickMail.Views.MainWindow main)
+                {
+                    main.RestoreFromTray();
+                    main.TryOpenMailtoFromCommandLine(activationArgs);
+                }
+                else MainWindow?.Activate();
+            }));
+            var ready = wait.ShowDialog() == true;
+            _backupProfileLease = wait.Lease;
+            if (MainWindow == wait) MainWindow = null;
+            ShutdownMode = previousShutdownMode;
+            if (!ready) { Shutdown(); return; }
         }
 
         LogService.Configure(profile.ProfileDir);

@@ -6,6 +6,8 @@ namespace QuickMail.Services;
 
 public interface IUpdateCheckService
 {
+    string? DisabledReason => null;
+    /// <summary>Null means a successful check found no newer release. Failures throw.</summary>
     Task<UpdateInfo?> CheckForUpdateAsync(CancellationToken cancellationToken = default);
 
     /// <summary>

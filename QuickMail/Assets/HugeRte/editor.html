@@ -21,17 +21,44 @@
       return new TextDecoder().decode(bytes);
     };
 
-    const emitContent = () => {
+    let snapshotVersion = 0;
+    const emitContent = async (requestId = null) => {
       if (!quickMailEditor) return;
+      const revision = ++snapshotVersion;
+      try {
       const clone = quickMailEditor.getBody().cloneNode(true);
+      const plain = quickMailEditor.getContent({ format: 'text' });
       clone.querySelectorAll('[data-quickmail-spelling]').forEach(span => span.replaceWith(...span.childNodes));
       clone.querySelectorAll('[data-quickmail-menu]').forEach(menu => menu.remove());
+      // Change the snapshot only, never the live DOM/caret. blob URLs die with this editor.
+      for (const image of clone.querySelectorAll('img[src]')) {
+        const src = image.getAttribute('src');
+        for (const attribute of [...image.attributes])
+          if (attribute.name.startsWith('data-mce-')) image.removeAttribute(attribute.name);
+        if (src?.startsWith('blob:') || src?.startsWith('data:')) image.removeAttribute('srcset');
+        if (!src?.startsWith('blob:')) continue;
+        const cached = quickMailEditor.editorUpload?.blobCache?.getByUri(src);
+        if (cached) image.setAttribute('src', 'data:' + cached.blob().type + ';base64,' + cached.base64());
+        else {
+          const response = await fetch(src);
+          if (!response.ok) throw new Error('An embedded image is no longer available. Please insert it again.');
+          const blob = await response.blob();
+          const data = await new Promise((resolve, reject) => {
+            const reader = new FileReader(); reader.onload = () => resolve(reader.result);
+            reader.onerror = () => reject(new Error('Could not read embedded image.')); reader.readAsDataURL(blob);
+          });
+          image.setAttribute('src', data);
+        }
+      }
       const body = clone.innerHTML;
       const html = '<!doctype html><html><head><meta charset="utf-8">' +
         preservedHeadStyles + '</head><body>' + body + '</body></html>';
-      const plain = quickMailEditor.getContent({ format: 'text' });
-      chrome.webview.postMessage(JSON.stringify({ html, plain }));
+      chrome.webview.postMessage(JSON.stringify({ html, plain, requestId, revision }));
+      } catch (error) {
+        chrome.webview.postMessage(JSON.stringify({ type: 'snapshot-error', requestId, revision, message: String(error.message || error) }));
+      }
     };
+    window.quickmailCaptureSnapshot = requestId => { void emitContent(requestId); };
 
     const requestCatalanProofing = () => {
       if (!quickMailEditor || quickMailLanguage !== 'ca-ES') return;

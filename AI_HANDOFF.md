@@ -864,3 +864,118 @@ top-row anchor around batched arrivals. No temporary SQLite table or schema chan
 Snooze additionally offers 30, 90 and 180 days, and one calendar year, all at 09:00 local time.
 Custom Snooze and Send Later date-only inputs default to 09:00; an explicitly supplied time,
 including 00:00, is preserved. Existing future-date validation still applies.
+
+## 28. Cursor recovery on activation (October 2026)
+
+MainWindow.Activated invokes CursorVisibilityRecovery on the UI thread, only when that window
+is the native foreground window. It probes the thread's ShowCursor counter and immediately
+undoes the probe if already visible; negative counters are raised to zero (maximum 32 calls).
+Windows touch/pen suppression is respected. Cursor shapes and WPF OverrideCursor are untouched.
+Corrections are recorded as `Cursor recovery` in quickmail.log, including native cursor flags.
+This is a defensive workaround for intermittent whole-window cursor disappearance, not a
+confirmed fix of its origin (the HTML editor is suspected but unproven). Clicking an already
+active window does not trigger it; switching away and back does. No timer or global hook is used.
+
+## 29. Copy missing attachment paths
+
+Attachment contextual Copy copies an existing stored absolute path verbatim, even when the
+file is missing or its UNC share is offline. It must not download/recreate the file or replace
+that path with a temporary one. Applies to the reading pane and standalone message window.
+Server-only attachments without a stored absolute path retain materialization before copying.
+Open, Explore and drag-and-drop still require a real file; their behavior is unchanged.
+
+## 30. Safe startup during backup
+
+When startup cannot acquire the profile lease, EQM shows BackupStartupWindow with safe
+cancellation and a wait for BOTH the agent and profile locks. It never removes lock files,
+terminates the worker or bypasses interrupted-restore markers. Active restorations cannot be
+cancelled from this dialog. External backup windows require explicit acknowledgement that the
+external copier has stopped; the agent cannot cancel Synology or verify its state.
+
+New agents publish .backup-active.json (run ID, operation, PID/start time) and monitor a
+run-ID-scoped .backup-cancel.json through a linked cancellation token. Existing cleanup paths
+complete before reopening. Cancellation is cooperative, not necessarily immediate during an
+uninterruptible system/NAS call. Old running agents cannot accept this protocol; the dialog
+explains this and allows waiting/closing without forcing anything. Deploy EQM AND BackupAgent.
+
+A live .backup-startup-waiter.json identity prevents duplicate automatic reopen. Scheduled
+cancellation consumes already-due schedule occurrences (with local receipts for skipped work)
+so the next five-minute task tick does not close EQM again; future occurrences remain scheduled.
+
+## 31. Folder opening progress
+
+SelectFolderCommand publishes a completion lifetime for all folder navigation entry points.
+MainWindow uses the existing two-second delayed mini-splash, without activating it or stealing
+tree/list focus. Superseding navigation or closing the owner ends the old indicator; every exit
+from selection (including failure/cancellation) completes its lifetime. Startup retains its own
+splash. Remote aggregate synchronization reports account/folder and source number, not a fabricated
+percentage. This is feedback only: synchronization order and folder-loading behavior are unchanged.
+
+## 32. Independent search result tabs
+
+Display settings: `OpenSearchesInResultsTab` defaults to true, including existing profiles with
+no explicit setting. F3 Search, Search Everywhere (including Ctrl+Enter), advanced search and
+Alt+cell search create a closeable SearchResults tab; searches launched inside it reuse it.
+Disabling the option restores inline search. Saved virtual folders retain their existing behavior.
+
+MainViewModel.SearchTabs captures folder/account, query/scope, advanced criteria, list presentation,
+raw and displayed rows, pagination, selection and status per participating list tab. MainWindow
+keeps the multi-selection and scroll anchor. Switching back restores the snapshot without a query;
+Escape/Clear returns to the originating tab, leaving results available, and closing results also
+returns to that origin. F5 explicitly reruns the local query without enumerating remote folders.
+Folder navigation leaves results intact. Result membership stays frozen on sync/read changes,
+while removals propagate to inactive snapshots and ordinary inactive folders accept new mail.
+Snapshots are in memory only; no database migration or persisted per-search tables are added.
+Automated coverage: SearchResultsTabTests plus existing tab, local-search and folder-state tests.
+
+## 33. Past appointments in month view
+
+FullCalendar month view dims finished appointments using opacity and reduced saturation; account
+colors and all selection/edit/context-menu behavior remain intact. Day/week/Today agenda are
+unchanged. The event end (exclusive for all-day events) determines completion, not its start.
+All-day events without an end use the next local midnight; timed events without a known end are
+not dimmed. CSS is updated every minute and on focus/visibility/view changes without reloading
+events. Hover/focus increases readability. Tests: CalendarContextMenuTests and
+`node scripts/Test-CalendarPastEvents.cjs`.
+
+## 34. Durable images inserted in outgoing HTML
+
+The HugeRTE bridge snapshots blob images as data URIs (blob cache, with a FileReader fallback),
+without replacing the live DOM/caret. Correlated capture acknowledgements are awaited before
+send, scheduling, draft/autosave and stored-message save; capture failure stops the operation.
+Revision numbers discard late snapshots. Editor-only data-mce image attributes/srcset are removed
+from local-image snapshots so they cannot reintroduce an expired blob URL.
+
+EmbeddedImageStore persists PNG/JPEG/GIF/WebP/BMP images under profile/Embedded/<composition-guid>/
+with content-hashed files/CIDs, and rewrites snapshot HTML to cid:. The directory identity survives
+folder moves and draft/sent IDs. Inline metadata is separate from the visible compose attachment
+list and is retained in local Draft, Scheduled, undo-draft and Out. Reopening reuses referenced
+files; no automatic deletion is performed because other copies may still reference them. Existing
+broken blob-only messages are not repaired. Inline images have a 20 MB limit consistent with the
+reader; larger images can be ordinary attachments. External HTTP images are not downloaded.
+
+MimeMessageBuilder emits multipart/related with inline Content-ID resources inside the HTML
+alternative. It loads durable file bytes when necessary and rejects unresolved blob content.
+IMAP details retain/fetch bounded inline MIME image resources and cache them through the existing
+received-resource store (Attachments/Embedded); newly authored images use the separate Embedded
+root. Reply/forward preserve inline metadata. Received resources may be rendered from bytes or disk.
+
+Native backup includes Embedded automatically for EQM jobs when attachment copying is enabled,
+including existing jobs. Relative inventory paths make normal restore/restore-test cover it too.
+Tests: EmbeddedImageTests, relevant compose/MIME/local-store suites, BackupTests, and
+`node scripts/Test-EmbeddedSnapshot.cjs`.
+
+## 35. Explicit Help update checks and truthful status (2026-10-10)
+
+Help offers Check for updates now and a separate View releases on GitHub action.
+Manual checks query the feed again without restarting, and open the existing in-app
+update dialog when an installable update is found. The status entry also retries on click;
+its tooltip contains the last successful check time or failure/disabled details.
+Startup checks remain silent when up to date. Duplicate checks are prevented while pending.
+Only a successful no-newer-version result reports No updates available; network, timeout,
+invalid release metadata and Velopack failures are no longer converted to that result.
+The quickmail-standalone-install marker is respected and explained (including its full path),
+not deleted automatically. Removing it externally allows the next manual check without restart.
+The existing installation's marker has not been removed by this change.
+Regression coverage: UpdateHelpTests (manual retry/dialog, disabled marker, failure after
+a prior available update, concurrent checks).

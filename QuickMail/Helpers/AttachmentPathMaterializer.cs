@@ -7,6 +7,17 @@ namespace QuickMail.Helpers;
 /// <summary>Resolves a stored attachment to a real local path for clipboard and Explorer actions.</summary>
 public static class AttachmentPathMaterializer
 {
+    /// <summary>Copy the stored path even if missing/offline; only materialize server-only attachments.</summary>
+    public static Task<string> GetPathForCopyAsync(AttachmentModel attachment,
+        MailMessageDetail detail, IMailService mailService, CancellationToken ct = default)
+    {
+        if (!string.IsNullOrWhiteSpace(attachment.PartSpecifier) &&
+            Path.IsPathFullyQualified(attachment.PartSpecifier))
+            return Task.FromResult(attachment.PartSpecifier);
+
+        return EnsureLocalPathAsync(attachment, detail, mailService, ct);
+    }
+
     public static async Task<string> EnsureLocalPathAsync(AttachmentModel attachment,
         MailMessageDetail detail, IMailService mailService, CancellationToken ct = default)
     {

@@ -8,6 +8,72 @@ public sealed class BackupTests : IDisposable
     private readonly string _root = Path.Combine(Path.GetTempPath(), "dinamica-backup-test-" + Guid.NewGuid().ToString("N"));
     private readonly BackupJob _job;
     private CancellationToken Ct => TestContext.Current.CancellationToken;
+    [Fact] public void StartupWaitsForAgentCleanupEvenIfDatabaseLeaseIsAlreadyFree()
+    {
+        using (ProfileLease.LockAgent(_job.ProfileDirectory))
+            Assert.Throws<IOException>(() => StartupCancellation.OpenForStartup(_job.ProfileDirectory));
+        using var application = StartupCancellation.OpenForStartup(_job.ProfileDirectory);
+    }
+
+    [Fact] public void StartupNeverBypassesInterruptedRestoreMarker()
+    {
+        JsonFiles.Write(Path.Combine(_job.ProfileDirectory, ".restore-in-progress.json"), new { Interrupted = true });
+        Assert.Throws<IOException>(() => StartupCancellation.OpenForStartup(_job.ProfileDirectory));
+    }
+
+    [Fact] public void DeadAgentMetadataCannotAcceptCancellation()
+    {
+        using var process = System.Diagnostics.Process.GetCurrentProcess();
+        JsonFiles.Write(Path.Combine(_job.ProfileDirectory, StartupCancellation.ActiveName),
+            new ActiveBackup("stale", "Backup", process.Id, process.StartTime.ToUniversalTime().Ticks - 1));
+        Assert.Null(StartupCancellation.Active(_job.ProfileDirectory));
+        Assert.False(StartupCancellation.Request(_job.ProfileDirectory, "stale"));
+    }
+    [Fact] public async Task StartupCanCancelMaintenanceAndLeasesAreReleased()
+    {
+        _job.MaintenanceMinutes = 30;
+        var operation = Task.Run(() => new Runner(_job).RunAsync("Maintenance", Ct), Ct);
+        ActiveBackup? active = null;
+        for (var i = 0; i < 100 && active == null; i++)
+        {
+            await Task.Delay(50, Ct);
+            active = StartupCancellation.Active(_job.ProfileDirectory);
+        }
+        Assert.NotNull(active);
+        Assert.False(StartupCancellation.Request(_job.ProfileDirectory, "stale-id"));
+        Assert.True(StartupCancellation.Request(_job.ProfileDirectory, active.Id));
+        var result = await operation.WaitAsync(TimeSpan.FromSeconds(10), Ct);
+        Assert.Equal("Cancelled", result.Status);
+        Assert.Null(StartupCancellation.Active(_job.ProfileDirectory));
+        using var agent = ProfileLease.LockAgent(_job.ProfileDirectory);
+        using var application = ProfileLease.OpenApplication(_job.ProfileDirectory);
+    }
+
+    [Fact] public async Task StaleCancellationCannotCancelNextRun()
+    {
+        JsonFiles.Write(Path.Combine(_job.ProfileDirectory, StartupCancellation.CancelName), new BackupCancelRequest("old-run"));
+        using var control = new StartupCancellation(_job.ProfileDirectory, "new-run", "Backup", Ct);
+        await Task.Delay(400, Ct);
+        Assert.False(control.Token.IsCancellationRequested);
+        Assert.True(StartupCancellation.Request(_job.ProfileDirectory, "new-run"));
+        for (var i = 0; i < 50 && !control.Token.IsCancellationRequested; i++) await Task.Delay(50, Ct);
+        Assert.True(control.Token.IsCancellationRequested);
+    }
+
+    [Fact] public void RestoreCannotBeCancelledFromStartup()
+    {
+        using var control = new StartupCancellation(_job.ProfileDirectory, "restore-run", "Restore", Ct);
+        Assert.False(StartupCancellation.Request(_job.ProfileDirectory, "restore-run"));
+        Assert.False(control.Token.IsCancellationRequested);
+    }
+
+    [Fact] public void StartupWaiterIsIdentifiedByLiveProcess()
+    {
+        StartupCancellation.RegisterWaiter(_job.ProfileDirectory);
+        Assert.True(StartupCancellation.HasLiveWaiter(_job.ProfileDirectory));
+        StartupCancellation.RemoveWaiter(_job.ProfileDirectory);
+        Assert.False(StartupCancellation.HasLiveWaiter(_job.ProfileDirectory));
+    }
     private sealed class CapturedProgress : IProgress<ProgressInfo>
     {
         public readonly System.Collections.Concurrent.ConcurrentQueue<string> Stages = new();
@@ -137,6 +203,21 @@ public sealed class BackupTests : IDisposable
         var local = Catalog.ReadRecentReceipts(_job, 100, includeDestination: false);
         Assert.Contains(local, run => run.Id == backup.Id);
     }
+    [Fact] public async Task ExistingEqmJobIncludesEmbeddedWithoutConfigurationChanges()
+    {
+        var directory = Path.Combine(_job.ProfileDirectory, "Embedded", "message");
+        Directory.CreateDirectory(directory);
+        await File.WriteAllBytesAsync(Path.Combine(directory, "image.png"), [1, 2, 3], Ct);
+        Assert.DoesNotContain("Embedded", _job.AttachmentDirectories);
+        var backup = await Backup();
+        var manifest = BackupEngine.ReadManifest(backup.Artifact);
+        Assert.Contains(manifest.Attachments, file => file.Path == "Embedded/message/image.png");
+        Assert.True(File.Exists(Path.Combine(_job.AttachmentDestination, "Embedded", "message", "image.png")));
+        _job.CopyAttachments = false;
+        var without = await Backup();
+        Assert.Empty(BackupEngine.ReadManifest(without.Artifact).Attachments);
+    }
+
     [Fact] public async Task OptionalLegacyEudoraSourceIsMirroredSeparately()
     {
         var eudora = Path.Combine(_root, "Eudora");

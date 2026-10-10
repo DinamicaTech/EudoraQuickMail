@@ -42,11 +42,14 @@ internal static class ReopenWatcher
             }
 
             // The agent owns this lock for the entire run, including notifications and status writes.
+            // A manually started EQM is already waiting and owns responsibility for reopening.
+            if (StartupCancellation.HasLiveWaiter(profile)) return 0;
             // Holding it while launching EQM prevents the next scheduled run from racing the reopen.
             try
             {
                 using var agent = ProfileLease.LockAgent(profile);
                 using (ProfileLease.OpenApplication(profile)) { }
+                if (StartupCancellation.HasLiveWaiter(profile)) return 0;
                 var start = new ProcessStartInfo(application)
                 {
                     UseShellExecute = true,

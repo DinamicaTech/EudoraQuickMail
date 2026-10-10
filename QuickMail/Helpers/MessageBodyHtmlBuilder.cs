@@ -140,12 +140,13 @@ public static class MessageBodyHtmlBuilder
         if (string.IsNullOrWhiteSpace(html)) return html;
         foreach (var resource in detail.Attachments.Where(a => a.IsInline
                      && !string.IsNullOrWhiteSpace(a.ContentId)
-                     && !string.IsNullOrWhiteSpace(a.PartSpecifier)))
+                     && (a.Content != null || !string.IsNullOrWhiteSpace(a.PartSpecifier))))
         {
             try
             {
-                if (!File.Exists(resource.PartSpecifier) || resource.FileSize > 20 * 1024 * 1024) continue;
-                var bytes = File.ReadAllBytes(resource.PartSpecifier);
+                if (resource.FileSize > 20 * 1024 * 1024 || (resource.Content == null && !File.Exists(resource.PartSpecifier))) continue;
+                var bytes = resource.Content ?? File.ReadAllBytes(resource.PartSpecifier!);
+                if (bytes.Length > 20 * 1024 * 1024) continue;
                 var dataUri = $"data:{resource.ContentType};base64,{Convert.ToBase64String(bytes)}";
                 var id = resource.ContentId!.Trim().Trim('<', '>');
                 html = Regex.Replace(html,

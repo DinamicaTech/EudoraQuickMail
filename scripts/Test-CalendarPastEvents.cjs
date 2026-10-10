@@ -1,0 +1,27 @@
+// No browser/dependencies needed: exercise the exact helpers embedded in the calendar page.
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
+const assert = require('node:assert/strict');
+const source = fs.readFileSync(path.join(__dirname, '../QuickMail/Views/MainWindow.xaml.cs'), 'utf8');
+const start = source.indexOf('function eventEndMillis(event)');
+const end = source.indexOf('function updateFinishedEvents()', start);
+assert.ok(start > 0 && end > start);
+const context = vm.createContext({ Date, Number });
+vm.runInContext(source.slice(start, end), context);
+const finished = context.isFinishedMonthEvent;
+const endMillis = context.eventEndMillis;
+const now = new Date(2026, 9, 8, 12).getTime();
+assert.equal(finished('dayGridMonth', now - 1, now), true);
+assert.equal(finished('dayGridMonth', now, now), true);
+assert.equal(finished('dayGridMonth', now + 1, now), false);
+assert.equal(finished('timeGridDay', now - 1, now), false);
+assert.equal(finished('timeGridWeek', now - 1, now), false);
+assert.equal(finished('dayGridMonth', NaN, now), false);
+assert.equal(finished('dayGridMonth', endMillis({ start: new Date(now - 3600000), end: new Date(now + 3600000) }), now), false);
+assert.equal(Number.isNaN(endMillis({ start: new Date(now - 3600000), allDay: false })), true);
+const midnight = new Date(2026, 9, 8);
+assert.equal(endMillis({ start: midnight, allDay: true }), new Date(2026, 9, 9).getTime());
+assert.equal(finished('dayGridMonth', endMillis({ start: midnight, allDay: true }), now), false);
+assert.equal(finished('dayGridMonth', endMillis({ start: midnight, end: new Date(2026, 9, 10), allDay: true }), now), false);
+console.log('PASS: 11 calendar past-event assertions (end time, in-progress, future, day/week, all-day, unknown end).');

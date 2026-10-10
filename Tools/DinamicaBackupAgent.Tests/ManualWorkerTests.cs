@@ -7,6 +7,17 @@ public sealed class ManualWorkerTests : IDisposable
     private readonly string _root = Path.Combine(Path.GetTempPath(), "backup-worker-test-" + Guid.NewGuid().ToString("N"));
     private readonly BackupJob _job = new();
     private string JobPath => Path.Combine(_root, "job.json");
+    [Fact] public void CancelledScheduleConsumesDueOccurrencesButNotFutureOnes()
+    {
+        _job.BackupSchedule.Enabled = true; _job.BackupSchedule.Time = "00:01";
+        _job.MaintenanceSchedule.Enabled = true; _job.MaintenanceSchedule.Time = "00:02";
+        var state = new Dictionary<string, DateTime>();
+        Program.ConsumeDueAfterCancellation(_job, JobPath, state);
+        Assert.Equal(_job.BackupSchedule.LatestOccurrence(DateTime.Now), state["Backup"]);
+        Assert.Equal(_job.MaintenanceSchedule.LatestOccurrence(DateTime.Now), state["Maintenance"]);
+        Assert.False(state.ContainsKey("Test"));
+        Assert.All(state.Values, value => Assert.True(value <= DateTime.Now));
+    }
     public ManualWorkerTests()
     {
         Directory.CreateDirectory(_root);

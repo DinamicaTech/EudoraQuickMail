@@ -55,6 +55,7 @@ public class ConfigModel
     /// move rule. The tab is updated but never brought to the foreground automatically.
     /// </summary>
     public bool ShowFilteredDestinationTab { get; set; } = true;
+    public bool OpenSearchesInResultsTab { get; set; } = true;
 
     /// <summary>Most recently executed quick searches, newest first (maximum ten).</summary>
     public List<string> QuickSearchHistory { get; set; } = [];

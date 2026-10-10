@@ -221,6 +221,7 @@ public class ConfigService : IConfigService
                     case "showaccountspanel": config.ShowAccountsPanel = ParseBool(value); break;
                     case "showtodayagenda":   config.ShowTodayAgenda   = ParseBool(value); break;
                     case "showfiltereddestinationtab": config.ShowFilteredDestinationTab = ParseBool(value); break;
+                    case "opensearchesinresultstab": config.OpenSearchesInResultsTab = ParseBool(value); break;
                     case "builtinsavedviewsversion":
                         if (int.TryParse(value, out var builtInViewsVersion))
                             config.BuiltInSavedViewsVersion = Math.Max(0, builtInViewsVersion);
@@ -508,6 +509,7 @@ public class ConfigService : IConfigService
         sb.AppendLine();
 
         sb.AppendLine($"ShowFilteredDestinationTab = {(config.ShowFilteredDestinationTab ? "on" : "off")}");
+        sb.AppendLine($"OpenSearchesInResultsTab = {(config.OpenSearchesInResultsTab ? "on" : "off")}");
         sb.AppendLine("# Keep one background tab pointing at the latest successful rule destination.");
         sb.AppendLine();
 

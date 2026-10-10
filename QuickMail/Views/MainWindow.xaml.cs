@@ -319,6 +319,8 @@ public partial class MainWindow : Window
         _statusClockTimer.Start();
         _vm.MessagesDeleting += OnMessagesDeleting;
         _vm.FolderSelectionDataReady += OnFolderSelectionDataReady;
+        _vm.FolderSelectionStarted += OnFolderSelectionStarted;
+        _vm.ListTabStateSaving += SaveListTabViewport;
         _vm.NewMailArrived += OnNewMailArrived;
         MailMessageSummary? viewportAnchor = null;
         double viewportFraction = 0;
@@ -974,6 +976,9 @@ public partial class MainWindow : Window
         _statusClockTimer.Tick -= StatusClockTimer_Tick;
         _undoSendTimer?.Stop();
         _vm.FolderSelectionDataReady -= OnFolderSelectionDataReady;
+        _vm.FolderSelectionStarted -= OnFolderSelectionStarted;
+        _vm.ListTabStateSaving -= SaveListTabViewport;
+        _folderIndicatorLifetime?.TrySetResult();
         foreach (var tab in _vm.OpenTabs.OfType<ComposeTabViewModel>().ToList())
             tab.ForceDispose();
         foreach (var w in _openComposeWindows.ToList())
@@ -1110,10 +1115,10 @@ public partial class MainWindow : Window
         _configService.Save(config);
         if (slowWildcard)
             await RunWithDelayedIndicatorAsync("Searching messages…",
-                () => _vm.RunQuickSearchAsync(query, everywhere),
+                () => _vm.RunQuickSearchInTabAsync(query, everywhere),
                 () => _vm.StatusText);
         else
-            await _vm.RunQuickSearchAsync(query, everywhere);
+            await _vm.RunQuickSearchInTabAsync(query, everywhere);
     }
 
     private async void SearchButton_Click(object sender, RoutedEventArgs e) => await ExecuteSearchAsync();
@@ -1159,7 +1164,7 @@ public partial class MainWindow : Window
     private void AdvancedSearchButton_Click(object sender, RoutedEventArgs e)
     {
         var window = new AdvancedSearchWindow { Owner = this };
-        window.SearchRequested += async criteria => await _vm.ApplyAdvancedSearchAsync(criteria);
+        window.SearchRequested += async criteria => await _vm.RunAdvancedSearchInTabAsync(criteria);
         window.Show();
     }
 
@@ -1201,6 +1206,7 @@ public partial class MainWindow : Window
         // the editable ComboBox history popup, and the async reload was started without awaiting
         // it, so the old result set could remain visible briefly (or until another folder click).
         SearchBox.IsDropDownOpen = false;
+        if (_vm.ReturnFromSearchResults()) return;
         await _vm.ClearSearchCommand.ExecuteAsync(null);
         ReturnFocusToMessageList();
         var count = _vm.Messages.Count;
@@ -1548,7 +1554,7 @@ public partial class MainWindow : Window
             id: "tabs.close", category: "View", title: "Close Tab",
             execute: () => { if (_vm.ActiveTab != null) _vm.CloseTab(_vm.ActiveTab); },
             defaultKey: Key.W, defaultModifiers: ModifierKeys.Control,
-            isAvailable: () => _vm.ActiveTab is MessageTabViewModel or ComposeTabViewModel));
+            isAvailable: () => _vm.ActiveTab is MessageTabViewModel or ComposeTabViewModel or SearchResultsTabViewModel));
 
         _registry.Register(new CommandDefinition(
             id: "mail.closeMessage", category: "Mail", title: "Close Message",
@@ -3369,9 +3375,8 @@ public partial class MainWindow : Window
             && e.OriginalSource is TextBlock cell
             && !string.IsNullOrWhiteSpace(cell.Text))
         {
-            _vm.IsSearchActive = true;
-            _vm.SearchText = cell.Text;
             e.Handled = true;
+            await _vm.RunQuickSearchInTabAsync(cell.Text, everywhere: false);
             return;
         }
 
@@ -4301,6 +4306,8 @@ public partial class MainWindow : Window
         .fc .fc-button{border-radius:3px;box-shadow:none}.fc .fc-event{border-radius:3px;padding:1px 3px;cursor:pointer}
         .fc .fc-col-header-cell-cushion,.fc .fc-daygrid-day-number{color:CanvasText;text-decoration:none}
         .fc .fc-daygrid-day.fc-day-today{background:rgba(15,108,189,.10)}
+        .fc .fc-event.eqm-event-finished{opacity:.48;filter:saturate(.55)}
+        .fc .fc-event.eqm-event-finished:hover,.fc .fc-event.eqm-event-finished:focus-within{opacity:.85}
         #calendar-menu{position:fixed;display:none;z-index:10000;min-width:150px;padding:4px;
         border:1px solid #a9b1bc;border-radius:4px;background:Canvas;color:CanvasText;box-shadow:0 3px 12px #0004}
         #calendar-menu button{width:100%;padding:6px 10px;border:0;border-radius:3px;text-align:left;
@@ -4318,6 +4325,21 @@ public partial class MainWindow : Window
           <button type="button" data-action="new">New appointment</button>
         </div><script>
         let dateClickTimer=0;
+        // All-day ends are exclusive. Without a supplied end, an all-day event lasts one
+        // local calendar day; an undated timed end is unknown and must not be guessed.
+        function eventEndMillis(event){
+          if(event.end)return event.end.getTime();
+          if(event.allDay&&event.start){const end=new Date(event.start);end.setDate(end.getDate()+1);return end.getTime()}
+          return NaN;
+        }
+        function isFinishedMonthEvent(view,end,now){
+          return view==='dayGridMonth'&&Number.isFinite(end)&&end<=now;
+        }
+        function updateFinishedEvents(){
+          const now=Date.now();
+          document.querySelectorAll('#calendar [data-calendar-event-id]').forEach(el=>
+            el.classList.toggle('eqm-event-finished',isFinishedMonthEvent(calendar.view.type,Number(el.dataset.calendarEventEnd),now)));
+        }
         const postNewAppointment=(date,allDay)=>chrome.webview.postMessage({type:'new',date,allDay});
         const calendar=new FullCalendar.Calendar(document.getElementById('calendar'),{
           initialView:'dayGridMonth',height:'100%',nowIndicator:true,navLinks:true,selectable:true,
@@ -4329,6 +4351,8 @@ public partial class MainWindow : Window
             i.el.dataset.calendarEventId=i.event.id;
             i.el.dataset.calendarEventDate=i.event.startStr;
             i.el.dataset.calendarEventAllDay=i.event.allDay?'true':'false';
+            i.el.dataset.calendarEventEnd=String(eventEndMillis(i.event));
+            i.el.classList.toggle('eqm-event-finished',isFinishedMonthEvent(i.view.type,eventEndMillis(i.event),Date.now()));
             i.el.addEventListener('dblclick',()=>chrome.webview.postMessage({type:'open',id:i.event.id}));
           },
           dateClick:i=>{
@@ -4336,9 +4360,13 @@ public partial class MainWindow : Window
             if(i.jsEvent.detail>1)postNewAppointment(i.dateStr,i.allDay);
             else dateClickTimer=setTimeout(()=>chrome.webview.postMessage({type:'date',date:i.dateStr}),240);
           },
-          datesSet:i=>{if(!window.hostUpdating)chrome.webview.postMessage({type:'navigate',view:i.view.type,date:calendar.getDate().toISOString()})}
+          datesSet:i=>{updateFinishedEvents();if(!window.hostUpdating)chrome.webview.postMessage({type:'navigate',view:i.view.type,date:calendar.getDate().toISOString()})}
         });
         calendar.render();
+        // Only toggle CSS, without rerendering events or touching selection/edit handlers.
+        setInterval(updateFinishedEvents,60000);
+        window.addEventListener('focus',updateFinishedEvents);
+        document.addEventListener('visibilitychange',()=>{if(!document.hidden)updateFinishedEvents()});
         const menu=document.getElementById('calendar-menu');
         let menuDate='';
         let menuAllDay=true;
@@ -5566,7 +5594,7 @@ public partial class MainWindow : Window
         if (sender is not MenuItem { Tag: AttachmentModel attachment }) return;
         try
         {
-            var path = await EnsureAttachmentLocalPathAsync(attachment);
+            var path = await EnsureAttachmentLocalPathAsync(attachment, forCopy: true);
             if (path is null) return;
             Clipboard.SetText(path);
             _vm.StatusText = $"Attachment path copied: {path}";
@@ -5598,7 +5626,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private async Task<string?> EnsureAttachmentLocalPathAsync(AttachmentModel attachment)
+    private async Task<string?> EnsureAttachmentLocalPathAsync(AttachmentModel attachment, bool forCopy = false)
     {
         var detail = _vm.MessageDetail;
         if (detail is null) return null;
@@ -5608,7 +5636,9 @@ public partial class MainWindow : Window
         try
         {
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
-            return await AttachmentPathMaterializer.EnsureLocalPathAsync(attachment, detail, _imap, cts.Token);
+            return forCopy
+                ? await AttachmentPathMaterializer.GetPathForCopyAsync(attachment, detail, _imap, cts.Token)
+                : await AttachmentPathMaterializer.EnsureLocalPathAsync(attachment, detail, _imap, cts.Token);
         }
         finally
         {
@@ -5715,6 +5745,7 @@ public partial class MainWindow : Window
     // those untouched.
     private void OnActivated(object? sender, EventArgs e)
     {
+        CursorVisibilityRecovery.OnWindowActivated(new WindowInteropHelper(this).Handle);
         LogService.Debug($"[FOCUS] Activated lastPane={_paneIndexBeforeDeactivation} {FocusInfo()}");
         if (_paneIndexBeforeDeactivation == 3 || _paneIndexBeforeDeactivation == 4)
             // Re-check IsActive at callback time: a transient activation (e.g. a modeless child of the
@@ -7357,6 +7388,17 @@ public partial class MainWindow : Window
         // Nothing extra needed here; the handler is wired for drag/drop future use.
     }
 
+    private readonly Dictionary<TabSessionViewModel, (MailMessageSummary? Anchor, double Offset,
+        List<MailMessageSummary> Selection)> _listTabViewports = new();
+
+    private void SaveListTabViewport(TabSessionViewModel tab)
+    {
+        var offset = FindScrollViewer(MessageList)?.VerticalOffset ?? 0;
+        var index = (int)Math.Floor(offset);
+        _listTabViewports[tab] = (index >= 0 && index < _vm.Messages.Count ? _vm.Messages[index] : null,
+            offset, MessageList.SelectedItems.OfType<MailMessageSummary>().ToList());
+    }
+
     private async Task OnActiveTabChangedAsync()
     {
         var version = Interlocked.Increment(ref _tabChangedVersion);
@@ -7369,6 +7411,35 @@ public partial class MainWindow : Window
         if (tab == null)
         {
             _vm.IsMessageOpen = false;
+            return;
+        }
+
+        if (_vm.HasRestoredListTab)
+        {
+            await Dispatcher.InvokeAsync(() =>
+            {
+                if (version != _tabChangedVersion || _vm.ActiveTab != tab) return;
+                if (_listTabViewports.TryGetValue(tab, out var viewport))
+                {
+                    var selected = _vm.SelectedMessage;
+                    MessageList.SelectedItems.Clear();
+                    foreach (var row in viewport.Selection)
+                        if (_vm.Messages.Contains(row)) MessageList.SelectedItems.Add(row);
+                    if (MessageList.SelectedItems.Count == 0 && selected != null)
+                        MessageList.SelectedItem = selected;
+                    if (!FolderList.IsKeyboardFocusWithin)
+                    {
+                        if (_vm.ViewMode == ViewMode.Messages) MessageList.Focus();
+                        else FocusActiveMessagePanel();
+                    }
+                    var index = viewport.Anchor == null ? -1 : _vm.Messages.IndexOf(viewport.Anchor);
+                    FindScrollViewer(MessageList)?.ScrollToVerticalOffset(index >= 0
+                        ? index + viewport.Offset - Math.Floor(viewport.Offset) : viewport.Offset);
+                }
+                else if (!FolderList.IsKeyboardFocusWithin) FocusActiveMessagePanel();
+                foreach (var old in _listTabViewports.Keys.Where(t => !_vm.OpenTabs.Contains(t)).ToList())
+                    _listTabViewports.Remove(old);
+            }, DispatcherPriority.ApplicationIdle);
             return;
         }
 
@@ -8667,7 +8738,30 @@ public partial class MainWindow : Window
     /// Shows a compact non-modal progress window only when an explicitly opted-in operation takes
     /// longer than two seconds. Keeping this manual avoids flashing progress UI for ordinary work.
     /// </summary>
-    private async Task RunWithDelayedIndicatorAsync(string title, Func<Task> operation, Func<string>? statusProvider = null)
+    private TaskCompletionSource? _folderIndicatorLifetime;
+
+    private async void OnFolderSelectionStarted(MailFolderModel folder, Task completion)
+    {
+        // Navigation can supersede a previous load. Finish its indicator without cancelling work here.
+        _folderIndicatorLifetime?.TrySetResult();
+        _folderIndicatorLifetime = null;
+        if (!IsVisible) return; // Initial loading already has the startup splash.
+        var lifetime = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _folderIndicatorLifetime = lifetime;
+        try
+        {
+            await RunWithDelayedIndicatorAsync($"Opening {folder.DisplayName}…",
+                async () => { await Task.WhenAny(completion, lifetime.Task); },
+                () => _vm.StatusText, activate: false);
+        }
+        catch (Exception ex) { LogService.Log("Folder loading indicator", ex); }
+        finally
+        {
+            if (ReferenceEquals(_folderIndicatorLifetime, lifetime)) _folderIndicatorLifetime = null;
+        }
+    }
+
+    private async Task RunWithDelayedIndicatorAsync(string title, Func<Task> operation, Func<string>? statusProvider = null, bool activate = true)
     {
         var work = operation();
         var delay = Task.Delay(TimeSpan.FromSeconds(2));
@@ -8677,7 +8771,8 @@ public partial class MainWindow : Window
             return;
         }
 
-        var indicator = new SlowOperationWindow(title, statusProvider ?? (() => _vm.StatusText)) { Owner = this };
+        if (work.IsCompleted || !IsVisible) { await work; return; }
+        var indicator = new SlowOperationWindow(title, statusProvider ?? (() => _vm.StatusText)) { Owner = this, ShowActivated = activate };
         indicator.Show();
         try { await work; }
         finally { indicator.Close(); }

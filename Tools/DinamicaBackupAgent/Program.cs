@@ -83,7 +83,13 @@ public static class Program
         // A local scheduler lease prevents overlapping invocations before a runner acquires its lease.
         using var scheduleLease = new FileStream(Path.Combine(Path.GetDirectoryName(path)!, ".backup-schedule.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
         // Explicit requests are independent of schedule enablement/occurrence and consume once.
-        if (await ManualWorker.ProcessAsync(job, path, ct)) return 0;
+        if (await ManualWorker.ProcessAsync(job, path, ct))
+        {
+            var manualResult = new ManualCommands(path, job.Id).ReadStatus()?.Result;
+            if (manualResult != null && StartupCancellation.WasRequested(job.ProfileDirectory, manualResult.Id))
+                ConsumeDueAfterCancellation(job, path, ReadScheduleState(path));
+            return 0;
+        }
         SafePaths.Validate(job);
         var state = ReadScheduleState(path);
         var status = 0;
@@ -111,6 +117,12 @@ public static class Program
             runner.RequestInteractiveWatcher = !interactive;
             var result = await runner.RunAsync(pair.Item1, ct);
             state[pair.Item1] = occurrence.Value; JsonFiles.Write(ScheduleStatePath(path), state);
+            if (result.Status == "Cancelled" || StartupCancellation.WasRequested(job.ProfileDirectory, result.Id))
+            {
+                // Consume already-due work so a five-minute scheduler tick cannot close EQM again.
+                ConsumeDueAfterCancellation(job, path, state);
+                return 0;
+            }
             if (DateTime.TryParse(result.CompletedMaintenanceOccurrence, out var maintenance))
             {
                 state["Maintenance"] = maintenance; JsonFiles.Write(ScheduleStatePath(path), state);
@@ -119,6 +131,22 @@ public static class Program
             if (result.Status == "Failed") status = 1;
         }
         return status;
+    }
+    internal static void ConsumeDueAfterCancellation(BackupJob job, string path, Dictionary<string, DateTime> state)
+    {
+        foreach (var item in new[] { ("Backup", job.BackupSchedule), ("Maintenance", job.MaintenanceSchedule), ("Test", job.TestSchedule) })
+        {
+            var due = item.Item2.LatestOccurrence(DateTime.Now);
+            if (due.HasValue && (!state.TryGetValue(item.Item1, out var prior) || prior < due.Value))
+            {
+                state[item.Item1] = due.Value;
+                // Local receipt: cancellation must not wait for the NAS just to record skipped work.
+                var skipped = new RunResult { Kind = item.Item1, Status = "Cancelled", FinishedUtc = DateTimeOffset.UtcNow,
+                    Detail = "Due operation skipped after safe cancellation to allow application startup." };
+                JsonFiles.Write(Path.Combine(job.ProfileDirectory, ".backup-history", job.Id, "run-" + skipped.Id + ".json"), skipped);
+            }
+        }
+        JsonFiles.Write(ScheduleStatePath(path), state);
     }
     private static void SaveMissed(BackupJob job, RunResult run)
     {

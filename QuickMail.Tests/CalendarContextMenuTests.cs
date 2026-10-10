@@ -153,4 +153,18 @@ public class CalendarContextMenuTests : WpfTestBase
         Assert.Contains("data-action=\"duplicate\">Duplicate appointment", html);
         Assert.Contains("action==='duplicate'||action==='share'", html);
     }
+
+    [Fact]
+    public void FullCalendarFinishedEvents_AreVisualOnlyAndRecheckedWithoutReload()
+    {
+        var builder = typeof(MainWindow).GetMethod("BuildFullCalendarHtml", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(builder);
+        var html = Assert.IsType<string>(builder.Invoke(null, [string.Empty]));
+        Assert.Contains(".eqm-event-finished{opacity:.48;filter:saturate(.55)}", html);
+        Assert.Contains("view==='dayGridMonth'&&Number.isFinite(end)&&end<=now", html);
+        Assert.Contains("setInterval(updateFinishedEvents,60000)", html);
+        Assert.Contains("eventClick:i=>chrome.webview.postMessage", html);
+        Assert.Contains("i.el.addEventListener('dblclick'", html);
+        Assert.DoesNotContain("pointer-events:none", html);
+    }
 }

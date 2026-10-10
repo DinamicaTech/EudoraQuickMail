@@ -59,6 +59,10 @@ public class UpdateCheckService : IUpdateCheckService, IDisposable
 
     public bool SelfUpdatePending => _pendingUpdate is not null || _portableRelease is not null;
 
+    public string? DisabledReason => File.Exists(Path.Combine(AppContext.BaseDirectory, StandaloneMarkerFile))
+        ? $"Updates are disabled by {Path.Combine(AppContext.BaseDirectory, StandaloneMarkerFile)}. This marker is used for isolated test installations. Remove it only if this installation should receive official releases, then check again."
+        : null;
+
     public async Task PrepareUpdateAsync(IProgress<string>? progress, CancellationToken cancellationToken = default)
     {
         if (_portableRelease is { } portable)
@@ -91,8 +95,8 @@ public class UpdateCheckService : IUpdateCheckService, IDisposable
         // Local test installers deliberately have no release feed. A marker beside the executable
         // keeps them completely detached from both Velopack's GitHub source and the portable API
         // fallback, while production packages (which omit it) retain normal update behaviour.
-        if (File.Exists(Path.Combine(AppContext.BaseDirectory, StandaloneMarkerFile)))
-            return null;
+        if (DisabledReason is { } reason)
+            throw new InvalidOperationException(reason);
 
         // Velopack path only applies when running from a Velopack install
         // (%LocalAppData%\QuickMail\current\). Portable copies use the official complete ZIP.
@@ -218,7 +222,7 @@ public class UpdateCheckService : IUpdateCheckService, IDisposable
         catch (Exception ex)
         {
             LogService.Debug($"UpdateCheckService: Velopack check failed: {ex.Message}");
-            return null;
+            throw;
         }
     }
 
@@ -233,14 +237,14 @@ public class UpdateCheckService : IUpdateCheckService, IDisposable
 
             if (!root.TryGetProperty("tag_name", out var tagEl) ||
                 !root.TryGetProperty("html_url", out var urlEl))
-                return null;
+                throw new InvalidDataException("The release response is missing its version or URL.");
 
             var tag = tagEl.GetString()?.TrimStart('v') ?? "";
             var url = urlEl.GetString() ?? "";
 
             if (!Version.TryParse(tag, out var remote) ||
                 !Version.TryParse(_currentVersion, out var current))
-                return null;
+                throw new InvalidDataException("The release version could not be compared with the running version.");
 
             if (remote <= current) return null;
             if (_portableRelease?.Version != tag) _portableWork = null;
@@ -251,7 +255,7 @@ public class UpdateCheckService : IUpdateCheckService, IDisposable
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException or OperationCanceledException or ObjectDisposedException)
         {
             LogService.Debug($"UpdateCheckService: {ex.Message}");
-            return null;
+            throw;
         }
     }
 
