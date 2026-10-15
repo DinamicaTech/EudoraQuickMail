@@ -243,7 +243,9 @@ sealed class StubLocalStoreService : ILocalStoreService
     /// <summary>When set, <see cref="LoadDetailAsync"/> returns this seeded detail (tests use it to
     /// stand in for a cached invite email); otherwise it returns null like the real cache-miss path.</summary>
     public MailMessageDetail? SeededDetail { get; set; }
-    public Task<MailMessageDetail?> LoadDetailAsync(Guid accountId, string folderName, string messageId) => Task.FromResult(SeededDetail);
+    public Exception? LoadDetailFailure { get; set; }
+    public Task<MailMessageDetail?> LoadDetailAsync(Guid accountId, string folderName, string messageId) => LoadDetailFailure == null
+        ? Task.FromResult(SeededDetail) : Task.FromException<MailMessageDetail?>(LoadDetailFailure);
     public Task<string> GetMaxMessageKeyAsync(Guid accountId, string folderName) => Task.FromResult("0");
     public Task<HashSet<string>> GetAllMessageIdsAsync(Guid accountId, string folderName) => Task.FromResult(new HashSet<string>());
     public Task<Dictionary<string, bool>> LoadFolderReadStatesAsync(Guid accountId, string folderName) => Task.FromResult(new Dictionary<string, bool>());

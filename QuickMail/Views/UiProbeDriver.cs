@@ -109,8 +109,26 @@ internal sealed class UiProbeDriver
                 return await CaptureSettledAsync(_window, path);
 
             case "compose":
-                return await CaptureChildWindowAsync(() => ExecuteCommand("mail.new"),
-                    w => w is ComposeWindow, path);
+                ExecuteCommand("mail.new");
+                var composeDeadline = DateTime.UtcNow + SurfaceTimeout;
+                while (DateTime.UtcNow < composeDeadline)
+                {
+                    await IdleAsync();
+                    if (_vm.IsComposeTabActive)
+                    {
+                        await Task.Delay(1000);
+                        return await CaptureSettledAsync(_window, path);
+                    }
+                    var compose = Application.Current.Windows.OfType<ComposeWindow>().FirstOrDefault(w => w.IsVisible);
+                    if (compose != null)
+                    {
+                        var captured = await CaptureSettledAsync(compose, path);
+                        compose.Close();
+                        return captured;
+                    }
+                    await Task.Delay(100);
+                }
+                return false;
 
             case "theme-manager":
                 return await CaptureChildWindowAsync(() => ExecuteCommand("theme.manager.open"),
@@ -123,6 +141,20 @@ internal sealed class UiProbeDriver
             case "rules":
                 return await CaptureChildWindowAsync(() => ExecuteCommand("mail.rules"),
                     w => w is RulesManagerWindow or UnifiedRulesWindow, path);
+
+            case "message-activity":
+                await _window.OpenMessageForProbeAsync(UiProbeFixture.AccountId, UiProbeFixture.InboxFolder, UiProbeFixture.HtmlMessageId);
+                return await CaptureChildWindowAsync(() => ExecuteCommand("mail.messageActivity"),
+                    w => w is MessageActivityWindow, path);
+
+            case "attachment-explorer":
+                return await CaptureChildWindowAsync(() => ExecuteCommand("mail.attachmentExplorer"),
+                    w => w is AttachmentBrowserWindow, path);
+
+            case "rule-conflicts":
+                await _window.OpenMessageForProbeAsync(UiProbeFixture.AccountId, UiProbeFixture.InboxFolder, UiProbeFixture.HtmlMessageId);
+                return await CaptureChildWindowAsync(() => ExecuteCommand("mail.analyzeRuleConflicts"),
+                    w => w is MessageActivityWindow, path);
 
             case "saved-views":
                 return await CaptureChildWindowAsync(() => _vm.ManageViewsCommand.Execute(null),

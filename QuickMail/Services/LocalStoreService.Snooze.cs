@@ -18,7 +18,7 @@ public partial class LocalStoreService
         command.CommandText = """
             SELECT unique_id,account_id,folder_name,internet_message_id,from_disp,to_addr,
                    subject,date_ticks,is_read,preview_text,is_replied,is_forwarded,
-                   has_attachments,is_mailing_list,flag_id,message_direction
+                   has_attachments,is_mailing_list,flag_id,message_direction,notes
             FROM MessageSummary
             WHERE account_id=$account AND (
                 (folder_name=$folder AND unique_id=$id)
@@ -65,6 +65,9 @@ public partial class LocalStoreService
         }
         await RefreshSnoozeCountsAsync(connection, transaction, ct);
         await transaction.CommitAsync(ct);
+        foreach (var message in messages)
+            await RecordMessageActivityAsync(new MailMessageSummary { AccountId = message.AccountId,
+                FolderName = message.FolderName, MessageId = message.MessageId }, "Snoozed", $"Wake at {wakeAtUtc:O}", ct);
     }
 
     public async Task<IReadOnlyList<MailMessageSummary>> LoadSnoozedMessagesAsync(
@@ -78,7 +81,7 @@ public partial class LocalStoreService
         command.CommandText = $"""
             SELECT s.unique_id,s.account_id,s.folder_name,s.internet_message_id,s.from_disp,s.to_addr,
                    s.subject,z.wake_ticks,s.is_read,s.preview_text,s.is_replied,s.is_forwarded,
-                   s.has_attachments,s.is_mailing_list,s.flag_id,s.message_direction
+                   s.has_attachments,s.is_mailing_list,s.flag_id,s.message_direction,s.notes
             FROM MessageSummary s JOIN SnoozedMessage z
               ON z.account_id=s.account_id AND z.folder_name=s.folder_name AND z.unique_id=s.unique_id
             WHERE z.wake_ticks>$now{accountFilter}
@@ -108,7 +111,7 @@ public partial class LocalStoreService
             query.CommandText = """
                 SELECT s.unique_id,s.account_id,s.folder_name,s.internet_message_id,s.from_disp,s.to_addr,
                        s.subject,s.date_ticks,s.is_read,s.preview_text,s.is_replied,s.is_forwarded,
-                       s.has_attachments,s.is_mailing_list,s.flag_id,s.message_direction
+                       s.has_attachments,s.is_mailing_list,s.flag_id,s.message_direction,s.notes
                 FROM MessageSummary s JOIN SnoozedMessage z
                   ON z.account_id=s.account_id AND z.folder_name=s.folder_name AND z.unique_id=s.unique_id
                 WHERE z.wake_ticks <= $now;
@@ -132,7 +135,11 @@ public partial class LocalStoreService
         }
         await RefreshSnoozeCountsAsync(connection, transaction, ct);
         await transaction.CommitAsync(ct);
-        foreach (var message in messages) message.IsRead = false;
+        foreach (var message in messages)
+        {
+            message.IsRead = false;
+            await RecordMessageActivityAsync(message, "Snooze ended", "Returned to inbox management", ct);
+        }
         return messages;
     }
 

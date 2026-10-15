@@ -1561,6 +1561,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
         MessageSort.ToAscending => LocalSearchSort.ToAscending,
         MessageSort.ToDescending => LocalSearchSort.ToDescending,
         MessageSort.AlphaAscending => LocalSearchSort.SubjectAscending,
+        MessageSort.NotesAscending => LocalSearchSort.NotesAscending,
+        MessageSort.NotesDescending => LocalSearchSort.NotesDescending,
         MessageSort.AlphaDescending => LocalSearchSort.SubjectDescending,
         MessageSort.ReadStateAscending => LocalSearchSort.ReadAscending,
         MessageSort.ReadStateDescending => LocalSearchSort.ReadDescending,
@@ -5601,6 +5603,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 SortCanonicalFolderChildren(canonicalRoot);
             foreach (var n in FlattenAllNodes(roots))
                 if (expandedKeys.Contains(NodeKey(n))) n.IsExpanded = true;
+            AddFavoriteNodes(roots);
             FolderTree = new ObservableCollection<FolderTreeNode>(roots);
             MarkDefaultCalendarNodes();
             return;
@@ -5693,6 +5696,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             if (expandedKeys.Contains(NodeKey(n)))
                 n.IsExpanded = true;
 
+        AddFavoriteNodes(roots);
         FolderTree = new ObservableCollection<FolderTreeNode>(roots);
         // Fresh node objects start unmarked; restore the default calendar's marker on the rebuild.
         MarkDefaultCalendarNodes();
@@ -6458,9 +6462,20 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private void SchedulePrefetch(List<MailMessageSummary> targets, string reason)
     {
+        // POP and imported mail already have their authoritative bodies locally. Scheduling
+        // cache probes for them adds no information and leaves unnecessary database readers
+        // racing shutdown after a local-folder refresh. Snapshot account state on the UI thread.
+        var localAccounts = Accounts.Where(account => account.BackendKind is BackendKind.Pop3Smtp or BackendKind.LocalArchive)
+            .Select(account => account.Id).ToHashSet();
+        targets = targets.Where(message => !localAccounts.Contains(message.AccountId)).ToList();
+        if (targets.Count == 0)
+        {
+            DrainCts(ref _prefetchCts);
+            return;
+        }
         ReplaceCts(ref _prefetchCts, out var ct);
-
-        _ = Task.Run(() => RunPrefetchAsync(targets, reason, ct));
+        if (ct.IsCancellationRequested) return;
+        _ = Task.Run(() => RunPrefetchAsync(targets, reason, ct), ct);
     }
 
     private async Task RunPrefetchAsync(List<MailMessageSummary> targets, string reason, CancellationToken ct)
@@ -8703,6 +8718,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
         MessageSort.FlaggedFirst => messages.OrderBy(m => m.IsFlagged ? 0 : 1).ThenByDescending(m => m.Date),
         MessageSort.DateAscending => messages.OrderBy(m => m.Date),
         MessageSort.AlphaAscending => messages.OrderBy(m => m.Subject, StringComparer.OrdinalIgnoreCase),
+        MessageSort.NotesAscending => messages.OrderBy(m => m.Notes, StringComparer.OrdinalIgnoreCase),
+        MessageSort.NotesDescending => messages.OrderByDescending(m => m.Notes, StringComparer.OrdinalIgnoreCase),
         MessageSort.AlphaDescending => messages.OrderByDescending(m => m.Subject, StringComparer.OrdinalIgnoreCase),
         MessageSort.FromAscending => messages.OrderBy(m => m.From, StringComparer.OrdinalIgnoreCase),
         MessageSort.FromDescending => messages.OrderByDescending(m => m.From, StringComparer.OrdinalIgnoreCase),
@@ -9921,7 +9938,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
         ComposeRequested?.Invoke(new ComposeModel
         {
             Kind = ComposeKind.EditScheduled, AccountId = source.AccountId,
+            OutgoingMessageId = source.OutgoingMessageId, FollowUpDays = source.FollowUpDays, FollowUp = source.FollowUp,
+            Repetition = source.Repetition, RuleForwardKey = source.RuleForwardKey,
             To = source.To, Cc = source.Cc, Bcc = source.Bcc, Subject = source.Subject,
+            Notes = source.Notes,
             Body = source.Body, Mode = source.Mode, HtmlBody = source.HtmlBody,
             SpellLanguage = source.SpellLanguage, Attachments = source.Attachments,
             InReplyToMessageId = source.InReplyToMessageId,
@@ -9953,6 +9973,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
             var model = new ComposeModel
             {
                 Kind            = ComposeKind.EditDraft,
+                FollowUpDays    = FollowUpReminder.ReadDraftDays(detail.RawHeaders),
+                FollowUp        = FollowUpReminder.ReadDraftTracking(detail.RawHeaders),
+                Repetition      = RepeatedSending.ReadHeaders(detail.RawHeaders),
+                OutgoingMessageId = string.IsNullOrWhiteSpace(summary.InternetMessageId)
+                    ? MimeKit.Utils.MimeUtils.GenerateMessageId() : summary.InternetMessageId,
                 AccountId       = summary.AccountId,
                 To              = detail.To,
                 Cc              = detail.Cc,
@@ -9960,6 +9985,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 Body            = detail.PlainTextBody,
                 Mode            = detail.DraftComposeMode,
                 SpellLanguage   = detail.DraftSpellLanguage,
+                Notes = detail.Notes,
                 HtmlBody        = detail.DraftComposeMode == ComposeMode.Html ? detail.HtmlBody : null,
                 DraftMessageId  = summary.MessageId,
                 DraftFolderName = summary.FolderName,

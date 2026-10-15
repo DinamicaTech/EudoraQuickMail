@@ -92,6 +92,7 @@ public class ConfigModel
     /// An unresolvable value falls back to All Mail; it is never an error.
     /// </summary>
     public string StartupFolder { get; set; } = string.Empty;
+    public List<string> FavoriteFolderKeys { get; set; } = [];
 
     /// <summary>
     /// Owning account for <see cref="StartupFolder"/> when it names a real folder. Empty means

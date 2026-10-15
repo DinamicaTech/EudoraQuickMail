@@ -29,6 +29,7 @@ public class SmtpService : ISendMailService
 
     public async Task SendAsync(ComposeModel compose, AccountModel account, string? password, CancellationToken ct = default)
     {
+        OutgoingAttachmentValidator.ValidateAndLoad(compose);
         var details = BuildPerformanceDetails(compose, account);
         var totalStarted = Stopwatch.GetTimestamp();
         var stage = "dispatch";

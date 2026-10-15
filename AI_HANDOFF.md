@@ -979,3 +979,156 @@ not deleted automatically. Removing it externally allows the next manual check w
 The existing installation's marker has not been removed by this change.
 Regression coverage: UpdateHelpTests (manual retry/dialog, disabled marker, failure after
 a prior available update, concurrent checks).
+
+## 36. Favorites, send attachment checks and conditional follow-ups (0.8.84)
+
+Folder context menus offer Add to favorites / Remove from favorites. Favorites are shortcuts
+at the top of the tree, persisted as stable node keys in config.ini (FavoriteFolderKeys JSON).
+They reference the original folder model: no message copies or separate mailboxes are created.
+Missing targets are hidden. Dragging a shortcut cannot move the underlying folder; dropping
+messages onto it still targets that folder. Noncanonical path-based keys may need re-adding
+after a rename. Canonical folder IDs survive renames/moves.
+
+Compose, scheduled dispatch, SMTP and Graph validate all attachments before sending. Retained
+bytes remain valid even if the original file disappeared. Otherwise load the absolute source
+path; missing/unreadable/unhydrated resources and unresolved HTML cid references stop sending
+with names/paths and restore/reattach/remove instructions. A queued item remains visible with
+an error and automatic retries disabled, rather than silently omitting the resource.
+
+Compose offers Follow up (days), zero disabled. After successful transport acceptance, create
+one self-addressed conditional reminder in Scheduled with subject Follow up: <original subject>,
+a short excerpt and the existing quickmail original-message link. No special view is added.
+Sent-message context menu Follow up permits a custom future date/time (date only -> 09:00).
+Scheduled permits edit, reschedule and cancel as usual; draft headers preserve follow-up metadata.
+Stable outgoing Message-ID links the MIME sent to its Sent copy; deterministic queue IDs prevent
+duplicate reminder creation during accepted-transport recovery. Never schedule on send failure.
+
+A reply from any TO recipient cancels the reminder only when In-Reply-To/References contains
+the original Message-ID. Ignore self replies, automated replies and delivery reports; do not
+infer replies from matching subjects. Cached replies are checked every five minutes. Before
+sending a due reminder, synchronize the account Inbox (real POP3 reception for POP accounts),
+then fetch missing candidate headers and recheck. Network/authentication failures postpone it;
+Focus/Offline postpone until incoming checks are possible. LocalArchive cannot verify remote
+replies and therefore defers. Server-side filing into an unsynchronized non-Inbox folder and
+replies without threading headers remain detection limitations. Reminders require EQM running.
+Metadata lives in the existing scheduled-mail.json and draft headers; no DB schema migration.
+
+Regression coverage: ProductivityFollowUpTests plus full non-clipboard suite. Includes missing
+resources, exact reply matching, automatic-reply exclusion, cancellation, offline deferral,
+idempotence, metadata roundtrip and actual POP3 check failure propagation. Pkcs dependency pinned
+to Microsoft security patch 8.0.2 (CVE-2026-84008 and related advisory); no unrelated upgrades.
+
+## 37. Rule forwarding and repeated sending (2026-10-15, pending publication)
+
+RuleAction.Forward is appended to the serialized enum (existing values unchanged). Rule Manager
+offers Forward with a single ForwardTo address and requires a matching condition. The original
+account sends a normal forwarded message, including regular/inline attachments and HTML/plain
+content, through Scheduled's durable queue; originals remain in their folders. Also mark as read
+is applied only after forwarding has been queued. Test Rule previews the forward destination.
+
+Rule forwarding rejects configured own-account destinations and skips messages carrying
+X-QuickMail-Rule-Forward or Auto-Submitted: auto-replied. Outgoing rule forwards include the
+marker and Auto-Submitted: auto-generated. A durable hash ledger at scheduled-mail.json.forwarded.json
+deduplicates by rule/account/source identity/destination across restart (Internet Message-ID when
+available, otherwise folder+message ID). It records successful QUEUEING, not delivery: failures stay
+in Scheduled for retry; cancelling a queued forward does not cause future rule runs to recreate it.
+The ledger is included in native EQM backup, including preexisting job definitions. External systems
+that strip markers or alias addresses can defeat loop detection; do not configure forwarding cycles.
+
+Send repeatedly appears in the compose File menu and Send dropdown. A dialog requests start date,
+whole-day interval (1–36500), and inclusive end date. The first date must still be in the future at
+08:00 local time. Prefix Repetition: is added once. The chosen Windows time-zone ID is persisted,
+and every occurrence is calculated at local 08:00, preserving daylight-saving rules, not +24h UTC.
+Only the next occurrence is in Scheduled. After transport acceptance and ordinary Sent handling,
+the existing queue record is atomically replaced by the next future occurrence with a new MIME
+Message-ID. Recovery of accepted transport never resends the original. A failure before acceptance
+keeps the current occurrence and creates no successor. On late startup send ONE overdue copy,
+then skip missed dates on the original cadence; if already past the end, send that overdue copy
+and end. Deleting the pending Scheduled message ends the series. Editing uses Send repeatedly to
+change dates/interval/end; metadata also survives draft saves and reopen. Follow-up is independent.
+
+Locally authored attachments supplied as bytes without an existing disk path are materialized in
+Attachments/Local (inline in Attachments/Embedded) before saving authoritative local messages.
+This keeps forwarded attachments accessible in Scheduled/Out after restart; no original is deleted.
+Tests: RepeatedSendingAndForwardTests; existing rules, queue, local storage and theme suites.
+
+## 38. Private Notes, rule previews/replies, recipient privacy, export and activity (2026-10-15, pending publication)
+
+Private Notes are editable beneath Subject in compose and the existing-message editor. A sortable
+Notes column is added to the message list. Global/F3 search includes Notes; N:word restricts search
+to Notes, while the preexisting bare N status syntax is preserved. Notes are local metadata, never
+MIME headers/body or reply/forward text. Draft/queue/local Sent round-trip them. A small separate
+MessageNotesFts index avoids rebuilding the large body FTS; PrivateMessageNotes preserves annotations
+by account + RFC Message-ID across IMAP cache refresh/labels. Both are included in the DB backup.
+The compose field is explicitly unavailable without the local store (online-only mode).
+
+Rules support inclusive local ActiveUntil date and Reply template. Expired rules remain configured
+but are skipped, including explicit execution. Preview shows scanned/matching counts and examples,
+including full cached body and CC/BCC evaluation; it does not execute actions. Sending previews count
+condition matches, not guaranteed sends. Reply template uses plain text, existing template expansion,
+and original Message-ID threading, with conservative list/bounce/auto-reply/self guards. Its durable
+ledger allows one queued reply per sender/account/rule/expiration campaign. Without an expiration this
+means once until that campaign changes. Disabling a rule does not cancel an already queued message.
+
+Recipient privacy checks distinct visible TO+CC mailboxes: more than three across more than one exact
+domain offers Yes=own sender in TO and all original TO/CC in BCC (keeping existing BCC, deduplicated),
+No=retain visible addresses, Cancel=do not send. It is a heuristic, not proof that recipients are strangers.
+Normal, immediate, scheduled and repeated composition use it; a modeless repeated-date dialog is
+followed by revalidation of the final recipient/sender values. Existing unattended rules are not blocked
+by interactive prompts.
+
+Export > Selection with attachments and index creates a fresh uniquely named directory with numbered
+message subfolders, full EMLs and native attachment files plus an escaped, inert HTML index. Select all
+in Email History to export that displayed result set. It exports the selected rows only, not hidden or
+unloaded matches. Missing bodies/attachments mark that message incomplete in the index; no silent
+success and no overwriting old exports. Notes and activity are excluded. Remote reads use prefetch
+(no Seen side effect) and remain available if the local detail read fails.
+
+Activity context menu/palette reads a separate MessageActivity table. SQL triggers observe new local
+catalogue rows, movements and removals; explicit entries record rules, snooze/wake and queued transport
+acceptance. These are LOCAL observations, not server delivery guarantees. Identity is account + RFC
+Message-ID, with account/folder/local ID fallback migrated on local moves. No historical reconstruction.
+Retention: 90 days, max 100,000 events per profile; the view shows latest 500 per message. Bodies,
+attachment contents and credentials are never logged. The table is part of normal DB backup.
+
+Tests: MessageNotesTests, RecipientPrivacyTests, RuleEnhancementTests,
+MessageActivityAndBundleTests and the existing repeated-sending/rules/search/compose suites.
+
+Integration regression: POP/LocalArchive folder loads no longer launch remote-style prefetch cache
+probes for already-authoritative local bodies. This also avoids a needless SQLite reader racing
+local-folder disposal. Remote prefetch tasks receive their cancellation token before being scheduled.
+
+Verification: Release app build with warnings treated as errors passed (0 warnings/errors).
+The non-clipboard full run recorded 3,325 passes and 7 keyboard-handler test failures
+(ComposeWindowEnterSendGuardTests and TabStripNavigationTests). A separate rerun of those
+classes together with the new feature suites passed all 85 tests; the full-suite failures
+are not reproducible in that isolated run and must not be reported as a clean full-suite pass.
+TRX evidence: .codex-artifacts/test-results/message-tools-final.trx and message-tools-targeted.trx.
+Affected UI surfaces were captured in parchment/dark; final Rule Manager layout captures are in
+.codex-artifacts/message-tools-20261015-03. No standalone package or GitHub release was generated.
+
+## 39. Attachment explorer, assisted recovery and rule conflict analysis (2026-10-15, pending publication)
+
+Tools offers Attachment explorer and Analyze rule conflicts for the message selection. The latter
+is also in the message context menu; reading-pane attachments offer Locate missing attachment.
+See docs/ATTACHMENT-INVESTIGATION.md for scope, keyboard walkthrough and infrastructure details.
+The explorer queries cached attachment JSON (including legacy paths) without downloading all mail,
+supports folder/Everywhere scope, search, sortable columns, multi-save and Go to message. Results
+are bounded to the newest 10,000; embedded resources are excluded. Online-only mode explains its
+local-store requirement. No persistent DB migration is introduced.
+
+Recovery searches only a selected directory tree, skips reparse points, supports cancellation and
+reports skipped locations. Name/size evidence is labelled unverified; a known cached SHA-256 must
+match and is rechecked before repair. Explicit confirmation chooses copy into Attachments/Recovered
+or link to the candidate. Only the selected message's attachment metadata is transactionally changed;
+stale selections are rejected, content-index entries invalidated and Activity recorded. Backup files
+are never deleted, copy destinations never overwritten. Reopen already-open messages after repair.
+
+RuleService.Analysis reuses matching with cached full body/CC/BCC, filters enabled/nonexpired rules
+and account scope, follows SPAM-first order, and reports all condition matches including blocked later
+rules after move/delete/SPAM. Flags competing destinations/read state, deletion with sends and identical
+rule configurations. No actions run; missing cached matching data and simulation limitations are explicit.
+Tests: AttachmentInvestigationTests plus existing rules, activity and accessibility/theme coverage.
+Verification: 102 selected regression tests passed, including recovery through the view model and
+candidate modification after hash verification. UI probes completed 4/4 in parchment/dark; final
+captures in .codex-artifacts/attachment-investigation-ui-20261015-02. Production data was not used.

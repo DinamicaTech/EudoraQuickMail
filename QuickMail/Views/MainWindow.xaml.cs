@@ -1752,6 +1752,11 @@ public partial class MainWindow : Window
             defaultKey: Key.G, defaultModifiers: ModifierKeys.Control,
             isAvailable: () => _vm.IsCalendarView));
 
+        _registry.Register(new CommandDefinition("mail.messageActivity", "Mail", "Message activity", () => MessageContextMenu_Activity_Click(this, new RoutedEventArgs())));
+        _registry.Register(new CommandDefinition("mail.attachmentExplorer", "Mail", "Attachment explorer", () => MenuAttachmentExplorer_Click(this,new RoutedEventArgs())));
+        _registry.Register(new CommandDefinition("mail.analyzeRuleConflicts", "Mail", "Analyze rule conflicts for selected messages", () => MessageContextMenu_AnalyzeRules_Click(this,new RoutedEventArgs())));
+        _registry.Register(new CommandDefinition("mail.exportBundle", "Mail", "Export selection with attachments and index", () => MessageContextMenu_ExportBundle_Click(this, new RoutedEventArgs())));
+
         // Install the WM_CONTEXTMENU hook before WebView2 init. WebView2 initialization
         // creates an out-of-process HWND that grabs Win32 focus without WPF tracking it,
         // leaving Keyboard.FocusedElement null. If the user presses Shift+F10 before the
@@ -1817,7 +1822,6 @@ public partial class MainWindow : Window
         using (PerformanceLogService.Measure("Startup/splash: update Today agenda empty state"))
             UpdateTodayAgendaEmptyState();
         StartupReady?.Invoke();
-        _ = StartInitialAttachmentIndexIfNeededAsync();
         if (navigationConfig.ShowTodayAgenda && _vm.CalendarVm != null)
             _ = LoadTodayAgendaAtStartupAsync();
         using (PerformanceLogService.Measure("Startup/post-splash: focus active message panel"))
@@ -1835,6 +1839,10 @@ public partial class MainWindow : Window
             _ = new UiProbeDriver(this, _vm, _registry, uiProbe, capture).RunAsync();
             return;
         }
+
+        // The initial index notice is modal and the indexer mutates the fixture cache.
+        // Start it only after the unattended UI-probe path has returned.
+        _ = StartInitialAttachmentIndexIfNeededAsync();
 
         // Connect accounts and sync new mail in the background; messages trickle in via FolderSynced.
         _ = _vm.StartBackgroundSyncAsync();
@@ -2521,7 +2529,7 @@ public partial class MainWindow : Window
             && Math.Abs(current.Y - _folderDragStart.Y) < SystemParameters.MinimumVerticalDragDistance) return;
 
         _folderDragNode = null;
-        if (!IsMovableFolder(node, "move")) return;
+        if (node.IsFavorite || !IsMovableFolder(node, "move")) return;
         DragDrop.DoDragDrop(FolderList, node, DragDropEffects.Move);
     }
 
@@ -2648,6 +2656,7 @@ public partial class MainWindow : Window
             "From" => "from",
             "To" => "to",
             "Subject" => "subject",
+            "Notes" => "notes",
             "Date" => "date",
             "Time" => "time",
             "Folder" => "folder",
@@ -2680,6 +2689,7 @@ public partial class MainWindow : Window
             "From" => descending ? MessageSort.FromDescending : MessageSort.FromAscending,
             "To" => descending ? MessageSort.ToDescending : MessageSort.ToAscending,
             "Subject" => descending ? MessageSort.AlphaDescending : MessageSort.AlphaAscending,
+            "Notes" => descending ? MessageSort.NotesDescending : MessageSort.NotesAscending,
             "Status" => descending ? MessageSort.StatusDescending : MessageSort.StatusAscending,
             "Direction" => descending ? MessageSort.DirectionDescending : MessageSort.DirectionAscending,
             "Attachments" => descending ? MessageSort.AttachmentsFirst : MessageSort.AttachmentsLast,
@@ -3439,6 +3449,7 @@ public partial class MainWindow : Window
         OpenComposeWindow(new ComposeModel
         {
             Kind = ComposeKind.EditStoredMessage,
+            Notes = string.IsNullOrEmpty(detail.Notes) ? summary.Notes : detail.Notes,
             AccountId = summary.AccountId,
             To = detail.To,
             Cc = detail.Cc,
@@ -7146,7 +7157,7 @@ public partial class MainWindow : Window
             throw new InvalidOperationException("Local message editing is unavailable.");
 
         await store.UpdateStoredMessageContentAsync(model.AccountId, model.StoredFolderName,
-            model.StoredMessageId, model.Subject, model.Body, model.HtmlBody, model.Mode);
+            model.StoredMessageId, model.Subject, model.Body, model.HtmlBody, model.Mode, model.Notes);
 
         var summary = _vm.Messages.FirstOrDefault(item => item.AccountId == model.AccountId
             && item.MessageId == model.StoredMessageId
@@ -7154,6 +7165,7 @@ public partial class MainWindow : Window
         if (summary is not null)
         {
             summary.Subject = model.Subject;
+            summary.Notes = model.Notes;
             summary.Preview = model.Body.Length <= 240 ? model.Body : model.Body[..240];
             System.Windows.Data.CollectionViewSource.GetDefaultView(_vm.Messages).Refresh();
         }
@@ -7162,6 +7174,7 @@ public partial class MainWindow : Window
             && detail.FolderName.Equals(model.StoredFolderName, StringComparison.OrdinalIgnoreCase))
         {
             detail.Subject = model.Subject;
+            detail.Notes = model.Notes;
             detail.PlainTextBody = model.Body;
             detail.HtmlBody = model.HtmlBody ?? string.Empty;
             await ShowMessageBodyAsync(detail);
@@ -8783,6 +8796,11 @@ public partial class MainWindow : Window
         var menu = (ContextMenu)sender;
         var node = (menu.PlacementTarget as TreeViewItem)?.DataContext as FolderTreeNode;
         var kind = node?.Folder?.Kind ?? SpecialFolderKind.None;
+        foreach (var item in menu.Items.OfType<MenuItem>().Where(i => i.Tag as string == "favorite-folder"))
+        {
+            item.IsEnabled = node?.Folder != null && !node.IsHeader && !node.IsCalendarNode;
+            item.Header = node != null && _vm.IsFavoriteFolder(node) ? "Remove from Favorites" : "Add to Favorites";
+        }
         foreach (var item in menu.Items.OfType<MenuItem>().Where(item => item.Tag is string tag &&
                      tag.StartsWith("empty-", StringComparison.Ordinal)))
             item.Visibility = (item.Tag as string, kind) switch
@@ -8793,6 +8811,11 @@ public partial class MainWindow : Window
                 ("empty-recovery", SpecialFolderKind.RecoveryDeleted) => Visibility.Visible,
                 _ => Visibility.Collapsed,
             };
+    }
+
+    private void FolderContextMenu_Favorite_Click(object sender, RoutedEventArgs e)
+    {
+        if (GetContextMenuFolderNode(sender) is { } node) _vm.ToggleFavoriteFolder(node);
     }
 
     private async void FolderContextMenu_EmptySystemFolder_Click(object sender, RoutedEventArgs e)
@@ -8866,6 +8889,38 @@ public partial class MainWindow : Window
             LogService.Log("Snooze messages", ex);
             _vm.StatusText = $"Snooze failed: {ex.Message}";
         }
+    }
+
+    private async void MessageContextMenu_FollowUp_Click(object sender, RoutedEventArgs e)
+    {
+        if (GetSelectedMessages() is not { Count: 1 } selected) return;
+        var original = selected[0];
+        var account = _vm.Accounts.FirstOrDefault(a => a.Id == original.AccountId);
+        if (account == null || !original.IsOutgoing || string.IsNullOrWhiteSpace(original.InternetMessageId))
+        {
+            MessageBox.Show(this, "Select one sent message with an Internet Message-ID so replies can be identified.", "Follow up");
+            return;
+        }
+        var queue = (Application.Current as App)?.ScheduledSender;
+        if (queue == null) return;
+        var prompt = new TextPromptWindow("Follow up", "Remind me if no TO recipient replies by (local date and time):\nDate only defaults to 09:00.",
+            DateTime.Now.AddDays(7).Date.AddHours(9).ToString("g", CultureInfo.CurrentCulture)) { Owner = this };
+        if (prompt.ShowDialog() != true) return;
+        if (!ScheduledDateParser.TryParse(prompt.Value, CultureInfo.CurrentCulture, out var when) || when <= DateTime.Now)
+        { MessageBox.Show(this, "Enter a future date and time.", "Follow up"); return; }
+        try
+        {
+            if (FollowUpReminder.Addresses(original.To).Count == 0) throw new InvalidOperationException("No TO recipients available.");
+            var model = new ComposeModel { AccountId = account.Id, OutgoingMessageId = original.InternetMessageId,
+                To = original.To, Subject = original.Subject, Body = original.Preview };
+            var reminder = FollowUpReminder.Build(model, account, original.Date);
+            var existing = (await queue.GetSnapshotAsync()).FirstOrDefault(x => x.Message.AccountId == account.Id &&
+                x.Message.FollowUp?.OriginalInternetId == original.InternetMessageId);
+            if (existing != null) await queue.ReplaceAsync(existing.Id, reminder, new DateTimeOffset(when));
+            else await queue.ScheduleAsync(reminder, new DateTimeOffset(when));
+            _vm.StatusText = $"Follow up scheduled for {when:g}. You can edit or cancel it in Scheduled.";
+        }
+        catch (Exception ex) { MessageBox.Show(this, ex.Message, "Follow up", MessageBoxButton.OK, MessageBoxImage.Warning); }
     }
 
     private async Task<int> ScheduleSnoozeRemindersAsync(
@@ -9710,32 +9765,12 @@ public partial class MainWindow : Window
                     .ToList();
             }
 
-            var matches = _ruleService.TestRule(rule, messages)
-                .OrderByDescending(message => message.Date)
-                .ToList();
-            var action = rule.Action switch
-            {
-                RuleAction.MoveToFolder => $"Would move matching messages to {rule.TargetFolder ?? "(no folder)"}" +
-                                           (rule.AlsoMarkAsRead ? " and mark them as read." : "."),
-                RuleAction.MarkAsRead => "Would mark matching messages as read.",
-                RuleAction.MarkAsUnread => "Would mark matching messages as unread.",
-                RuleAction.Delete => "Would move matching messages to Trash" +
-                                     (rule.AlsoMarkAsRead ? " after marking them as read." : "."),
-                _ => "No action."
-            };
-            var markRead = rule.Action == RuleAction.MarkAsRead || rule.AlsoMarkAsRead
-                ? matches.Count
-                : 0;
-            return new RulePreviewResult(
-                rule.Name,
-                rule.AlsoFilterOutMailbox ? $"{currentFolderName} + Out" : currentFolderName,
-                action,
-                messages.Count,
-                matches.Count,
-                matches.Count(message => message.Direction == MessageDirection.Incoming),
-                matches.Count(message => message.Direction == MessageDirection.Outgoing),
-                markRead,
-                matches.Take(20).ToList());
+            using var previewCancellation = new CancellationTokenSource(TimeSpan.FromMinutes(2));
+            var matches = _ruleService is RuleService concreteRules
+                ? await concreteRules.PreviewMatchesAsync(rule, messages, previewCancellation.Token)
+                : _ruleService.TestRule(rule, messages);
+            return RulePreviewBuilder.Build(rule, messages, matches,
+                rule.AlsoFilterOutMailbox ? $"{currentFolderName} + Out" : currentFolderName);
         }
 
         // Unowned (issue #347) so the window reads its own title, not the main window's. Modeless
@@ -9848,6 +9883,8 @@ public partial class MainWindow : Window
                 compatibilityBody: compatibilityBody,
                 foldersByAccount: _vm.CachedFolders,
                 targetFolderFilter: targetFolderFilter);
+            foreach (var replyTemplate in await _templateService.LoadAllAsync())
+                rulesVm.ReplyTemplates.Add(replyTemplate);
             if (selectRuleId is { } ruleId) rulesVm.SelectRule(ruleId);
             rulesVm.RunOnExistingRequested += RunClientRulesOnExisting;
             rulesVm.ApplyToCurrentFolderRequested += ApplySelectedRuleToCurrentFolder;

@@ -1298,6 +1298,8 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
         RecordStage("final folder additive migration");
 
         RunDataMigrations(conn);
+        InitializeMessageActivity(conn);
+        InitializeNotes(conn);
         InitializeSpamTriggers(conn);
         RecordStage("versioned data migrations", $"finalUserVersion={GetUserVersion(conn)}");
 
@@ -1744,7 +1746,7 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
         await using var conn = await OpenAsync();
         await using var cmd = conn.CreateCommand();
         cmd.CommandText =
-            "SELECT unique_id, account_id, folder_name, from_disp, to_addr, subject, date_ticks, is_read, preview_text, is_replied, is_forwarded, has_attachments, is_mailing_list, flag_id, internet_message_id, message_direction " +
+            "SELECT unique_id, account_id, folder_name, from_disp, to_addr, subject, date_ticks, is_read, preview_text, is_replied, is_forwarded, has_attachments, is_mailing_list, flag_id, internet_message_id, message_direction, notes " +
             "FROM MessageSummary ORDER BY date_ticks DESC;";
         return await ReadSummariesAsync(cmd);
     }
@@ -1754,7 +1756,7 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
         await using var conn = await OpenAsync();
         await using var cmd = conn.CreateCommand();
         cmd.CommandText =
-            "SELECT unique_id, account_id, folder_name, from_disp, to_addr, subject, date_ticks, is_read, preview_text, is_replied, is_forwarded, has_attachments, is_mailing_list, flag_id, internet_message_id, message_direction " +
+            "SELECT unique_id, account_id, folder_name, from_disp, to_addr, subject, date_ticks, is_read, preview_text, is_replied, is_forwarded, has_attachments, is_mailing_list, flag_id, internet_message_id, message_direction, notes " +
             "FROM MessageSummary WHERE account_id=$aid ORDER BY date_ticks DESC;";
         cmd.Parameters.AddWithValue("$aid", accountId.ToString());
         return await ReadSummariesAsync(cmd);
@@ -1765,7 +1767,7 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
         await using var conn = await OpenAsync();
         await using var cmd = conn.CreateCommand();
         cmd.CommandText =
-            "SELECT unique_id, account_id, folder_name, from_disp, to_addr, subject, date_ticks, is_read, preview_text, is_replied, is_forwarded, has_attachments, is_mailing_list, flag_id, internet_message_id, message_direction " +
+            "SELECT unique_id, account_id, folder_name, from_disp, to_addr, subject, date_ticks, is_read, preview_text, is_replied, is_forwarded, has_attachments, is_mailing_list, flag_id, internet_message_id, message_direction, notes " +
             "FROM MessageSummary WHERE account_id=$aid AND folder_name=$fn " +
             "AND NOT EXISTS(SELECT 1 FROM SnoozedMessage z WHERE z.account_id=MessageSummary.account_id " +
             "AND z.folder_name=MessageSummary.folder_name AND z.unique_id=MessageSummary.unique_id AND z.wake_ticks>$now) " +
@@ -2901,7 +2903,7 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
         cmd.CommandText = """
             SELECT d.to_addr, d.cc, d.bcc, d.reply_to, d.plain_body, d.html_body,
                    s.from_disp, s.subject, s.date_ticks, s.is_read, d.attachments_json, d.calendar_ics, d.raw_headers,
-                   d.draft_compose_mode, d.draft_spell_language, s.message_direction
+                   d.draft_compose_mode, d.draft_spell_language, s.message_direction, s.notes
             FROM MessageDetail d
             LEFT JOIN MessageSummary s USING (unique_id, account_id, folder_name)
             WHERE d.unique_id=$uid AND d.account_id=$aid AND d.folder_name=$fn;
@@ -2966,6 +2968,7 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
             HtmlBody      = r.GetString(5),
             From          = r.IsDBNull(6) ? string.Empty : r.GetString(6),
             Subject       = r.IsDBNull(7) ? "(no subject)" : r.GetString(7),
+            Notes = r.IsDBNull(16) ? string.Empty : r.GetString(16),
             Date          = r.IsDBNull(8) ? DateTimeOffset.MinValue : new DateTimeOffset(r.GetInt64(8), TimeSpan.Zero),
             IsRead        = !r.IsDBNull(9) && r.GetInt64(9) != 0,
             Attachments   = attachments,
@@ -3135,6 +3138,7 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
                 From        = r.GetString(3),
                 To          = r.GetString(4),
                 Subject     = r.GetString(5),
+                Notes = r.GetString(16),
                 Date        = new DateTimeOffset(r.GetInt64(6), TimeSpan.Zero),
                 IsRead      = r.GetInt64(7) != 0,
                 Preview     = r.GetString(8),
@@ -3360,7 +3364,7 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
     /// <summary>Updates the user-editable local subject/body without altering envelope data,
     /// headers, dates, attachments or embedded-resource references.</summary>
     public async Task UpdateStoredMessageContentAsync(Guid accountId, string folderName,
-        string messageId, string subject, string plainBody, string? htmlBody, ComposeMode mode)
+        string messageId, string subject, string plainBody, string? htmlBody, ComposeMode mode, string? notes = null)
     {
         var preview = string.Join(' ', (plainBody ?? string.Empty)
             .Replace('\r', ' ').Replace('\n', ' ').Split(' ', StringSplitOptions.RemoveEmptyEntries));
@@ -3371,7 +3375,7 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
         await using var cmd = conn.CreateCommand();
         cmd.Transaction = (SqliteTransaction)tx;
         cmd.CommandText = """
-            UPDATE MessageSummary SET subject=$subject, preview_text=$preview
+            UPDATE MessageSummary SET subject=$subject, preview_text=$preview, notes=COALESCE($notes,notes)
              WHERE account_id=$aid AND folder_name=$fn AND unique_id=$uid;
             UPDATE MessageDetail SET plain_body=$plain, html_body=$html, draft_compose_mode=$mode
              WHERE account_id=$aid AND folder_name=$fn AND unique_id=$uid;
@@ -3383,6 +3387,7 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
         cmd.Parameters.AddWithValue("$fn", folderName);
         cmd.Parameters.AddWithValue("$uid", messageId);
         cmd.Parameters.AddWithValue("$subject", subject ?? string.Empty);
+        cmd.Parameters.AddWithValue("$notes", (object?)notes ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$preview", preview);
         cmd.Parameters.AddWithValue("$plain", plainBody ?? string.Empty);
         cmd.Parameters.AddWithValue("$html", htmlBody ?? string.Empty);

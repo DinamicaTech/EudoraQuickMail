@@ -232,6 +232,12 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
     partial void OnCcChanged(string value)      => _isDirty = true;
     partial void OnBccChanged(string value)     => _isDirty = true;
     partial void OnSubjectChanged(string value) => _isDirty = true;
+    [ObservableProperty] private string _notes = string.Empty;
+    partial void OnNotesChanged(string value) => _isDirty = true;
+    public bool CanEditPrivateNotes => _localStore is LocalStoreService;
+    public string PrivateNotesHint => CanEditPrivateNotes
+        ? "Private local notes. Search with N:words; never sent to recipients."
+        : "Private notes require the local message store; they are unavailable in online-only mode.";
     partial void OnBodyChanged(string value)    => _isDirty = true;
     [ObservableProperty] private string _spellLanguage = string.Empty;
     partial void OnSpellLanguageChanged(string value) => _isDirty = true;
@@ -257,6 +263,11 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
 
     public void Seed(ComposeModel model)
     {
+        _outgoingMessageId = model.OutgoingMessageId;
+        _followUpTracking = model.FollowUp;
+        _repetition = model.Repetition;
+        _ruleForwardKey = model.RuleForwardKey;
+        FollowUpDays = model.FollowUpDays;
         _inReplyToMessageId = model.InReplyToMessageId;
         _replySourceAccountId = model.ReplySourceAccountId;
         _replySourceFolderName = model.ReplySourceFolderName;
@@ -277,6 +288,7 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
         Cc      = model.Cc;
         Bcc     = model.Bcc;
         Subject = model.Subject;
+        Notes = model.Notes;
         Body    = model.Body;
         SpellLanguage = model.SpellLanguage ?? string.Empty;
 
@@ -437,6 +449,7 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
 
         if (PrepareRichBodyAsync != null) await PrepareRichBodyAsync();
         var compose = BuildComposeModel(account.Id);
+        await PersistPrivateNotesAsync(compose);
         _draftMessageId = await _imap.AppendDraftAsync(account.Id, compose, _draftMessageId, combined.Token);
         _isDirty = false;
     }
@@ -451,12 +464,15 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
     // ── Auto-save ──────────────────────────────────────────────────────────────
 
     private readonly CancellationTokenSource _autoSaveCts = new();
+    private bool _disposed;
 
     /// <summary>Cancels any in-flight autosave. Called by the window on closing.</summary>
     public void CancelAutoSave() => _autoSaveCts.Cancel();
 
     public void Dispose()
     {
+        if (_disposed) return;
+        _disposed = true;
         _autoSaveCts.Cancel();
         _autoSaveCts.Dispose();
         GC.SuppressFinalize(this);
@@ -536,6 +552,8 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
 
     private async Task SendCoreAsync(bool bypassConfiguredDelay)
     {
+        if (_isSchedulingRepetition) return;
+        if (_repetition != null) { await SendRepeatedlyAsync(); return; }
         if (string.IsNullOrWhiteSpace(To))
         {
             SetStatusOutcome("Please enter at least one recipient.");
@@ -549,6 +567,7 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
             return;
         }
 
+        if (!ConfirmRecipientPrivacy()) return;
         if (!ConfirmForgottenAttachment()) return;
         WarnIfAttachmentsExceedRecommendedSize();
 
@@ -589,6 +608,9 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
             var stageStarted = Stopwatch.GetTimestamp();
             if (PrepareRichBodyAsync != null) await PrepareRichBodyAsync();
             compose = BuildComposeModel(account.Id);
+            await PersistPrivateNotesAsync(compose);
+            OutgoingAttachmentValidator.ValidateAndLoad(compose);
+            ValidateFollowUp(compose);
             PerformanceLogService.Record("Send compose: build model",
                 Stopwatch.GetElapsedTime(stageStarted), sendDetails);
 
@@ -603,6 +625,7 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
                 : Math.Clamp(_configService.Load().DelaySendingMessagesSeconds, 0, 600);
             var activity = (System.Windows.Application.Current as App)?.MailActivityPolicy;
             if (activity is { CanSend: false }) configuredDelay = null;
+            if (compose.FollowUp != null) configuredDelay = null;
             if (outgoingQueue is not null && configuredDelay != 0)
             {
                 SetProgress("Queueing message…");
@@ -641,6 +664,15 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
             stageStarted = Stopwatch.GetTimestamp();
             await _smtp.SendAsync(compose, account, password, cts.Token);
+            if (ResolveOutgoingQueue() is ScheduledSendService followUpQueue)
+            {
+                try { await followUpQueue.ScheduleFollowUpAfterSentAsync(compose, account, DateTimeOffset.UtcNow); }
+                catch (Exception ex)
+                {
+                    LogService.Log("Message sent but follow-up could not be saved", ex);
+                    ConfirmationRequested?.Invoke("Message was sent, but its follow-up could not be saved: " + ex.Message, "Follow-up unavailable");
+                }
+            }
             PerformanceLogService.Record("Send compose: transport dispatch",
                 Stopwatch.GetElapsedTime(stageStarted), sendDetails);
 
@@ -724,8 +756,11 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private async Task ScheduleSendAsync()
     {
+        if (_isSchedulingRepetition) return;
+        if (_repetition != null) { await SendRepeatedlyAsync(); return; }
         if (string.IsNullOrWhiteSpace(To)) { SetStatusOutcome("Please enter at least one recipient."); return; }
         if (SenderAccount is not { } account) { SetStatusOutcome("Please select a sender account."); return; }
+        if (!ConfirmRecipientPrivacy()) return;
         if (!ConfirmForgottenAttachment()) return;
         WarnIfAttachmentsExceedRecommendedSize();
         var requested = PromptScheduleTimeRequested?.Invoke(_scheduledAt?.LocalDateTime ?? DateTime.Now.AddMinutes(10));
@@ -746,6 +781,9 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
         {
             if (PrepareRichBodyAsync != null) await PrepareRichBodyAsync();
             compose = BuildComposeModel(account.Id);
+            await PersistPrivateNotesAsync(compose);
+            OutgoingAttachmentValidator.ValidateAndLoad(compose);
+            ValidateFollowUp(compose);
         }
         catch (Exception ex)
         {
@@ -765,6 +803,60 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
 
     private IOutgoingMailQueue? ResolveOutgoingQueue() => _outgoingQueue
         ?? (System.Windows.Application.Current as App)?.ScheduledSender;
+
+    public Func<RepeatedSendRequest?, Task<RepeatedSendRequest?>>? PromptRepetitionRequested { get; set; }
+    private bool _isSchedulingRepetition;
+    private RepeatedSendSchedule? _repetition;
+    private string? _ruleForwardKey;
+
+    [RelayCommand]
+    private async Task SendRepeatedlyAsync()
+    {
+        if (_disposed || _isSchedulingRepetition || PromptRepetitionRequested == null) return;
+        if (SenderAccount is not { } account || string.IsNullOrWhiteSpace(To))
+        { SetStatusOutcome("Select a sender account and at least one recipient."); return; }
+        if (!ConfirmForgottenAttachment()) return;
+        var suggested = _repetition is { } old
+            ? new RepeatedSendRequest(DateOnly.FromDateTime((_scheduledAt?.LocalDateTime ?? DateTime.Today.AddDays(1))), old.IntervalDays, old.EndDate) : null;
+        _isSchedulingRepetition = true;
+        try
+        {
+            var requested = await PromptRepetitionRequested(suggested);
+            if (requested == null || _disposed) return;
+            var plan = new RepeatedSendSchedule(requested.IntervalDays, requested.EndDate, TimeZoneInfo.Local.Id);
+            var when = RepeatedSending.AtEight(requested.StartDate, plan.TimeZoneId);
+            RepeatedSending.Validate(plan, when);
+            if (when <= DateTimeOffset.UtcNow) throw new ArgumentException("The first occurrence must be in the future.");
+            if (ResolveOutgoingQueue() is not { } scheduler) throw new InvalidOperationException("Scheduled sending is unavailable.");
+            if (PrepareRichBodyAsync != null) await PrepareRichBodyAsync();
+            if (_disposed) return;
+            // The date dialog is modeless: validate the current recipients and sender, not
+            // the values that were present before the user opened it.
+            if (SenderAccount is not { } currentAccount || string.IsNullOrWhiteSpace(To))
+            { SetStatusOutcome("Select a sender account and at least one recipient."); return; }
+            account = currentAccount;
+            if (!ConfirmRecipientPrivacy()) return;
+            var compose = BuildComposeModel(account.Id);
+        await PersistPrivateNotesAsync(compose);
+            compose.Repetition = plan;
+            if (!compose.Subject.StartsWith("Repetition:", StringComparison.OrdinalIgnoreCase)) compose.Subject = "Repetition: " + compose.Subject;
+            OutgoingAttachmentValidator.ValidateAndLoad(compose);
+            ValidateFollowUp(compose);
+            WarnIfAttachmentsExceedRecommendedSize();
+            if (_scheduledId is { } id) await scheduler.ReplaceAsync(id, compose, when);
+            else await scheduler.ScheduleAsync(compose, when);
+            LocalFolderChanged?.Invoke(account.Id);
+            _isSent = true;
+            SetStatusOutcome($"Repeated sending scheduled for {when.LocalDateTime:g}.");
+            CloseRequested?.Invoke();
+        }
+        catch (Exception ex)
+        {
+            SetStatusOutcome("Could not schedule repeated sending: " + ex.Message);
+            ErrorDialogRequested?.Invoke("Send repeatedly", ex.Message);
+        }
+        finally { _isSchedulingRepetition = false; }
+    }
 
     private bool ConfirmForgottenAttachment()
     {
@@ -1162,6 +1254,21 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
         Process.Start(new ProcessStartInfo(tempPath) { UseShellExecute = true });
     }
 
+    [ObservableProperty] private int _followUpDays;
+    private static void ValidateFollowUp(ComposeModel model)
+    {
+        if (model.FollowUpDays is < 0 or > 3650 || (model.FollowUpDays > 0 && FollowUpReminder.Addresses(model.To).Count == 0))
+            throw new InvalidOperationException("Follow up requires 1–3650 days and at least one TO recipient (0 disables it).");
+    }
+    partial void OnFollowUpDaysChanged(int value) => _isDirty = true;
+    public IReadOnlyList<int> FollowUpPresets { get; } = new[] { 0, 2, 7, 14, 30 };
+    private string _outgoingMessageId = MimeKit.Utils.MimeUtils.GenerateMessageId();
+    private FollowUpTracking? _followUpTracking;
+
+    private Task PersistPrivateNotesAsync(ComposeModel model) => _localStore is LocalStoreService store
+        ? store.SavePrivateNotesAsync(model.AccountId, model.OutgoingMessageId, model.Notes)
+        : Task.CompletedTask;
+
     internal ComposeModel BuildComposeModel(Guid accountId)
     {
         // Resolve the body parts for the active mode. Markdown mode sends the
@@ -1205,11 +1312,17 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
         if (!string.IsNullOrEmpty(htmlBody)) htmlBody = PersistEmbeddedHtml(htmlBody);
         var model = new ComposeModel
         {
+            OutgoingMessageId = _outgoingMessageId,
+            FollowUpDays = FollowUpDays,
+            FollowUp = _followUpTracking,
+            Repetition = _repetition,
+            RuleForwardKey = _ruleForwardKey,
             AccountId           = accountId,
             To                  = To,
             Cc                  = Cc,
             Bcc                 = Bcc,
             Subject             = Subject,
+            Notes = Notes,
             Body                = body,
             Mode                = CurrentMode,
             SpellLanguage       = SpellLanguage,
@@ -1353,6 +1466,7 @@ public partial class ComposeViewModel : ObservableObject, IDisposable
         Cc = detail.Cc,
         Bcc = detail.Bcc,
         Subject = detail.Subject,
+        Notes = detail.Notes,
         Body = string.IsNullOrEmpty(detail.PlainTextBody) && !string.IsNullOrEmpty(detail.HtmlBody)
             ? HtmlStripper.ToPlainText(detail.HtmlBody)
             : detail.PlainTextBody,

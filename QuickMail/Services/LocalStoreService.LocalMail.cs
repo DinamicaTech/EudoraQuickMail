@@ -73,6 +73,13 @@ public partial class LocalStoreService
         if (string.IsNullOrWhiteSpace(message.FolderName)) throw new ArgumentException("FolderName is required.");
         if (uidl is not null)
             await MaterializePop3ResourcesAsync(message, ct);
+        else
+        {
+            var pending = message.Attachments.Where(a => a.Content != null &&
+                (string.IsNullOrWhiteSpace(a.PartSpecifier) || !Path.IsPathFullyQualified(a.PartSpecifier) || !File.Exists(a.PartSpecifier))).ToList();
+            if (pending.Count > 0)
+                await MaterializePop3ResourcesAsync(new MailMessageDetail { Date = message.Date, Attachments = pending }, ct, "Local");
+        }
         var attachmentJson = message.Attachments.Count == 0 ? null : JsonSerializer.Serialize(
             message.Attachments.Select(a => new
             {
@@ -125,10 +132,10 @@ public partial class LocalStoreService
             summary.CommandText = """
                 INSERT INTO MessageSummary
                     (unique_id,account_id,folder_name,from_disp,to_addr,subject,date_ticks,is_read,
-                     preview_text,is_replied,is_forwarded,has_attachments,is_mailing_list,flag_id,internet_message_id,message_direction)
-                VALUES ($uid,$aid,$fn,$from,$to,$subject,$date,$read,$preview,$replied,$forwarded,$hasAttachments,$list,NULL,$imid,$direction)
+                     preview_text,is_replied,is_forwarded,has_attachments,is_mailing_list,flag_id,internet_message_id,message_direction,notes)
+                VALUES ($uid,$aid,$fn,$from,$to,$subject,$date,$read,$preview,$replied,$forwarded,$hasAttachments,$list,NULL,$imid,$direction,$notes)
                 ON CONFLICT(unique_id,account_id,folder_name) DO UPDATE SET
-                    from_disp=excluded.from_disp,to_addr=excluded.to_addr,subject=excluded.subject,
+                    from_disp=excluded.from_disp,to_addr=excluded.to_addr,subject=excluded.subject,notes=excluded.notes,
                     date_ticks=excluded.date_ticks,is_read=excluded.is_read,preview_text=excluded.preview_text,
                     has_attachments=excluded.has_attachments,
                     internet_message_id=excluded.internet_message_id,
@@ -138,6 +145,7 @@ public partial class LocalStoreService
             summary.Parameters.AddWithValue("$from", message.From ?? string.Empty);
             summary.Parameters.AddWithValue("$to", message.To ?? string.Empty);
             summary.Parameters.AddWithValue("$subject", message.Subject ?? string.Empty);
+            summary.Parameters.AddWithValue("$notes", message.Notes ?? string.Empty);
             summary.Parameters.AddWithValue("$date", message.Date.UtcTicks);
             summary.Parameters.AddWithValue("$read", message.IsRead ? 1 : 0);
             summary.Parameters.AddWithValue("$preview", message.Preview ?? string.Empty);
@@ -220,7 +228,7 @@ public partial class LocalStoreService
         await tx.CommitAsync(ct);
     }
 
-    private async Task MaterializePop3ResourcesAsync(MailMessageDetail message, CancellationToken ct)
+    private async Task MaterializePop3ResourcesAsync(MailMessageDetail message, CancellationToken ct, string attachmentCategory = "Received")
     {
         var profileDir = Path.GetDirectoryName(_dbPath)
             ?? throw new InvalidOperationException("The QuickMail data folder is not available.");
@@ -230,7 +238,7 @@ public partial class LocalStoreService
             if (attachment.Content is null)
                 throw new InvalidDataException($"POP3 resource '{attachment.FileName}' has no decoded content.");
 
-            var category = attachment.IsInline ? "Embedded" : "Received";
+            var category = attachment.IsInline ? "Embedded" : attachmentCategory;
             var year = message.Date == DateTimeOffset.MinValue ? DateTime.Now.Year : message.Date.Year;
             var directory = Path.Combine(profileDir, "Attachments", category, year.ToString());
             Directory.CreateDirectory(directory);
@@ -513,7 +521,7 @@ public partial class LocalStoreService
         var requiresDetail = terms.Any(t => t.Field is QuickSearchField.AttachmentCount
             or QuickSearchField.AttachmentName);
         var ftsJoin = requiresFts
-            ? "JOIN LocalMessageFts f ON f.account_id=s.account_id AND f.unique_id=s.unique_id AND f.folder_name=s.folder_name"
+            ? "LEFT JOIN LocalMessageFts f ON f.account_id=s.account_id AND f.unique_id=s.unique_id AND f.folder_name=s.folder_name"
             : string.Empty;
         var detailJoin = requiresDetail
             ? "LEFT JOIN MessageDetail d ON d.account_id=s.account_id AND d.unique_id=s.unique_id AND d.folder_name=s.folder_name"
@@ -532,6 +540,8 @@ public partial class LocalStoreService
             LocalSearchSort.FromDescending => "s.from_disp COLLATE NOCASE DESC",
             LocalSearchSort.ToAscending => "s.to_addr COLLATE NOCASE ASC",
             LocalSearchSort.ToDescending => "s.to_addr COLLATE NOCASE DESC",
+            LocalSearchSort.NotesAscending => "s.notes COLLATE NOCASE ASC",
+            LocalSearchSort.NotesDescending => "s.notes COLLATE NOCASE DESC",
             LocalSearchSort.SubjectAscending => "s.subject COLLATE NOCASE ASC",
             LocalSearchSort.SubjectDescending => "s.subject COLLATE NOCASE DESC",
             LocalSearchSort.ReadAscending => "s.is_read ASC, s.date_ticks DESC",
@@ -572,7 +582,7 @@ public partial class LocalStoreService
         cmd.CommandText = $"""
             SELECT s.unique_id,s.account_id,s.folder_name,s.internet_message_id,s.from_disp,s.to_addr,
                    s.subject,s.date_ticks,s.is_read,s.preview_text,s.is_replied,s.is_forwarded,
-                   s.has_attachments,s.is_mailing_list,s.flag_id,s.message_direction
+                   s.has_attachments,s.is_mailing_list,s.flag_id,s.message_direction,s.notes
             FROM MessageSummary s
             {ftsJoin}
             {detailJoin}
@@ -777,12 +787,16 @@ public partial class LocalStoreService
                 string FieldPredicate(string column, string ftsColumn) => wildcard
                     ? $"{column} LIKE {p} ESCAPE '\\' COLLATE NOCASE"
                     : $"f.rowid IN (SELECT rowid FROM LocalMessageFts WHERE LocalMessageFts MATCH '{ftsColumn}:' || {p})";
+                var notesPredicate = wildcard
+                    ? $"s.notes LIKE {p} ESCAPE '\\' COLLATE NOCASE"
+                    : $"(s.account_id,s.unique_id,s.folder_name) IN (SELECT account_id,unique_id,folder_name FROM MessageNotesFts WHERE MessageNotesFts MATCH {p})";
                 alternatives.Add(term.Field switch
                 {
                     QuickSearchField.To => FieldPredicate("f.to_addr", "to_addr"),
                     QuickSearchField.From => FieldPredicate("f.from_addr", "from_addr"),
                     QuickSearchField.Cc => FieldPredicate("f.cc_addr", "cc_addr"),
                     QuickSearchField.Subject => FieldPredicate("f.subject", "subject"),
+                    QuickSearchField.Notes => notesPredicate,
                     QuickSearchField.Body => FieldPredicate("f.body_text", "body_text"),
                     QuickSearchField.AttachmentName =>
                         $"(EXISTS(SELECT 1 FROM json_each(d.attachments_json) j WHERE json_extract(j.value,'$.FileName') LIKE {p}l ESCAPE '\\' COLLATE NOCASE) OR EXISTS(SELECT 1 FROM AttachmentContent ac WHERE ac.account_id=s.account_id AND ac.unique_id=s.unique_id AND ac.folder_name=s.folder_name AND ac.entry_path LIKE {p}l ESCAPE '\\' COLLATE NOCASE))",
@@ -795,8 +809,8 @@ public partial class LocalStoreService
                           $"WHERE ac.status='indexed' AND ac.fts_rowid IN " +
                           $"(SELECT rowid FROM AttachmentContentFts WHERE AttachmentContentFts MATCH 'content_text:' || {p})))",
                     _ => wildcard
-                        ? $"(f.from_addr LIKE {p} ESCAPE '\\' COLLATE NOCASE OR f.to_addr LIKE {p} ESCAPE '\\' COLLATE NOCASE OR f.cc_addr LIKE {p} ESCAPE '\\' COLLATE NOCASE OR f.subject LIKE {p} ESCAPE '\\' COLLATE NOCASE OR f.body_text LIKE {p} ESCAPE '\\' COLLATE NOCASE)"
-                        : $"f.rowid IN (SELECT rowid FROM LocalMessageFts WHERE LocalMessageFts MATCH {p})",
+                        ? $"(f.from_addr LIKE {p} ESCAPE '\\' COLLATE NOCASE OR f.to_addr LIKE {p} ESCAPE '\\' COLLATE NOCASE OR f.cc_addr LIKE {p} ESCAPE '\\' COLLATE NOCASE OR f.subject LIKE {p} ESCAPE '\\' COLLATE NOCASE OR f.body_text LIKE {p} ESCAPE '\\' COLLATE NOCASE OR {notesPredicate})"
+                        : $"(f.rowid IN (SELECT rowid FROM LocalMessageFts WHERE LocalMessageFts MATCH {p}) OR {notesPredicate})",
                 });
             }
             groups.Add("(" + string.Join(" OR ", alternatives) + ")");
@@ -910,6 +924,8 @@ public partial class LocalStoreService
             LocalSearchSort.FromDescending => "s.from_disp COLLATE NOCASE DESC",
             LocalSearchSort.ToAscending => "s.to_addr COLLATE NOCASE ASC",
             LocalSearchSort.ToDescending => "s.to_addr COLLATE NOCASE DESC",
+            LocalSearchSort.NotesAscending => "s.notes COLLATE NOCASE ASC",
+            LocalSearchSort.NotesDescending => "s.notes COLLATE NOCASE DESC",
             LocalSearchSort.SubjectAscending => "s.subject COLLATE NOCASE ASC",
             LocalSearchSort.SubjectDescending => "s.subject COLLATE NOCASE DESC",
             LocalSearchSort.ReadAscending => "s.is_read ASC, s.date_ticks DESC",
@@ -923,7 +939,7 @@ public partial class LocalStoreService
         cmd.CommandText = $"""
             SELECT s.unique_id,s.account_id,s.folder_name,s.internet_message_id,s.from_disp,s.to_addr,
                    s.subject,s.date_ticks,s.is_read,s.preview_text,s.is_replied,s.is_forwarded,
-                   s.has_attachments,s.is_mailing_list,s.flag_id,s.message_direction
+                   s.has_attachments,s.is_mailing_list,s.flag_id,s.message_direction,s.notes
             FROM MessageSummary s JOIN LocalMessageFts ON LocalMessageFts.account_id=s.account_id AND LocalMessageFts.unique_id=s.unique_id AND LocalMessageFts.folder_name=s.folder_name
             WHERE ({where}){scope} ORDER BY {order} LIMIT $limit OFFSET $offset;
             """;
@@ -954,6 +970,8 @@ public partial class LocalStoreService
             LocalSearchSort.FromDescending => "from_disp COLLATE NOCASE DESC",
             LocalSearchSort.ToAscending => "to_addr COLLATE NOCASE ASC",
             LocalSearchSort.ToDescending => "to_addr COLLATE NOCASE DESC",
+            LocalSearchSort.NotesAscending => "notes COLLATE NOCASE ASC",
+            LocalSearchSort.NotesDescending => "notes COLLATE NOCASE DESC",
             LocalSearchSort.SubjectAscending => "subject COLLATE NOCASE ASC",
             LocalSearchSort.SubjectDescending => "subject COLLATE NOCASE DESC",
             LocalSearchSort.ReadAscending => "is_read ASC, date_ticks DESC",
@@ -1010,7 +1028,7 @@ public partial class LocalStoreService
         cmd.CommandText = $"""
             SELECT unique_id,account_id,folder_name,internet_message_id,from_disp,to_addr,
                    subject,date_ticks,is_read,preview_text,is_replied,is_forwarded,
-                   has_attachments,is_mailing_list,flag_id,message_direction
+                   has_attachments,is_mailing_list,flag_id,message_direction,notes
             FROM MessageSummary WHERE 1=1{accountFilter}{folderFilter}{excludedFilter}{snoozeFilter}
             ORDER BY {order} LIMIT $limit OFFSET $offset;
             """;
@@ -1076,7 +1094,7 @@ public partial class LocalStoreService
     {
         MessageId = reader.GetString(0), AccountId = Guid.Parse(reader.GetString(1)), FolderName = reader.GetString(2),
         InternetMessageId = reader.GetString(3), From = reader.GetString(4), To = reader.GetString(5),
-        Subject = reader.GetString(6), Date = new DateTimeOffset(reader.GetInt64(7), TimeSpan.Zero),
+        Notes = reader.GetString(16), Subject = reader.GetString(6), Date = new DateTimeOffset(reader.GetInt64(7), TimeSpan.Zero),
         IsRead = reader.GetInt64(8) != 0, Preview = reader.GetString(9), IsReplied = reader.GetInt64(10) != 0,
         IsForwarded = reader.GetInt64(11) != 0, HasAttachments = reader.GetInt64(12) != 0,
         IsMailingList = reader.GetInt64(13) != 0, FlagId = reader.IsDBNull(14) ? null : reader.GetString(14),

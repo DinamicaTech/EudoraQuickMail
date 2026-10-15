@@ -30,6 +30,7 @@ public enum LocalSearchSort
     NewestFirst, OldestFirst, Relevance, FromAscending, FromDescending,
     SubjectAscending, SubjectDescending, ReadAscending, ReadDescending, AttachmentsFirst, AttachmentsLast
     , ToAscending, ToDescending, DirectionAscending, DirectionDescending
+    , NotesAscending, NotesDescending
 }
 
 public static class LocalMailConstants

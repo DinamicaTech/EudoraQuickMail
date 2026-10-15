@@ -10,7 +10,7 @@ using QuickMail.Models;
 
 namespace QuickMail.Services;
 
-public class RuleService : IRuleService
+public partial class RuleService : IRuleService
 {
     private const string CanonicalFolderPrefix = "\u0000LocalFolder:";
     private const string PrintableCanonicalFolderPrefix = "LocalFolder:";
@@ -20,6 +20,8 @@ public class RuleService : IRuleService
     private readonly IAccountService? _accountService;
     private List<MailRule> _cache = [];
     private bool _loaded;
+    public Func<MailRule, MailMessageSummary, CancellationToken, Task>? ForwardMessageAsync { get; set; }
+    public Func<MailRule, MailMessageSummary, CancellationToken, Task>? ReplyTemplateAsync { get; set; }
 
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
 
@@ -110,7 +112,7 @@ public class RuleService : IRuleService
         r.UseToCondition, r.ToContains, r.AlsoCcBcc,
         r.UseSubjectCondition, r.SubjectContains,
         r.UseBodyCondition, r.BodyContains,
-        r.MustHaveAttachments, r.Action, r.AlsoMarkAsRead, r.TargetFolder);
+        r.MustHaveAttachments, r.Action, r.AlsoMarkAsRead, r.TargetFolder, r.ForwardTo, r.ReplyTemplateId, r.ActiveUntil);
 
     public void SaveRules(List<MailRule> rules)
     {
@@ -197,7 +199,7 @@ public class RuleService : IRuleService
         var perf = $"account={accountId}; messages={incoming.Count}; automaticOnly={automaticOnly}";
         PerformanceLogService.Marker("Rules: apply batch BEGIN", perf);
         var rules = LoadRules();
-        var enabledRules = rules.Where(r => r.IsEnabled && (!automaticOnly || r.ApplyAutomatically))
+        var enabledRules = rules.Where(r => r.IsEnabled && !r.IsExpired && (!automaticOnly || r.ApplyAutomatically))
             .OrderByDescending(r => r.IsSpamFilter).ToList();
         // Automatic rules are an incoming-mail pipeline. Keep this guard here as well as at the
         // sync callers so a future caller cannot accidentally apply an automatic move/delete rule
@@ -290,7 +292,7 @@ public class RuleService : IRuleService
 
     public List<MailMessageSummary> TestRule(MailRule rule, IEnumerable<MailMessageSummary> messages)
     {
-        return messages.Where(m => MatchesRule(rule, m)).ToList();
+        return messages.Where(m => IsMatch(rule, m)).ToList();
     }
 
     public bool IsMatch(MailRule rule, MailMessageSummary message, string? completeBody = null) =>
@@ -352,6 +354,8 @@ public class RuleService : IRuleService
     private static bool MatchesRule(MailRule rule, MailMessageSummary msg, string? completeBody = null,
         string? storedCc = null, string? storedBcc = null)
     {
+        if (rule.IsExpired) return false;
+        if (rule.Action == RuleAction.ReplyTemplate && msg.Direction == MessageDirection.Outgoing) return false;
         if (rule.IsSpamFilter) return SpamPolicy.Matches(rule, msg);
         var fromCandidate = msg.Direction == MessageDirection.Outgoing ? msg.To : msg.From;
         if (rule.UseFromCondition
@@ -382,6 +386,19 @@ public class RuleService : IRuleService
             return false;
 
         return true;
+    }
+
+    public async Task<List<MailMessageSummary>> PreviewMatchesAsync(MailRule rule,
+        List<MailMessageSummary> messages, CancellationToken ct)
+    {
+        var candidates = messages.Where(m => !rule.AccountId.HasValue || rule.AccountId == m.AccountId).ToList();
+        var needsDetails = rule.UseBodyCondition || (rule.UseToCondition && rule.AlsoCcBcc);
+        var data = needsDetails ? await LoadRuleMatchDataAsync(_store, candidates, ct) : [];
+        return candidates.Where(m =>
+        {
+            data.TryGetValue((m.AccountId, m.FolderName, m.MessageId), out var detail);
+            return MatchesRule(rule, m, detail?.Body, detail?.Cc, detail?.Bcc);
+        }).ToList();
     }
 
     private static async Task<Dictionary<(Guid AccountId, string FolderName, string MessageId), RuleMatchData>>
@@ -431,11 +448,21 @@ public class RuleService : IRuleService
             await MoveToFolderAsync(matched, junk.FullName, ct);
             return;
         }
-        if (rule.AlsoMarkAsRead && rule.Action != RuleAction.MarkAsRead)
+        if (rule.AlsoMarkAsRead && rule.Action is not (RuleAction.MarkAsRead or RuleAction.Forward or RuleAction.ReplyTemplate))
             await FilterOperationTrace.RunAsync("Rules: mark as read", $"account={accountId}; messages={matched.Count}",
                 $"Marking {matched.Count:N0} message(s) as read…", () => MarkAsReadAsync(matched, ct));
         switch (rule.Action)
         {
+            case RuleAction.ReplyTemplate:
+                if (ReplyTemplateAsync == null) throw new InvalidOperationException("Template replies are not available.");
+                foreach (var message in matched) await ReplyTemplateAsync(rule, message, ct);
+                if (rule.AlsoMarkAsRead) await MarkAsReadAsync(matched, ct);
+                break;
+            case RuleAction.Forward:
+                if (ForwardMessageAsync == null) throw new InvalidOperationException("Forwarding is not available.");
+                foreach (var message in matched) await ForwardMessageAsync(rule, message, ct);
+                if (rule.AlsoMarkAsRead) await MarkAsReadAsync(matched, ct);
+                break;
             case RuleAction.MarkAsRead:
                 await MarkAsReadAsync(matched, ct);
                 break;
@@ -446,13 +473,25 @@ public class RuleService : IRuleService
 
             case RuleAction.MoveToFolder:
                 if (string.IsNullOrEmpty(rule.TargetFolder)) break;
-                await MoveToFolderAsync(matched, rule.TargetFolder, ct);
+                await MoveToFolderAsync(matched, rule.TargetFolder, ct, rule);
                 break;
 
             case RuleAction.Delete:
+                if (_store is LocalStoreService deleteActivityStore)
+                    foreach (var message in matched)
+                        await deleteActivityStore.RecordMessageActivityAsync(message, "Rule started", $"{rule.Name}: move to Trash requested", ct);
                 await DeleteAsync(matched, ct);
                 break;
         }
+        if (rule.Action is not (RuleAction.MoveToFolder or RuleAction.Delete) && _store is LocalStoreService activityStore)
+            foreach (var message in matched)
+                await activityStore.RecordMessageActivityAsync(message, "Rule",
+                    $"{rule.Name}: {rule.Action}" + (rule.Action switch
+                    {
+                        RuleAction.Forward => $" → {rule.ForwardTo}; processed with duplicate/loop protection (not delivery confirmation)",
+                        RuleAction.ReplyTemplate => "; processed with duplicate/automatic-reply protection (not delivery confirmation)",
+                        _ => ""
+                    }), ct);
     }
 
     private async Task MarkAsReadAsync(List<MailMessageSummary> messages, CancellationToken ct)
@@ -498,7 +537,7 @@ public class RuleService : IRuleService
     }
 
     private async Task MoveToFolderAsync(
-        List<MailMessageSummary> messages, string targetFolder, CancellationToken ct)
+        List<MailMessageSummary> messages, string targetFolder, CancellationToken ct, MailRule? appliedRule = null)
     {
         // Group messages by (AccountId, FolderName) so we issue one MOVE per source folder.
         var groups = messages.GroupBy(m => (m.AccountId, m.FolderName));
@@ -531,6 +570,13 @@ public class RuleService : IRuleService
                     await mailboxStore.MoveLocalMessagesAsync(
                         group.Key.AccountId, group.Key.FolderName, physicalTarget, uids, ct);
                 }
+                if (appliedRule != null && _store is LocalStoreService activityStore)
+                    foreach (var message in group)
+                        await activityStore.RecordMessageActivityAsync(new MailMessageSummary
+                        {
+                            AccountId = message.AccountId, FolderName = physicalTarget,
+                            MessageId = message.MessageId, InternetMessageId = message.InternetMessageId,
+                        }, "Rule", $"{appliedRule.Name}: moved from {group.Key.FolderName} to {physicalTarget}", ct);
             }
             catch (OperationCanceledException) { throw; }
             catch (Exception ex)
@@ -609,7 +655,7 @@ public class RuleService : IRuleService
         CancellationToken ct)
     {
         var rules = LoadRules();
-        var enabledRules = rules.Where(r => r.IsEnabled).OrderByDescending(r => r.IsSpamFilter).ToList();
+        var enabledRules = rules.Where(r => r.IsEnabled && !r.IsExpired).OrderByDescending(r => r.IsSpamFilter).ToList();
         if (enabledRules.Count == 0) return [];
 
         var removedMessages = new List<MailMessageSummary>();

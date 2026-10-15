@@ -49,6 +49,7 @@ public sealed class BackupEngine(BackupJob job, IProgress<ProgressInfo>? progres
             {
                 foreach (var relative in job.ProfileFiles.Prepend(job.DatabaseName)
                     .Concat(legacy is null ? [] : ["eudora-import-settings.json"])
+                    .Concat(job.ApplicationType.Equals("EQM", StringComparison.OrdinalIgnoreCase) ? ["scheduled-mail.json.forwarded.json"] : Array.Empty<string>())
                     .Distinct(StringComparer.OrdinalIgnoreCase))
                 {
                     ct.ThrowIfCancellationRequested();

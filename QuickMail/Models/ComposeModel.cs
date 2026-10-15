@@ -27,6 +27,12 @@ public class ComposeModel
     public string Cc { get; set; } = string.Empty;
     public string Bcc { get; set; } = string.Empty;
     public string Subject { get; set; } = string.Empty;
+    public string Notes { get; set; } = string.Empty;
+    public string OutgoingMessageId { get; set; } = MimeKit.Utils.MimeUtils.GenerateMessageId();
+    public int FollowUpDays { get; set; }
+    public FollowUpTracking? FollowUp { get; set; }
+    public RepeatedSendSchedule? Repetition { get; set; }
+    public string? RuleForwardKey { get; set; }
     public string Body { get; set; } = string.Empty;
 
     /// <summary>The editing mode this message was composed in.</summary>
@@ -67,3 +73,5 @@ public class ComposeModel
 
     public List<AttachmentModel> Attachments { get; set; } = [];
 }
+
+public sealed record FollowUpTracking(string OriginalInternetId, string Recipients, DateTimeOffset SentAtUtc);

@@ -3,7 +3,7 @@ namespace DinamicaBackup;
 public sealed record DetectedApplication(string Directory, string Profile, string Executable);
 public static class ApplicationDetection
 {
-    public static readonly string[] EqmProfileFiles = ["accounts.json", "config.ini", "hotkeys.json", "rules.json", "views.json", "contacts.json", "groups.json", "templates.json", "scheduled-mail.json", "snooze.json", "flags.json", "mail-activity.json", "eudora-import-settings.json"];
+    public static readonly string[] EqmProfileFiles = ["accounts.json", "config.ini", "hotkeys.json", "rules.json", "views.json", "contacts.json", "groups.json", "templates.json", "scheduled-mail.json", "scheduled-mail.json.forwarded.json", "snooze.json", "flags.json", "mail-activity.json", "eudora-import-settings.json"];
     public static List<SqlProbe> EqmProbes() => [new("Latest message date (UTC ticks)", "SELECT MAX(date_ticks) FROM MessageSummary")];
     public static DetectedApplication DetectEqm(string directory, BackupJob current)
     {

@@ -46,6 +46,18 @@ public static class MimeMessageBuilder
     public static MimeMessage Build(ComposeModel compose, AccountModel account, string? userAgent = null)
     {
         var message = new MimeMessage();
+        message.MessageId = compose.OutgoingMessageId;
+        if (compose.Repetition is { } repetition)
+            message.Headers.Add(RepeatedSending.Header, RepeatedSending.Encode(repetition));
+        if (compose.RuleForwardKey != null)
+        {
+            message.Headers.Add(RuleForwardService.MarkerHeader, "true");
+            message.Headers.Add("Auto-Submitted", "auto-generated");
+        }
+        if (compose.FollowUpDays > 0)
+            message.Headers.Add("X-QuickMail-FollowUp-Days", compose.FollowUpDays.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        if (compose.FollowUp is { } tracking)
+            message.Headers.Add(FollowUpReminder.TrackingHeader, FollowUpReminder.EncodeTracking(tracking));
 
         if (userAgent != null)
             message.Headers.Add(HeaderId.UserAgent, userAgent);

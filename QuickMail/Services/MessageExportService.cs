@@ -40,9 +40,9 @@ public static class MessageExportService
     }
 
     public static async Task WriteEmlAsync(MailMessageDetail detail, string path, IMailService mail,
-        CancellationToken ct = default)
+        CancellationToken ct = default, bool requireAllAttachments = false)
     {
-        var message = LoadHeaderShell(detail.RawHeaders) ?? new MimeMessage();
+        using var message = LoadHeaderShell(detail.RawHeaders) ?? new MimeMessage();
         EnsureAddresses(message.From, detail.From);
         EnsureAddresses(message.To, detail.To);
         EnsureAddresses(message.Cc, detail.Cc);
@@ -73,7 +73,11 @@ public static class MessageExportService
             if (bytes == null && !string.IsNullOrWhiteSpace(attachment.PartSpecifier))
                 bytes = await mail.DownloadAttachmentAsync(detail.AccountId, detail.FolderName,
                     detail.MessageId, attachment.PartSpecifier, ct);
-            if (bytes == null) continue;
+            if (bytes == null)
+            {
+                if (requireAllAttachments) throw new FileNotFoundException("Attachment unavailable: " + attachment.FileName);
+                continue;
+            }
 
             var contentType = MimeKit.ContentType.TryParse(attachment.ContentType, out var parsed)
                 ? parsed : new MimeKit.ContentType("application", "octet-stream");

@@ -347,6 +347,8 @@ public class SelectorItemAccessibilityTests : WpfTestBase
             new SavedView { Name = "Alpha" }.ToString(),
             new MessageTemplate { Title = "Alpha" }.ToString(),
             new MailRule { Name = "Alpha" }.ToString(),
+            new AttachmentBrowserItem(new MailMessageSummary { Subject = "Alpha" }, new AttachmentModel { FileName = "file.pdf" }).ToString(),
+            new AttachmentRecoveryCandidate("file.pdf", 10, "Name matches").ToString(),
             new GroupModel { Name = "Alpha" }.ToString(),
             new ProviderCatalog().Other.ToString(),
             new ConnectionAccountRow

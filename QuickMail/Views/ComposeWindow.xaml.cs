@@ -60,6 +60,7 @@ internal sealed class AddressSuggestion
 [SuppressMessage("Design", "CA1001", Justification = "_autocompleteCts is cancelled and disposed in OnClosed; WPF never calls Dispose on a Window, so implementing IDisposable would be dead code.")]
 public partial class ComposeWindow : Window
 {
+    private RepeatedSendWindow? _repeatedSendDialog;
     internal const string HtmlEditorBridgeResourceName = "QuickMail.Assets.HugeRte.editor.html";
     // WebView2 runs this before any page script, including HugeRTE's iframe listeners.  Handling
     // external files here is intentionally redundant with editor.html: the early bridge wins the
@@ -412,6 +413,21 @@ public partial class ComposeWindow : Window
             vm.LoadSeededHtmlBody();
 
         // Wire the View confirmation callback so the VM stays out of System.Windows.
+        vm.RecipientPrivacyRequested = assessment =>
+        {
+            var answer = MessageBox.Show(DialogOwner,
+                $"TO and CC expose {assessment.VisibleCount} recipients across {assessment.DomainCount} different domains. " +
+                "They may not expect their addresses to be shared.\n\n" +
+                "Yes: put your own address in TO and move all TO/CC recipients to BCC, retaining existing BCC recipients, then continue.\n" +
+                "No: continue with the addresses visible.\nCancel: return to editing without sending.",
+                "Protect recipients' privacy", MessageBoxButton.YesNoCancel, MessageBoxImage.Warning, MessageBoxResult.Cancel);
+            return answer switch
+            {
+                MessageBoxResult.Yes => RecipientPrivacyChoice.ProtectWithBcc,
+                MessageBoxResult.No => RecipientPrivacyChoice.KeepVisible,
+                _ => RecipientPrivacyChoice.Cancel
+            };
+        };
         vm.ConfirmationRequested = (message, title) =>
             MessageBox.Show(DialogOwner, message, title, MessageBoxButton.YesNo, MessageBoxImage.Warning)
             == MessageBoxResult.Yes;
@@ -443,6 +459,20 @@ public partial class ComposeWindow : Window
             MessageBox.Show(DialogOwner, "Enter a valid local date and time.", "Send Later",
                 MessageBoxButton.OK, MessageBoxImage.Warning);
             return null;
+        };
+
+        vm.PromptRepetitionRequested = suggested =>
+        {
+            var dialog = new RepeatedSendWindow(suggested) { Owner = DialogOwner };
+            _repeatedSendDialog = dialog;
+            var completion = new TaskCompletionSource<RepeatedSendRequest?>(TaskCreationOptions.RunContinuationsAsynchronously);
+            dialog.Closed += (_, _) =>
+            {
+                _repeatedSendDialog = null;
+                completion.TrySetResult(dialog.Request);
+            };
+            dialog.Show();
+            return completion.Task;
         };
 
         // Wire the template picker so the VM stays out of System.Windows.
@@ -546,6 +576,7 @@ public partial class ComposeWindow : Window
         StoredMessageEditButtons.Visibility = Visibility.Visible;
         MenuSend.Visibility = Visibility.Collapsed;
         MenuSendLater.Visibility = Visibility.Collapsed;
+        MenuSendRepeatedly.Visibility = Visibility.Collapsed;
         MenuSaveDraft.Visibility = Visibility.Collapsed;
         MenuSaveStoredMessage.Visibility = Visibility.Visible;
         MenuInsertTemplate.Visibility = Visibility.Collapsed;
@@ -1007,6 +1038,7 @@ public partial class ComposeWindow : Window
         try { _autocompleteCts?.Cancel(); _autocompleteCts?.Dispose(); } catch { /* best effort */ }
         _autocompleteCts = null;
         _vm.Dispose();
+        _repeatedSendDialog?.Close();
         base.OnClosed(e);
     }
 
@@ -2531,7 +2563,8 @@ public partial class ComposeWindow : Window
     {
         if (e.Key != Key.Tab || Keyboard.Modifiers != ModifierKeys.None) return;
         e.Handled = true;
-        FocusActiveEditor();
+        if (NotesBox.IsEnabled) NotesBox.Focus();
+        else FocusActiveEditor();
     }
 
     /// <summary>Reacts to a mode change: swaps editors, toolbar, fonts, and announces.</summary>

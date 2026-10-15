@@ -503,11 +503,15 @@
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsEditable" Value="True">
                             <Setter TargetName="PART_EditableTextBox" Property="Visibility" Value="Visible"/>
+                            <!-- Keep the editor off the arrow: otherwise its transparent surface
+                                 intercepts clicks intended for the underlying dropdown toggle. -->
+                            <Setter TargetName="PART_EditableTextBox" Property="Margin" Value="1,1,26,1"/>
                             <Setter TargetName="contentSite" Property="Visibility" Value="Hidden"/>
                         </Trigger>
                         <Trigger Property="controls:ComboBoxAssist.ShowDropDownButton" Value="False">
                             <Setter TargetName="toggle" Property="Visibility" Value="Collapsed"/>
                             <Setter TargetName="arrow" Property="Visibility" Value="Collapsed"/>
+                            <Setter TargetName="PART_EditableTextBox" Property="Margin" Value="1"/>
                         </Trigger>
                         <Trigger Property="IsKeyboardFocusWithin" Value="True">
                             <Setter TargetName="border" Property="BorderBrush" Value="{DynamicResource Theme.Accent}"/>

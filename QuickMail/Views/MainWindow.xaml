@@ -206,6 +206,7 @@
                       AutomationProperties.Name="Send again"
                       Command="{Binding SendAgainCommand}"/>
             <MenuItem Header="_History" AutomationProperties.Name="Message history">
+                <MenuItem Header="Follow up…" Click="MessageContextMenu_FollowUp_Click"/>
                 <MenuItem Header="_Email history" Tag="email"
                           AutomationProperties.Name="Show email history with this contact"
                           Click="MessageContextMenu_History_Click"/>
@@ -267,10 +268,13 @@
             <MenuItem Header="View _Source"
                       AutomationProperties.Name="View message source"
                       Click="MessageContextMenu_ViewSource_Click"/>
+            <MenuItem Header="Activity…" AutomationProperties.Name="Message activity" Click="MessageContextMenu_Activity_Click"/>
+            <MenuItem Header="Analyze rule conflicts…" Click="MessageContextMenu_AnalyzeRules_Click"/>
             <MenuItem Header="E_xport"
                       AutomationProperties.Name="Export message">
                 <MenuItem Header="Save as _EML…" Click="MessageContextMenu_SaveEml_Click"/>
                 <MenuItem Header="Save as _HTML…" Click="MessageContextMenu_SaveHtml_Click"/>
+                <MenuItem Header="Selection with attachments and index…" Click="MessageContextMenu_ExportBundle_Click"/>
                 <Separator/>
                 <MenuItem Header="Copy Message _Headers" Click="MessageContextMenu_CopyHeaders_Click"/>
             </MenuItem>
@@ -314,6 +318,7 @@
             <!-- #516. N, M, C, A, U and D are taken by the items above — note U, from "Use A_utomatic
                  Archive Folder" — leaving S and F. WPF cycles between duplicate access keys instead
                  of invoking, so a collision here would make the key highlight rather than activate. -->
+            <MenuItem Header="Add to Favorites" Tag="favorite-folder" Click="FolderContextMenu_Favorite_Click"/>
             <MenuItem Header="Set as _Startup Folder"
                       AutomationProperties.Name="Set as Startup Folder"
                       Click="FolderContextMenu_SetStartupFolder_Click"/>
@@ -750,6 +755,8 @@
                 <MenuItem Header="_Analyze Folder…"
                           Click="MenuAnalyzeFolder_Click"
                           AutomationProperties.Name="Analyze Folder"/>
+                <MenuItem Header="Attachment explorer…" Click="MenuAttachmentExplorer_Click"/>
+                <MenuItem Header="Analyze rule conflicts for selection…" Click="MessageContextMenu_AnalyzeRules_Click"/>
                 <MenuItem Header="Account _Health…"
                           Click="MenuAccountHealth_Click"
                           AutomationProperties.Name="Account Health"/>
@@ -1303,6 +1310,10 @@
                                                   Click="AttachmentContextMenu_Explore_Click"
                                                   Tag="{Binding PlacementTarget.SelectedItem,
                                                         RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
+                                        <MenuItem Header="Locate missing attachment…"
+                                                  Click="AttachmentContextMenu_Locate_Click"
+                                                  Tag="{Binding PlacementTarget.SelectedItem,
+                                                        RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
                                     </ContextMenu>
                                 </ListBox.ContextMenu>
                             </ListBox>
@@ -1801,6 +1812,11 @@
                                                        ToolTip="{Binding Subject}"/>
                                         </DataTemplate>
                                     </GridViewColumn.CellTemplate>
+                                </GridViewColumn>
+                                <GridViewColumn Width="180" DisplayMemberBinding="{Binding Notes}">
+                                    <GridViewColumn.Header>
+                                        <GridViewColumnHeader Content="Notes" Tag="Notes" AutomationProperties.IsColumnHeader="True"/>
+                                    </GridViewColumn.Header>
                                 </GridViewColumn>
                                 <GridViewColumn Width="96">
                                     <GridViewColumn.Header>

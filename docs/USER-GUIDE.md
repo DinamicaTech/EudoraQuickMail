@@ -973,6 +973,18 @@ Open the **Rules Manager** from the **Tools** menu (`Ctrl+Shift+L`) or the comma
 
 Every enabled rule for the account is tried, in list order, and each one that matches acts. A rule that moves or deletes a message takes it out of the running for the rest of the list.
 
+### Rule previews, expiration and template replies
+
+**Test Rule** opens a read-only report for the selected messages: number examined, matches, incoming/outgoing counts, proposed action, and up to 20 examples. **Preview…** uses the current folder (plus Out when configured), and evaluates cached complete bodies and CC/BCC where those conditions require them. Neither option sends, moves or marks messages. Forward/reply counts are condition matches: delivery protections and previously queued replies can reduce the number actually sent.
+
+Enable **Active until (inclusive)** to limit a rule to a local calendar date. After that date the rule remains saved but is skipped, including manual execution. Clear the checkbox to remove expiration. Changing the date does not retroactively undo earlier actions.
+
+The **Reply template** action selects an existing template and sends its text from the receiving account to Reply-To (or From if Reply-To is absent). It preserves the original message, uses the template subject when supplied (otherwise `Re:` plus the original subject), and does not attach the original attachments. The existing `{sender}`, `{date}` and `{time}` template substitutions are supported. Create/edit templates from the composer before choosing them in Rule Manager.
+
+For vacation replies, choose the account, template and expiration date, enable automatic processing, and leave conditions empty if the reply should cover all eligible incoming senders. There is at most one queued reply per sender, rule and expiration date, even after restarting EQM. Changing expiration starts a new response period. Without expiration, the same sender receives only one reply for that rule. Removing a queued automatic reply does not reset that protection.
+
+Automatic/bulk messages, known no-reply/bounce addresses, outgoing messages and your own configured addresses are skipped to reduce loops. Replies use the durable Scheduled queue and follow its offline/focus and retry behavior. Disabling a rule prevents new replies; remove any already queued reply from Scheduled if it must not be sent. As with any automatic responder, consider whether replying to unknown senders is appropriate before enabling an unrestricted rule.
+
 ### When rules run
 
 Rules run **on your Inbox, on mail as it arrives** — including mail that arrives while QuickMail is sitting open, not only at a full sync. This is deliberate: a rule never reaches back into Sent, Archive, Junk, Trash, or a folder you filed something into by hand, so nothing you deliberately put somewhere is moved or deleted behind your back. Mail already in the mailbox before a rule existed is left alone too.
@@ -1839,3 +1851,45 @@ confirmation.
 | `Escape` | Close window (when no menu or dropdown is open) |
 
 **Insert Template…** and **Save as Template** are available from the command palette; they have no default keyboard shortcut.
+
+## Private Notes and message investigation
+
+**Notes:** beneath Subject in composition and the existing-message editor holds private keywords or
+annotations. It is stored locally and backed up with the database, never sent to recipients. The
+message list has a sortable Notes column. General search includes notes; use `N:project` to search
+only Notes. Bare `N` continues to mean unread messages. Private notes require the local store and
+are unavailable in online-only mode.
+
+Before sending to more than three distinct visible TO/CC addresses across different domains, EQM
+offers to protect their addresses. **Yes** puts your own address in TO and moves the original TO/CC
+recipients to BCC, preserving existing BCC recipients and removing duplicates. **No** keeps them
+visible; **Cancel** returns without sending. Domain differences are a warning heuristic, not a
+determination that the people do not know one another.
+
+To export correspondence, open Email History, select the desired messages (Ctrl+A selects the
+displayed list), then choose **Export → Selection with attachments and index…**. A new directory
+contains EML messages, native attachments and an `index.html` linking them. Only selected, loaded
+rows are exported. Missing content is reported as incomplete in the index; Notes are not exported.
+
+**Activity…** in the message context menu shows recent local observations, rule actions, moves,
+snooze/wake events and acceptance of queued sends. Recording starts with this version; it cannot
+reconstruct older operations. Local catalogue additions/removals are not proof of server delivery
+or deletion. Events are retained up to 90 days and 100,000 events per profile, with the latest 500
+shown per message. Gmail labels sharing a Message-ID share the activity history within the account.
+# Attachment investigation tools
+
+**Tools > Attachment explorer** lists cached attachments in the current folder, or throughout EQM
+with **Everywhere**. Search filenames, senders or subjects; sort the columns; save selected files
+without overwriting existing names; or use **Go to message**. Embedded images and messages whose
+attachment metadata has not been downloaded are excluded. A capped result asks you to refine the search.
+
+For a missing file, select **Locate missing attachment**, choose a backup directory and inspect the
+candidates. **Recover a copy** copies into EQM; **Use candidate location** changes only this reference.
+Both require confirmation. Name/size matches are not proof; a known SHA-256 must match. Backup files
+are never deleted. Reopen the message after repair.
+
+**Analyze rule conflicts** in Tools or the message context menu examines the selected messages,
+listing active matching rules in execution order and flagging competing actions. Blocked later rules
+remain visible. This is a read-only simulation, not execution or a guarantee of remote delivery.
+
+See [Attachment investigation](ATTACHMENT-INVESTIGATION.md) for scope, keyboard navigation and limitations.

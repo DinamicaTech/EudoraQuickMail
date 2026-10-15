@@ -8,10 +8,10 @@ namespace QuickMail.Services;
 public sealed record ScheduledMail(Guid Id, DateTimeOffset SendAtUtc, ComposeModel Message, int Attempts = 0,
     string? LastError = null, string? LocalMessageId = null, bool IsImmediate = false,
     DateTimeOffset? NextAttemptUtc = null, bool AutomaticRetry = true,
-    bool TransportAccepted = false);
+    bool TransportAccepted = false, DateTimeOffset? AcceptedAtUtc = null);
 
 /// <summary>Durable local outbox with a short periodic dispatcher.</summary>
-public sealed class ScheduledSendService : IOutgoingMailQueue, IDisposable
+public sealed partial class ScheduledSendService : IOutgoingMailQueue, IDisposable
 {
     public event Action<MailOperationFailure, bool>? Failed;
     public event Action<Guid>? SentMailChanged;
@@ -31,6 +31,8 @@ public sealed class ScheduledSendService : IOutgoingMailQueue, IDisposable
     private readonly CancellationTokenSource _stop = new();
     private int _disposed;
     public bool IsDispatching => _dispatchGate.CurrentCount == 0;
+    public Func<AccountModel, CancellationToken, Task>? SyncBeforeFollowUpAsync { get; set; }
+    private DateTimeOffset _lastFollowUpCheck;
 
     public ScheduledSendService(ProfileContext profile, ISendMailService sender, IAccountService accounts,
         ICredentialService credentials, LocalStoreService store, IMailService mail,
@@ -70,6 +72,8 @@ public sealed class ScheduledSendService : IOutgoingMailQueue, IDisposable
     private async Task<Guid> EnqueueAsync(ComposeModel message, DateTimeOffset sendAtUtc, bool immediate,
         Guid? replaceScheduledId, CancellationToken ct)
     {
+        if (message.Repetition is { } plan) RepeatedSending.Validate(plan, sendAtUtc);
+        if (message.FollowUpDays is < 0 or > 3650) throw new ArgumentOutOfRangeException(nameof(message), "Follow-up days must be between 0 and 3650.");
         await _gate.WaitAsync(ct);
         try
         {
@@ -117,6 +121,7 @@ public sealed class ScheduledSendService : IOutgoingMailQueue, IDisposable
     public async Task ReplaceAsync(Guid id, ComposeModel message, DateTimeOffset sendAtUtc,
         CancellationToken ct = default)
     {
+        if (message.Repetition is { } plan) RepeatedSending.Validate(plan, sendAtUtc);
         if (sendAtUtc <= DateTimeOffset.Now) throw new ArgumentOutOfRangeException(nameof(sendAtUtc));
         await _gate.WaitAsync(ct);
         try
@@ -164,6 +169,13 @@ public sealed class ScheduledSendService : IOutgoingMailQueue, IDisposable
         await _dispatchGate.WaitAsync(_stop.Token);
         try
         {
+            if (DateTimeOffset.UtcNow - _lastFollowUpCheck > TimeSpan.FromMinutes(5))
+            {
+                _lastFollowUpCheck = DateTimeOffset.UtcNow;
+                try { await CancelAnsweredFollowUpsAsync(); }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                { LogService.Log("Follow-up background check deferred", ex); }
+            }
             var attempted = new HashSet<Guid>();
             while (!_stop.IsCancellationRequested)
             {
@@ -172,7 +184,7 @@ public sealed class ScheduledSendService : IOutgoingMailQueue, IDisposable
                 try
                 {
                     var now = DateTimeOffset.UtcNow;
-                    item = (await LoadAsync()).FirstOrDefault(candidate =>
+                    item = (await LoadAsync()).OrderBy(candidate => candidate.Message.FollowUp != null).FirstOrDefault(candidate =>
                         !attempted.Contains(candidate.Id)
                         && (candidate.TransportAccepted || (candidate.SendAtUtc <= now
                             && (manual || (candidate.AutomaticRetry
@@ -210,6 +222,27 @@ public sealed class ScheduledSendService : IOutgoingMailQueue, IDisposable
                     PerformanceLogService.Marker("Outgoing queue: dispatch START", details);
                     if (!item.TransportAccepted)
                     {
+                        if (item.Message.Repetition is { } repeatPlan) RepeatedSending.Validate(repeatPlan, item.SendAtUtc);
+                        if (item.Message.FollowUp is { } tracking)
+                        {
+                            if (_activity is { CanReceive: false })
+                            {
+                                await UpdateQueuedItemAsync(item.Id, x => x with { NextAttemptUtc = DateTimeOffset.UtcNow.AddMinutes(5), LastError = "Follow-up deferred until incoming mail can be checked." });
+                                continue;
+                            }
+                            using var checkTimeout = CancellationTokenSource.CreateLinkedTokenSource(_stop.Token);
+                            checkTimeout.CancelAfter(TimeSpan.FromMinutes(2));
+                            if (SyncBeforeFollowUpAsync == null) throw new IOException("Reply synchronization is not ready; follow-up postponed.");
+                            await SyncBeforeFollowUpAsync(account, checkTimeout.Token);
+                            if (_activity is { CanReceive: false })
+                                throw new IOException("Incoming mail was paused during reply checking; follow-up postponed.");
+                            if (await HasFollowUpResponseAsync(account, tracking, true, checkTimeout.Token))
+                            {
+                                await CancelFollowUpAsync(item);
+                                continue;
+                            }
+                        }
+                        OutgoingAttachmentValidator.ValidateAndLoad(item.Message);
                         ProgressChanged?.Invoke($"Sending queued message from {account.AccountLabel}…");
                         var password = account.BackendKind == BackendKind.Pop3Smtp
                             ? null : _credentials.GetPassword(account.Id);
@@ -221,11 +254,17 @@ public sealed class ScheduledSendService : IOutgoingMailQueue, IDisposable
                         item = item with
                         {
                             TransportAccepted = true,
+                            AcceptedAtUtc = DateTimeOffset.UtcNow,
                             LastError = null,
                             NextAttemptUtc = null,
                             AutomaticRetry = false,
                         };
                         await UpdateQueuedItemAsync(item.Id, _ => item);
+                        await _store.RecordMessageActivityAsync(new MailMessageSummary
+                        {
+                            AccountId = account.Id, InternetMessageId = item.Message.OutgoingMessageId ?? "",
+                            MessageId = item.LocalMessageId ?? "", FolderName = "Scheduled"
+                        }, "Transport accepted", item.Message.RuleForwardKey != null ? "Automatic rule message accepted for delivery" : "Scheduled message accepted for delivery");
                         PerformanceLogService.Record("Outgoing queue: SMTP accepted",
                             System.Diagnostics.Stopwatch.GetElapsedTime(itemStarted), details);
                     }
@@ -235,11 +274,14 @@ public sealed class ScheduledSendService : IOutgoingMailQueue, IDisposable
                         PerformanceLogService.Marker("Outgoing queue: resume accepted item", details);
                     }
                     var sentCopySaved = false;
+                    await ScheduleFollowUpAfterSentAsync(item.Message, account, item.AcceptedAtUtc ?? DateTimeOffset.UtcNow);
                     try
                     {
                         // SMTP acceptance is authoritative. Saving/synchronizing the Sent copy is
                         // best effort: if it fails we must still dequeue the item, otherwise the
                         // next timer pass sends a duplicate to the recipient.
+                        if (_store is LocalStoreService noteStore)
+                            await noteStore.SavePrivateNotesAsync(account.Id, item.Message.OutgoingMessageId, item.Message.Notes);
                         await _mail.AppendToSentAsync(account.Id, item.Message, CancellationToken.None);
                         sentCopySaved = true;
                     }
@@ -298,7 +340,7 @@ public sealed class ScheduledSendService : IOutgoingMailQueue, IDisposable
                             LogService.Log($"Scheduled send {item.Id}: failed to remove source draft", ex);
                         }
                     }
-                    await RemoveQueuedItemAsync(item.Id);
+                    await CompleteSentItemAsync(item);
                     SentMailChanged?.Invoke(account.Id);
                     ProgressChanged?.Invoke($"Message sent from {account.AccountLabel}.");
                     PerformanceLogService.Record("Outgoing queue: dispatch complete",
@@ -335,6 +377,71 @@ public sealed class ScheduledSendService : IOutgoingMailQueue, IDisposable
         catch (OperationCanceledException) when (_stop.IsCancellationRequested) { }
         finally { _dispatchGate.Release(); }
         return failures;
+    }
+
+    public async Task ScheduleFollowUpAfterSentAsync(ComposeModel original, AccountModel account, DateTimeOffset sentAt)
+    {
+        if (original.FollowUp != null || original.FollowUpDays <= 0) return;
+        if (original.FollowUpDays > 3650 || FollowUpReminder.Addresses(original.To).Count == 0)
+            throw new InvalidOperationException("Follow-up requires at least one TO recipient and 1–3650 days.");
+        // Stable identity makes a retry after transport acceptance idempotent.
+        var hash = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(original.OutgoingMessageId));
+        var id = new Guid(hash.AsSpan(0, 16));
+        await _gate.WaitAsync();
+        try
+        {
+            var queue = await LoadAsync();
+            if (queue.Any(x => x.Id == id)) return;
+            var reminder = FollowUpReminder.Build(original, account, sentAt);
+            var when = sentAt.AddDays(original.FollowUpDays);
+            var localId = "scheduled-" + id.ToString("N");
+            await _store.EnsureLocalSystemFoldersAsync([account]);
+            await SaveScheduledLocalCopyAsync(account, reminder, localId, when);
+            queue.Add(new ScheduledMail(id, when, reminder, LocalMessageId: localId));
+            await SaveAsync(queue);
+        }
+        finally { _gate.Release(); }
+        SentMailChanged?.Invoke(account.Id);
+    }
+
+    private async Task<bool> HasFollowUpResponseAsync(AccountModel account, FollowUpTracking tracking, bool fetchMissing, CancellationToken ct)
+    {
+        var candidates = await _store.GetFollowUpCandidatesAsync(account.Id, tracking, ct);
+        foreach (var cached in candidates)
+        {
+            var detail = cached;
+            if (fetchMissing && string.IsNullOrWhiteSpace(detail.RawHeaders))
+            {
+                detail = await _mail.GetMessageDetailAsync(account.Id, cached.FolderName, cached.MessageId, ct);
+                if (detail.BodyFetchFailed) throw new IOException("Could not verify a possible reply; follow-up postponed.");
+                if (!string.IsNullOrWhiteSpace(detail.RawHeaders)) await _store.UpsertDetailAsync(detail);
+            }
+            if (FollowUpReminder.IsResponse(tracking, detail, account.Username)) return true;
+        }
+        return false;
+    }
+
+    private async Task CancelFollowUpAsync(ScheduledMail item)
+    {
+        if (item.LocalMessageId != null)
+            await _store.DeleteLocalMessagesAsync(item.Message.AccountId, "Scheduled", [item.LocalMessageId]);
+        await RemoveQueuedItemAsync(item.Id);
+        SentMailChanged?.Invoke(item.Message.AccountId);
+        ProgressChanged?.Invoke("Follow-up cancelled: a reply was received.");
+    }
+
+    private async Task CancelAnsweredFollowUpsAsync()
+    {
+        foreach (var item in await GetSnapshotAsync())
+        {
+            if (item.TransportAccepted || item.Message.FollowUp is not { } tracking) continue;
+            var account = _accounts.LoadAccounts().FirstOrDefault(a => a.Id == item.Message.AccountId);
+            if (account != null && await HasFollowUpResponseAsync(account, tracking, false, _stop.Token))
+            {
+                await RemoveAsync(item.Id, deleteLocalCopy: true);
+                SentMailChanged?.Invoke(account.Id);
+            }
+        }
     }
 
     private async Task UpdateQueuedItemAsync(Guid id, Func<ScheduledMail, ScheduledMail> update)
@@ -404,11 +511,12 @@ public sealed class ScheduledSendService : IOutgoingMailQueue, IDisposable
         {
             AccountId = message.AccountId, FolderName = "Scheduled", MessageId = localMessageId,
             From = account.Username, To = message.To, Cc = message.Cc, Bcc = message.Bcc,
-            Subject = message.Subject, Date = sendAtUtc, PlainTextBody = message.Body,
+            Subject = message.Subject, Notes = message.Notes, Date = sendAtUtc, PlainTextBody = message.Body,
             HtmlBody = message.HtmlBody ?? string.Empty, DraftComposeMode = message.Mode,
             Attachments = message.Attachments.ToList(),
             DraftSpellLanguage = message.SpellLanguage,
             Preview = message.Body.Length <= 240 ? message.Body : message.Body[..240], IsRead = true,
+            RawHeaders = FollowUpReminder.DraftHeaders(message),
             Direction = MessageDirection.Outgoing,
         });
     }
@@ -419,11 +527,12 @@ public sealed class ScheduledSendService : IOutgoingMailQueue, IDisposable
         {
             AccountId = message.AccountId, FolderName = "Draft", MessageId = localMessageId,
             From = account.Username, To = message.To, Cc = message.Cc, Bcc = message.Bcc,
-            Subject = message.Subject, Date = DateTimeOffset.Now, PlainTextBody = message.Body,
+            Subject = message.Subject, Notes = message.Notes, Date = DateTimeOffset.Now, PlainTextBody = message.Body,
             HtmlBody = message.HtmlBody ?? string.Empty, DraftComposeMode = message.Mode,
             Attachments = message.Attachments.ToList(),
             DraftSpellLanguage = message.SpellLanguage,
             Preview = message.Body.Length <= 240 ? message.Body : message.Body[..240], IsRead = true,
+            RawHeaders = FollowUpReminder.DraftHeaders(message),
             Direction = MessageDirection.Outgoing,
         });
 
@@ -468,6 +577,7 @@ public sealed class ScheduledSendService : IOutgoingMailQueue, IDisposable
 
     private static bool ShouldRetryAutomatically(Exception error)
     {
+        if (error is FileNotFoundException or UnauthorizedAccessException) return false;
         var description = string.Join(" ", Enumerate(error).Select(ex =>
             $"{ex.GetType().FullName} {ex.Message}")).ToLowerInvariant();
         string[] permanentHints =

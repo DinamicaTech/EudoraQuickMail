@@ -16,6 +16,18 @@ namespace QuickMail.ViewModels;
 
 public partial class RulesManagerViewModel : ObservableObject
 {
+    public ObservableCollection<MessageTemplate> ReplyTemplates { get; } = [];
+    public bool HasExpiration
+    {
+        get => SelectedRule?.ActiveUntil != null;
+        set
+        {
+            if (SelectedRule == null) return;
+            SelectedRule.ActiveUntil = value ? SelectedRule.ActiveUntil ?? DateTime.Today.AddDays(7) : null;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(SelectedRule));
+        }
+    }
     private const string CanonicalFolderPrefix = "\u0000LocalFolder:";
     private readonly IRuleService _ruleService;
     private readonly IEnumerable<AccountModel> _accounts;
@@ -437,6 +449,8 @@ public partial class RulesManagerViewModel : ObservableObject
         new() { Action = RuleAction.MarkAsUnread, DisplayName = "Mark as unread" },
         new() { Action = RuleAction.MoveToFolder, DisplayName = "Move to folder" },
         new() { Action = RuleAction.Delete, DisplayName = "Delete" },
+        new() { Action = RuleAction.Forward, DisplayName = "Forward" },
+        new() { Action = RuleAction.ReplyTemplate, DisplayName = "Reply template" },
     };
 
     public bool IsMoveToFolderSelected =>
@@ -464,6 +478,7 @@ public partial class RulesManagerViewModel : ObservableObject
     {
         OnPropertyChanged(nameof(IsMoveToFolderSelected));
         OnPropertyChanged(nameof(IsFromEnabled));
+        OnPropertyChanged(nameof(HasExpiration));
         OnPropertyChanged(nameof(IsToEnabled));
         OnPropertyChanged(nameof(IsSubjectEnabled));
         OnPropertyChanged(nameof(IsBodyEnabled));
@@ -632,6 +647,7 @@ public partial class RulesManagerViewModel : ObservableObject
         }
 
         var matched = _ruleService.TestRule(SelectedRule, messages);
+        PreviewReady?.Invoke(RulePreviewBuilder.Build(SelectedRule, messages, matched, "Selected messages"));
         StatusText = matched.Count == 0
             ? $"Rule would match 0 of {messages.Count} selected messages."
             : $"Rule would match {matched.Count} of {messages.Count} selected messages.";
@@ -768,7 +784,17 @@ public partial class RulesManagerViewModel : ObservableObject
         }
 
         // Require at least one condition for destructive actions
-        if (rule.Action is RuleAction.MoveToFolder or RuleAction.Delete)
+        if (rule.Action == RuleAction.Forward)
+        {
+            try { RuleForwardService.ValidateDestination(rule.ForwardTo); }
+            catch (ArgumentException ex) { FolderError = ex.Message; valid = false; }
+        }
+        if (rule.Action == RuleAction.ReplyTemplate && !ReplyTemplates.Any(t => t.Id == rule.ReplyTemplateId))
+        {
+            FolderError = "Select an existing reply template.";
+            return false;
+        }
+        if (rule.Action is RuleAction.MoveToFolder or RuleAction.Delete or RuleAction.Forward)
         {
             bool hasCondition =
                 (rule.UseFromCondition && !string.IsNullOrWhiteSpace(rule.FromContains)) ||
@@ -779,7 +805,7 @@ public partial class RulesManagerViewModel : ObservableObject
 
             if (!hasCondition)
             {
-                ConditionsError = "At least one condition is required for Move and Delete actions.";
+                ConditionsError = "At least one condition is required for Move, Delete and Forward actions.";
                 valid = false;
             }
         }

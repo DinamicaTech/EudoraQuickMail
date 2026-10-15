@@ -22,6 +22,7 @@ public class GraphSendMailService : ISendMailService, IDisposable
 
     public async Task SendAsync(ComposeModel compose, AccountModel account, string? password, CancellationToken ct = default)
     {
+        OutgoingAttachmentValidator.ValidateAndLoad(compose);
         var details = $"account={account.Username}; attachments={compose.Attachments.Count}";
         MimeMessage message;
         using (PerformanceLogService.Measure("Send Graph: build MIME", details))

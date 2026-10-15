@@ -31,6 +31,23 @@ public sealed class PeriodicPop3Receiver : IDisposable
     public event Action<AccountModel, int, int>? Started;
     public event Action<AccountModel, Exception, bool>? Failed;
 
+    public async Task CheckForFollowUpAsync(AccountModel account, CancellationToken ct)
+    {
+        if (_activity is { CanReceive: false }) throw new System.IO.IOException("Incoming mail is paused.");
+        if (Interlocked.Exchange(ref _running, 1) != 0)
+            throw new System.IO.IOException("POP3 reception is already running; follow-up postponed.");
+        try
+        {
+            using var operation = BackupOperationTracker.Enter();
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, _stop.Token);
+            var result = await _receiver.CheckNowAsync(account, linked.Token);
+            if (_rules != null && result.NewMessages is { Count: > 0 })
+                await _rules.ApplyAutomaticRulesAsync(result.NewMessages.ToList(), account.Id, linked.Token);
+            Completed?.Invoke(account, result);
+        }
+        finally { Volatile.Write(ref _running, 0); }
+    }
+
     public async Task SweepAsync(bool includeAccountsWithAutomaticCheckDisabled = false)
     {
         if (_activity is { CanReceive: false }) return;

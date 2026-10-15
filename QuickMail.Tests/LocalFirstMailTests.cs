@@ -1076,6 +1076,12 @@ public sealed class LocalFirstMailTests : IDisposable
         vm.LoadAccountList([account]);
         await vm.SelectFolderCommand.ExecuteAsync(inbox);
         Assert.Single(vm.Messages);
+        // Local bodies are authoritative, so selecting/refreshing POP must not start a
+        // fire-and-forget cache reader that can outlive VM shutdown and keep mail.db locked.
+        var prefetchField = typeof(MainViewModel).GetField("_prefetchCts",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        Assert.NotNull(prefetchField);
+        Assert.Null(prefetchField.GetValue(vm));
 
         var visibleRows = vm.Messages;
         var selected = vm.Messages[0];
@@ -1091,6 +1097,7 @@ public sealed class LocalFirstMailTests : IDisposable
         Assert.Contains(vm.Messages, message => message.MessageId == "second");
         Assert.Same(visibleRows, vm.Messages);
         Assert.Same(selected, vm.SelectedMessage);
+        Assert.Null(prefetchField.GetValue(vm));
         vm.Dispose();
     }
 

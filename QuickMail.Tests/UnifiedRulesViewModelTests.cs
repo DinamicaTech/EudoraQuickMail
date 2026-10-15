@@ -351,6 +351,8 @@ public class UnifiedRulesViewModelTests
             rules.SaveRules([new MailRule { Name = "From Alice", AccountId = a, FromContains = "alice", Action = RuleAction.MarkAsRead }]);
 
             var messages = new[] { Msg("1", "alice@example.com"), Msg("2", "bob@example.com") };
+            // Real mailbox rows carry their account identity; preview must enforce the rule's scope.
+            foreach (var message in messages) message.AccountId = a;
             var vm = new UnifiedRulesViewModel(rules, new FakeServerRules(), [Graph(a)],
                 preferredAccountId: a, selectedMessagesForTest: messages);
             await vm.RefreshCommand.ExecuteAsync(TestContext.Current.CancellationToken);

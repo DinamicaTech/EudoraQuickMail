@@ -14,6 +14,7 @@ public sealed class FolderTreeNode : INotifyPropertyChanged
 
     /// <summary>True for account-level group nodes that serve as collapsible containers for folder children.</summary>
     public bool IsHeader { get; init; }
+    public bool IsFavorite { get; init; }
 
     /// <summary>
     /// The account this node belongs to, for account header/placeholder nodes (#31). Header nodes carry

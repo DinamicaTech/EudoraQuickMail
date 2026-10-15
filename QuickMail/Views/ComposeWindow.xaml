@@ -39,6 +39,7 @@
             <MenuItem Header="_File">
                 <MenuItem x:Name="MenuSend" Header="_Send" InputGestureText="Alt+S" Click="MenuSend_Click"/>
                 <MenuItem x:Name="MenuSendLater" Header="Send _later" Command="{Binding ScheduleSendCommand}"/>
+                <MenuItem x:Name="MenuSendRepeatedly" Header="Send _repeatedly…" Command="{Binding SendRepeatedlyCommand}"/>
                 <MenuItem x:Name="MenuSaveDraft" Header="Save _Draft" Command="{Binding SaveDraftCommand}" InputGestureText="Ctrl+S"/>
                 <MenuItem x:Name="MenuSaveStoredMessage" Header="_Save" Command="{Binding SaveStoredMessageCommand}"
                           InputGestureText="Ctrl+S" Visibility="Collapsed"/>
@@ -215,6 +216,11 @@
                 <ComboBoxItem Content="HTML"/>
             </ComboBox>
             <WrapPanel x:Name="NormalComposeButtons" DockPanel.Dock="Right" HorizontalAlignment="Right">
+                <TextBlock Text="Follow up (days):" VerticalAlignment="Center" Margin="6,0,4,0"/>
+                <ComboBox Width="60" IsEditable="True" ItemsSource="{Binding FollowUpPresets}"
+                          Text="{Binding FollowUpDays, UpdateSourceTrigger=LostFocus}"
+                          ToolTip="0 disables follow-up. After successful delivery, remind me if no TO recipient replies within this many days (1–3650)."
+                          AutomationProperties.Name="Follow up after days, zero disables"/>
                 <!-- Split Send control: the large half keeps the habitual one-click Send action;
                      the arrow exposes the less common variants without consuming four buttons. -->
                 <StackPanel Orientation="Horizontal" Margin="6,2,0,0">
@@ -235,6 +241,7 @@
                         <Button.ContextMenu>
                             <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
                                 <MenuItem Header="Send _later…" Command="{Binding ScheduleSendCommand}"/>
+                                <MenuItem Header="Send _repeatedly…" Command="{Binding SendRepeatedlyCommand}"/>
                                 <MenuItem Header="Save as _Draft" Command="{Binding SaveDraftCommand}"/>
                                 <Separator/>
                                 <MenuItem Header="Send _immediately" Command="{Binding SendImmediatelyCommand}"/>
@@ -336,6 +343,7 @@
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
                 <RowDefinition Height="*"/>
             </Grid.RowDefinitions>
             <Grid.ColumnDefinitions>
@@ -387,31 +395,34 @@
                      Margin="0,4" TabIndex="2"
                      PreviewKeyDown="SubjectBox_PreviewKeyDown"/>
 
+            <Label Grid.Row="3" Grid.Column="0" Content="Notes:" Target="{Binding ElementName=NotesBox}" Padding="0" VerticalAlignment="Center"/>
+            <TextBox Grid.Row="3" Grid.Column="1" x:Name="NotesBox" Text="{Binding Notes, UpdateSourceTrigger=PropertyChanged}"
+                     AutomationProperties.Name="Notes" ToolTip="{Binding PrivateNotesHint}" IsEnabled="{Binding CanEditPrivateNotes}" Margin="0,4" TabIndex="3"/>
             <!-- Cc -->
-            <TextBlock Grid.Row="3" Grid.Column="0"
+            <TextBlock Grid.Row="4" Grid.Column="0"
                        x:Name="CcLabel" Text="Cc:"
                        VerticalAlignment="Center" Margin="0,4"/>
-            <controls:TokenizedAddressBox Grid.Row="3" Grid.Column="1"
+            <controls:TokenizedAddressBox Grid.Row="4" Grid.Column="1"
                      x:Name="CcBox"
                      AddressText="{Binding Cc, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                      AutomationProperties.LabeledBy="{Binding ElementName=CcLabel}"
                      Margin="0,4" TabIndex="4"/>
 
             <!-- Bcc -->
-            <TextBlock Grid.Row="4" Grid.Column="0"
+            <TextBlock Grid.Row="5" Grid.Column="0"
                        x:Name="BccLabel" Text="Bcc:"
                        VerticalAlignment="Center" Margin="0,4"/>
-            <controls:TokenizedAddressBox Grid.Row="4" Grid.Column="1"
+            <controls:TokenizedAddressBox Grid.Row="5" Grid.Column="1"
                      x:Name="BccBox"
                      AddressText="{Binding Bcc, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                      AutomationProperties.LabeledBy="{Binding ElementName=BccLabel}"
                      Margin="0,4" TabIndex="5"/>
 
             <!-- Spell-check language -->
-            <Label Grid.Row="5" Grid.Column="0" Content="Language:"
+            <Label Grid.Row="6" Grid.Column="0" Content="Language:"
                    Target="{Binding ElementName=SpellLanguageSelector}"
                    Padding="0" VerticalAlignment="Center" Margin="0,4"/>
-            <ComboBox Grid.Row="5" Grid.Column="1" x:Name="SpellLanguageSelector"
+            <ComboBox Grid.Row="6" Grid.Column="1" x:Name="SpellLanguageSelector"
                       SelectedValue="{Binding SpellLanguage, Mode=TwoWay}"
                       SelectedValuePath="Tag" Margin="0,4" TabIndex="6"
                       AutomationProperties.Name="Spelling language"
@@ -422,10 +433,10 @@
                 <ComboBoxItem Content="English" Tag="en-US"/>
             </ComboBox>
 
-            <Separator Grid.Row="6" Grid.ColumnSpan="2" Margin="0,4"/>
+            <Separator Grid.Row="7" Grid.ColumnSpan="2" Margin="0,4"/>
 
             <!-- Attachments -->
-            <StackPanel Grid.Row="7" Grid.Column="0" Grid.ColumnSpan="2"
+            <StackPanel Grid.Row="8" Grid.Column="0" Grid.ColumnSpan="2"
                         Orientation="Horizontal" HorizontalAlignment="Left" Margin="0,2">
                 <Button x:Name="AddFilesButton"
                         Content="Add Files…"
@@ -442,7 +453,7 @@
                         AutomationProperties.Name="Save current message as template"
                         TabIndex="9"/>
             </StackPanel>
-            <ListBox Grid.Row="8" Grid.Column="0" Grid.ColumnSpan="2"
+            <ListBox Grid.Row="9" Grid.Column="0" Grid.ColumnSpan="2"
                      x:Name="AttachmentList"
                      ItemsSource="{Binding Attachments}"
                      SelectionMode="Single"
@@ -491,7 +502,7 @@
             </ListBox>
 
             <!-- Attachment summary: file count and total size -->
-            <TextBlock Grid.Row="8" Grid.Column="0" Grid.ColumnSpan="2"
+            <TextBlock Grid.Row="9" Grid.Column="0" Grid.ColumnSpan="2"
                        Text="{Binding AttachmentSummaryText}"
                        FontSize="{DynamicResource Theme.FontSizeSmall}"
                        Foreground="{DynamicResource Theme.TextSecondary}"
@@ -511,7 +522,7 @@
             <!-- Body: plain/Markdown TextBox and rich HTML editor.
                  Only one editor is visible at a time; visibility is swapped in
                  code-behind when the compose mode changes. -->
-            <Grid Grid.Row="10" Grid.ColumnSpan="2">
+            <Grid Grid.Row="11" Grid.ColumnSpan="2">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="*"/>
                 </Grid.RowDefinitions>

@@ -643,6 +643,11 @@ public partial class App : Application
             var templateService = _templateService;
             // accountService drives the one-time "All accounts" → per-account rule migration (#333 D1).
             var ruleService = new RuleService(effectiveMail, localStore, profile.ProfileDir, accountService);
+            if (ScheduledSender != null)
+            {
+                ruleService.ForwardMessageAsync = new RuleForwardService(effectiveMail, accountService, ScheduledSender).ForwardAsync;
+                ruleService.ReplyTemplateAsync = new RuleReplyTemplateService(effectiveMail, accountService, templateService, ScheduledSender).ReplyAsync;
+            }
             if (!probeMode)
                 _pop3Receiver = new PeriodicPop3Receiver(accountService,
                     new Pop3ReceiveService(new MailKitPop3TransportFactory(), localStore, accountSecrets),
@@ -652,6 +657,22 @@ public partial class App : Application
             var serverRuleService = new GraphServerRuleService(accountService, graphBackend.Client);
             var syncService = new SyncService(effectiveMail, localStore, configService, ruleService,
                 probeMode: probeMode, activity: MailActivityPolicy);
+            if (ScheduledSender != null)
+                ScheduledSender.SyncBeforeFollowUpAsync = async (account, ct) =>
+                {
+                    if (account.BackendKind == BackendKind.Pop3Smtp)
+                    {
+                        if (_pop3Receiver == null) throw new IOException("POP3 reception is not ready.");
+                        await _pop3Receiver.CheckForFollowUpAsync(account, ct);
+                        return;
+                    }
+                    if (account.BackendKind == BackendKind.LocalArchive)
+                        throw new IOException("A local archive cannot check incoming replies automatically.");
+                    var inboxes = (await effectiveMail.GetFoldersAsync(account.Id, ct))
+                        .Where(f => f.Kind == SpecialFolderKind.Inbox).ToList();
+                    if (inboxes.Count == 0) throw new IOException("Cannot verify replies: inbox unavailable.");
+                    foreach (var inbox in inboxes) await syncService.SyncFolderFullAsync(account, inbox, ct);
+                };
             // The one-time immutable-id wipe emptied these accounts' store, so their first re-sync would
             // read old mail as new and re-run rules over it on upgrade day. Baseline it (#366/N5).
             if (immutableIdRebuilt) syncService.SeedRebuildBaseline(rebuiltGraphAccountIds);

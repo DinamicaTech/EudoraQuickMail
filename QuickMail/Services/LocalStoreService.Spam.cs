@@ -46,7 +46,7 @@ public partial class LocalStoreService
         command.CommandText = """
             SELECT unique_id,account_id,folder_name,internet_message_id,from_disp,to_addr,
                    subject,date_ticks,is_read,preview_text,is_replied,is_forwarded,
-                   has_attachments,is_mailing_list,flag_id,message_direction
+                   has_attachments,is_mailing_list,flag_id,message_direction,notes
             FROM MessageSummary WHERE account_id=$a AND folder_name=$f AND unique_id=$id
             """;
         command.Parameters.AddWithValue("$a", account.ToString());

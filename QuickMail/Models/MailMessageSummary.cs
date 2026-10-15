@@ -44,6 +44,9 @@ public partial class MailMessageSummary : ObservableObject
     /// <summary>Blind-carbon-copy recipients when the source exposes them (normally sent mail).</summary>
     public string Bcc { get; set; } = string.Empty;
     public string Subject { get; set; } = string.Empty;
+    /// <summary>Private local annotation. Never transmitted as message content or headers.</summary>
+    [ObservableProperty]
+    private string _notes = string.Empty;
     public DateTimeOffset Date { get; set; }
 
     /// <summary>

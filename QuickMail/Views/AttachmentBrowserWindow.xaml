@@ -1,0 +1,66 @@
+<Window x:Class="QuickMail.Views.AttachmentBrowserWindow"
+ xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+ xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+ Title="Attachment explorer" Width="1150" Height="720" MinWidth="760" MinHeight="500"
+ WindowStartupLocation="CenterOwner" PreviewKeyDown="OnPreviewKeyDown"
+ Background="{DynamicResource Theme.WindowBackground}" Foreground="{DynamicResource Theme.TextPrimary}"
+ FontFamily="{DynamicResource Theme.FontFamily}" FontSize="{DynamicResource Theme.FontSizeBase}">
+ <Window.Resources>
+  <Style x:Key="AttachmentColumnHeader" TargetType="DataGridColumnHeader">
+   <Setter Property="Background" Value="{DynamicResource Theme.SurfaceBackground}"/>
+   <Setter Property="Foreground" Value="{DynamicResource Theme.TextPrimary}"/>
+   <Setter Property="BorderBrush" Value="{DynamicResource Theme.Border}"/>
+   <Setter Property="BorderThickness" Value="0,0,1,1"/>
+   <Setter Property="Padding" Value="6,5"/>
+  </Style>
+ </Window.Resources>
+ <Grid Margin="12">
+  <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/><RowDefinition Height="130"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+  <StackPanel Grid.Row="0" Margin="0,0,0,8">
+   <TextBlock Text="{Binding ScopeLabel}" TextTrimming="CharacterEllipsis" Margin="0,0,0,6"/>
+   <DockPanel>
+    <Button DockPanel.Dock="Right" Content="Search" Click="Search_Click" MinWidth="85" Margin="8,0,0,0"/>
+    <CheckBox DockPanel.Dock="Right" Content="Everywhere" IsChecked="{Binding Everywhere}" VerticalAlignment="Center" Margin="12,0,0,0"/>
+    <TextBox x:Name="SearchBox" Text="{Binding Search,UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="Search attachments"
+      ToolTip="Search by attachment filename, message subject or sender. Press Search to run."/>
+   </DockPanel>
+  </StackPanel>
+  <DataGrid x:Name="AttachmentsGrid" Grid.Row="1" ItemsSource="{Binding Items}" SelectedItem="{Binding Selected}"
+    IsReadOnly="True" AutoGenerateColumns="False" SelectionMode="Extended" SelectionUnit="FullRow"
+    CanUserAddRows="False" CanUserDeleteRows="False" HeadersVisibility="Column" ColumnHeaderStyle="{StaticResource AttachmentColumnHeader}"
+    AutomationProperties.Name="Attachments" EnableRowVirtualization="True">
+   <DataGrid.Columns>
+    <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="210"/>
+    <DataGridTextColumn Header="Type" Binding="{Binding Extension}" Width="65"/>
+    <DataGridTextColumn Header="Bytes" Binding="{Binding Size}" Width="90"/>
+    <DataGridTextColumn Header="Date" Binding="{Binding Date,StringFormat=g}" Width="140"/>
+    <DataGridTextColumn Header="Sender" Binding="{Binding Sender}" Width="170"/>
+    <DataGridTextColumn Header="Subject" Binding="{Binding Subject}" Width="230"/>
+    <DataGridTextColumn Header="Folder" Binding="{Binding Folder}" Width="140"/>
+    <DataGridTextColumn Header="Source path / server part" Binding="{Binding SourcePath}" Width="250"/>
+   </DataGrid.Columns>
+  </DataGrid>
+  <WrapPanel Grid.Row="2" Margin="0,8">
+   <Button Content="Save selected…" Click="Save_Click" Margin="0,0,8,0"/>
+   <Button x:Name="GoButton" Content="Go to message" Click="Go_Click" Margin="0,0,8,0"/>
+   <Button Content="Locate missing attachment…" Click="Find_Click" Margin="0,0,8,0"/>
+   <Button Content="Copy original path" Click="Copy_Click"/>
+  </WrapPanel>
+  <DataGrid x:Name="CandidatesGrid" Grid.Row="3" ItemsSource="{Binding Candidates}" SelectedItem="{Binding Candidate}"
+    IsReadOnly="True" AutoGenerateColumns="False" SelectionMode="Single" CanUserAddRows="False" CanUserDeleteRows="False"
+    HeadersVisibility="Column" ColumnHeaderStyle="{StaticResource AttachmentColumnHeader}" AutomationProperties.Name="Recovery candidates">
+   <DataGrid.Columns>
+    <DataGridTextColumn Header="Candidate path" Binding="{Binding Path}" Width="*"/>
+    <DataGridTextColumn Header="Bytes" Binding="{Binding Size}" Width="100"/>
+    <DataGridTextColumn Header="Match evidence" Binding="{Binding Evidence}" Width="310"/>
+   </DataGrid.Columns>
+  </DataGrid>
+  <WrapPanel Grid.Row="4" Margin="0,8">
+   <Button Content="Recover a copy…" Click="Recover_Click" Margin="0,0,8,0" ToolTip="Copy the selected candidate into EQM and update only this attachment reference."/>
+   <Button Content="Use candidate location…" Click="Relink_Click" Margin="0,0,8,0" ToolTip="Keep the file in its current location. The message will depend on this path remaining accessible."/>
+   <Button Content="Cancel operation" Click="Cancel_Click" Margin="0,0,8,0" IsEnabled="{Binding IsBusy}"/>
+   <Button x:Name="CloseButton" Content="Close" Click="Close_Click" MinWidth="80"/>
+  </WrapPanel>
+  <TextBox Grid.Row="5" Text="{Binding Status,Mode=OneWay}" IsReadOnly="True" TextWrapping="Wrap" MaxHeight="100" VerticalScrollBarVisibility="Auto" AutomationProperties.Name="Attachment operation status"/>
+ </Grid>
+</Window>

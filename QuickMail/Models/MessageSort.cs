@@ -21,4 +21,6 @@ public enum MessageSort
     StatusDescending,
     DirectionAscending,
     DirectionDescending,
+    NotesAscending,
+    NotesDescending,
 }

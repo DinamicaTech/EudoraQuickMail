@@ -102,6 +102,12 @@ public class MailRule
     /// Action == MoveToFolder; ignored otherwise.
     /// </summary>
     public string? TargetFolder { get; set; }
+    public string? ForwardTo { get; set; }
+    public int? ReplyTemplateId { get; set; }
+    /// <summary>Inclusive local date. Null means no expiration.</summary>
+    public DateTime? ActiveUntil { get; set; }
+    [JsonIgnore]
+    public bool IsExpired => ActiveUntil.HasValue && ActiveUntil.Value.Date < DateTime.Today;
 }
 
 public enum RuleAction
@@ -117,4 +123,6 @@ public enum RuleAction
 
     /// <summary>Move the message to the Trash folder.</summary>
     Delete,
+    Forward,
+    ReplyTemplate,
 }

@@ -59,6 +59,7 @@ public class TypeAheadWiringTests
 
     private static readonly Site[] Sites =
     [
+        new("Views/RulesManagerWindow.xaml", "ReplyTemplateCombo", "Title", typeof(MessageTemplate)),
         new("Views/AddressBookWindow.xaml",    "ContactList",      "TypeAheadText",           typeof(ContactModel)),
         new("Views/AddressBookWindow.xaml",    "GroupsList",       "Name",                    typeof(GroupModel)),
         new("Views/AddressBookWindow.xaml",    "GroupMembersList", "TypeAheadText",           typeof(ContactModel)),

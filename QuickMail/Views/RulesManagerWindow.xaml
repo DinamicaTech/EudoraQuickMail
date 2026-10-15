@@ -2,6 +2,8 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:local="clr-namespace:QuickMail.Views"
+        xmlns:models="clr-namespace:QuickMail.Models"
+        xmlns:controls="clr-namespace:QuickMail.Controls"
         Title="{Binding WindowTitle}"
         AutomationProperties.Name="{Binding WindowTitle}"
         Width="750" Height="874"
@@ -123,11 +125,16 @@
                           Focusable="False"/>
 
             <!-- Right pane: Rule editor -->
-            <ScrollViewer Grid.Column="2" VerticalScrollBarVisibility="Auto"
+            <Grid Grid.Column="2" Margin="12,0,0,0">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+            <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Auto"
                           Focusable="False"
                           KeyboardNavigation.TabNavigation="Continue"
                           KeyboardNavigation.IsTabStop="False">
-                <StackPanel Margin="12,0,0,0">
+                <StackPanel>
                   <!-- Fields disabled when no rule is selected (e.g. no rules yet): they bind to
                        SelectedRule.* and would otherwise be live-but-blank, so a keyboard/screen-reader
                        user could tab onto an empty Account combo with nothing behind it. The button row
@@ -184,6 +191,10 @@
                               AutomationProperties.Name="Also filter Out mailbox when run manually"/>
 
                     <!-- Conditions -->
+                    <CheckBox Content="Active until (inclusive)" IsChecked="{Binding HasExpiration}"
+                              ToolTip="Expired rules remain saved but are skipped for both manual and automatic processing."/>
+                    <controls:DateTimeField Kind="Date" Value="{Binding SelectedRule.ActiveUntil, Mode=TwoWay}"
+                                            IsEnabled="{Binding HasExpiration}" AutomationProperties.Name="Rule expiration date"/>
                     <TextBlock Text="Conditions" FontWeight="SemiBold" Margin="0,12,0,4"/>
                     <Separator Margin="0,0,0,6"/>
 
@@ -293,6 +304,40 @@
                               AutomationProperties.Name="Also mark matching messages as read"/>
 
                     <!-- Target folder -->
+                    <StackPanel>
+                        <StackPanel.Style>
+                            <Style TargetType="StackPanel">
+                                <Setter Property="Visibility" Value="Collapsed"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding SelectedValue, ElementName=ActionCombo}" Value="{x:Static models:RuleAction.ReplyTemplate}">
+                                        <Setter Property="Visibility" Value="Visible"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </StackPanel.Style>
+                        <TextBlock Text="Reply template"/>
+                        <ComboBox x:Name="ReplyTemplateCombo" ItemsSource="{Binding ReplyTemplates}" SelectedValue="{Binding SelectedRule.ReplyTemplateId}"
+                                  SelectedValuePath="Id" TextSearch.TextPath="Title" DisplayMemberPath="Title"
+                                  AutomationProperties.Name="Reply template"/>
+                        <TextBlock Text="One reply per sender and expiration period. Bulk mail, automatic replies and own accounts are skipped. Originals are retained."
+                                   TextWrapping="Wrap"/>
+                    </StackPanel>
+                    <StackPanel>
+                        <StackPanel.Style>
+                            <Style TargetType="StackPanel">
+                                <Setter Property="Visibility" Value="Collapsed"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding SelectedValue, ElementName=ActionCombo}" Value="{x:Static models:RuleAction.Forward}">
+                                        <Setter Property="Visibility" Value="Visible"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </StackPanel.Style>
+                        <Label Content="Forward _to:" Target="{Binding ElementName=ForwardToBox}"/>
+                        <TextBox x:Name="ForwardToBox" Text="{Binding SelectedRule.ForwardTo, UpdateSourceTrigger=PropertyChanged}"
+                                 AutomationProperties.Name="Forward destination email"
+                                 ToolTip="One email address. Sends using the original account, with attachments; keeps the original. Own accounts and already forwarded messages are protected against loops."/>
+                    </StackPanel>
                     <TextBlock Text="Target folder"/>
                     <!-- Accessible name tracks the chosen folder (issue #344): a static name made
                          a screen reader always say "Choose target folder" even after a folder was
@@ -320,9 +365,11 @@
                     </TextBlock>
                   </StackPanel>
                   <!-- End of the fields panel; buttons below stay enabled. -->
+                </StackPanel>
+            </ScrollViewer>
 
                     <!-- Buttons -->
-                    <StackPanel Orientation="Horizontal" Margin="0,16,0,0">
+                    <WrapPanel Grid.Row="1" Orientation="Horizontal" Margin="0,10,0,0">
                         <Button Content="Test Rule" Command="{Binding TestRuleCommand}"
                                 MinWidth="80" Margin="0,0,8,0"
                                 AutomationProperties.Name="Test rule against selected messages"/>
@@ -343,9 +390,8 @@
                                 MinWidth="60"
                                 AutomationProperties.Name="Cancel rule changes"
                                 IsCancel="True"/>
-                    </StackPanel>
-                </StackPanel>
-            </ScrollViewer>
+                    </WrapPanel>
+            </Grid>
         </Grid>
 
         <!-- Status bar -->

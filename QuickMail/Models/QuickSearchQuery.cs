@@ -3,7 +3,7 @@ using System.Text;
 
 namespace QuickMail.Models;
 
-public enum QuickSearchField { Any, To, From, Cc, Subject, Body, AttachmentCount, AttachmentName, AttachmentContent, Date, Unread, Flagged, Incoming, Outgoing, Spam }
+public enum QuickSearchField { Any, To, From, Cc, Subject, Body, AttachmentCount, AttachmentName, AttachmentContent, Date, Unread, Flagged, Incoming, Outgoing, Spam, Notes }
 
 public sealed record QuickSearchTerm(QuickSearchField Field, string Operator, string Value);
 public sealed record QuickSearchGroup(IReadOnlyList<QuickSearchTerm> Alternatives);
@@ -16,7 +16,7 @@ public static class QuickSearchParser
     public static bool HasSlowWildcard(string input) =>
         Parse(input).Groups.SelectMany(group => group.Alternatives).Any(term =>
             (term.Field is QuickSearchField.Any or QuickSearchField.To or QuickSearchField.From
-                or QuickSearchField.Cc or QuickSearchField.Subject or QuickSearchField.Body
+                or QuickSearchField.Cc or QuickSearchField.Subject or QuickSearchField.Body or QuickSearchField.Notes
                 or QuickSearchField.AttachmentName or QuickSearchField.AttachmentContent)
             && (term.Value.Contains('?') || term.Value.Contains('*') &&
                 !(term.Value.EndsWith('*') && term.Value.Count(ch => ch == '*') == 1)));
@@ -82,6 +82,7 @@ public static class QuickSearchParser
             ("AC", QuickSearchField.AttachmentContent), ("T", QuickSearchField.To),
             ("F", QuickSearchField.From), ("C", QuickSearchField.Cc),
             ("S", QuickSearchField.Subject), ("B", QuickSearchField.Body), ("D", QuickSearchField.Date),
+            ("N", QuickSearchField.Notes),
         };
         foreach (var (prefix, field) in prefixes)
         {

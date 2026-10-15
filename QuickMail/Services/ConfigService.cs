@@ -222,6 +222,10 @@ public class ConfigService : IConfigService
                     case "showtodayagenda":   config.ShowTodayAgenda   = ParseBool(value); break;
                     case "showfiltereddestinationtab": config.ShowFilteredDestinationTab = ParseBool(value); break;
                     case "opensearchesinresultstab": config.OpenSearchesInResultsTab = ParseBool(value); break;
+                    case "favoritefolderkeys":
+                        try { config.FavoriteFolderKeys = JsonSerializer.Deserialize<List<string>>(value) ?? []; }
+                        catch (JsonException) { config.FavoriteFolderKeys = []; }
+                        break;
                     case "builtinsavedviewsversion":
                         if (int.TryParse(value, out var builtInViewsVersion))
                             config.BuiltInSavedViewsVersion = Math.Max(0, builtInViewsVersion);
@@ -510,6 +514,7 @@ public class ConfigService : IConfigService
 
         sb.AppendLine($"ShowFilteredDestinationTab = {(config.ShowFilteredDestinationTab ? "on" : "off")}");
         sb.AppendLine($"OpenSearchesInResultsTab = {(config.OpenSearchesInResultsTab ? "on" : "off")}");
+        sb.AppendLine($"FavoriteFolderKeys = {JsonSerializer.Serialize(config.FavoriteFolderKeys)}");
         sb.AppendLine("# Keep one background tab pointing at the latest successful rule destination.");
         sb.AppendLine();
 
