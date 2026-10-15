@@ -248,7 +248,7 @@
 </head>
 <body>
 <header id="title-block-header">
-<h1 class="title">QuickMail User Guide</h1><p class="version">Version 0.8.46</p>
+<h1 class="title">QuickMail User Guide</h1><p class="version">Version 0.8.85</p>
 </header>
 <h1 id="quickmail-user-guide">QuickMail User Guide</h1>
 <p>QuickMail is a keyboard and screen reader friendly email program for
@@ -275,7 +275,6 @@ Message</a></li>
 <li><a href="#calendar">Calendar</a></li>
 <li><a href="#what-syncs-and-what-doesnt">What Syncs and What
 Doesn’t</a></li>
-<li><a href="#working-offline">Working Offline</a></li>
 <li><a href="#notifications">Notifications</a></li>
 <li><a href="#tools-menu">Tools Menu</a></li>
 <li><a href="#connection-diagnostics">Connection Diagnostics</a></li>
@@ -336,7 +335,7 @@ time</h3>
 <li>Download <strong>QuickMail-win.msi</strong> — or
 <strong>QuickMail-win-arm64.msi</strong> for a Snapdragon PC, as
 described above — from the <a
-href="https://github.com/kellylford/QuickMail/releases">releases
+href="https://github.com/DinamicaTech/EudoraQuickMail/releases">releases
 page</a> and run it.</li>
 <li>The setup wizard walks through a welcome page, the license
 agreement, and installation. QuickMail installs for the current user
@@ -379,7 +378,8 @@ switch:</p>
 <li>Uninstall QuickMail from <strong>Settings → Apps</strong>. When the
 uninstaller offers to delete your data, choose <strong>No</strong>.</li>
 <li>Download and run <strong>QuickMail-win-arm64.msi</strong> from the
-<a href="https://github.com/kellylford/QuickMail/releases">releases
+<a
+href="https://github.com/DinamicaTech/EudoraQuickMail/releases">releases
 page</a>.</li>
 <li>Start QuickMail. Everything is as you left it, for the same reason
 as above — your accounts, settings, and mail are stored separately from
@@ -450,8 +450,8 @@ on by default. Turn it off to skip the QuickMail Update Installed
 dialog; the Help menu entry still reflects your current version.</li>
 </ul>
 <h3 id="the-portable-version">The portable version</h3>
-<p><code>QuickMail.exe</code> on the same releases page — or
-<code>QuickMail-arm64.exe</code> for a Snapdragon PC — is a single-file
+<p><code>EudoraQM.exe</code> on the same releases page — or
+<code>EudoraQM-arm64.exe</code> for a Snapdragon PC — is a single-file
 version that runs from anywhere with no installation — nothing is
 written to Program Files or the registry, and it never updates itself.
 The Help menu tells you when a new version is available; updating is a
@@ -541,26 +541,15 @@ send.</li>
 <li><strong>Sync contacts from this account</strong> and <strong>Sync
 calendar from this account</strong> appear for iCloud accounts and for
 accounts that sign in — Microsoft, and Gmail when you choose Google
-sign-in. Check them <em>before</em> signing in, so the permission can be
+sign-in. Check them <em>before</em> signing in, so the permission is
 part of the same sign-in. (A Gmail account using an app password has no
 contact or calendar sync, so the boxes do not appear.)</li>
 <li>Press <strong>Add Account</strong>.</li>
 </ol>
-<p>Whether that permission really is part of the same sign-in depends on
-the account. Google sign-in folds it in, and so does a personal
-Outlook.com account set to connect over <strong>Microsoft 365
-(Graph)</strong> — one screen lists mail, contacts, and calendar
-together. A work or school Microsoft account asks separately once the
-account is added, on purpose: organizations that restrict what their
-users may approve would turn one over-asking screen into a failed
-sign-in, and no account at all.</p>
 <p>Server names, ports, and SSL settings are behind <strong>Advanced
 settings</strong>, an expander that stays closed unless you need it. Tab
 reaches its header before its contents, so one keystroke moves past the
-whole thing. <strong>Sign in with Microsoft</strong> and <strong>Sign in
-with Google</strong> come last of all, after Advanced settings and
-everything inside it — signing in is the last thing you do, so it is the
-last thing you tab to. The same is true in Manage Accounts.</p>
+whole thing.</p>
 <p>If something required is missing, <strong>Add Account</strong> does
 not close the dialog. It says what is missing and moves focus to the
 field that needs attention — the email address, the password, or, when
@@ -625,14 +614,8 @@ settings</strong> for any provider, to enter:</p>
 server logs in under a different name than your email address. See <a
 href="#when-your-login-is-not-your-email-address">When your login is not
 your email address</a>.</li>
-<li><strong>Connection method</strong> — Standard IMAP/SMTP, Microsoft
-365 (Graph) for Microsoft accounts, and POP3/SMTP when you have turned
-POP3 on. The incoming fields below follow whichever you choose; see <a
-href="#pop3-accounts">POP3 accounts</a>.</li>
 <li><strong>IMAP host</strong>, port, <strong>Use SSL</strong> (port
-993), and whether to accept invalid certificates — or <strong>POP3
-host</strong>, port and <strong>Use SSL</strong> (port 995) for a POP3
-account</li>
+993), and whether to accept invalid certificates</li>
 <li><strong>SMTP host</strong>, port, implicit SSL on connect (port 465
 — leave it unchecked for STARTTLS on port 587), and whether to accept
 invalid certificates</li>
@@ -712,10 +695,10 @@ Live.com</strong> accounts alike.</p>
 <strong>Outlook.com / Microsoft 365</strong> — or just type your
 address, which selects it for you. The password box disappears;
 Microsoft accounts sign in instead.</li>
-<li>Activate <strong>Sign in with Microsoft</strong> — the last tab stop
-in the dialog, after Advanced settings. A Microsoft sign-in window opens
-inside QuickMail. Sign in and approve the permissions QuickMail
-requests; the window closes itself and returns you to the dialog.</li>
+<li>Activate <strong>Sign in with Microsoft</strong>. A Microsoft
+sign-in window opens inside QuickMail. Sign in and approve the
+permissions QuickMail requests; the window closes itself and returns you
+to the dialog.</li>
 <li>Activate <strong>Add Account</strong>.</li>
 </ol>
 <p>Sign in as <strong>the same address you typed</strong> into the
@@ -755,15 +738,6 @@ href="#for-microsoft-365-administrators-and-tenant-owners">For Microsoft
 365 Administrators and Tenant Owners</a>; once they approve QuickMail,
 sign-in works normally. Personal Outlook.com accounts are not affected
 and need no approval.</p>
-<p>If an administrator signs in at that approval screen, they can
-approve QuickMail for the whole organization there (there is a “consent
-on behalf of your organization” option). Because the administrator’s
-account is not the one you were adding, QuickMail leaves your account
-unchanged and <strong>offers to sign you in again as yourself</strong> —
-choose <strong>Yes</strong> to finish connecting. An administrator can
-also approve QuickMail ahead of time without this back-and-forth via
-<strong>Help → Grant Admin Consent for Your Organization</strong> or the
-administrators section above.</p>
 </blockquote>
 <p>To bring this account’s contacts into your address book, check
 <strong>Sync contacts from this account</strong> before signing in. See
@@ -881,83 +855,6 @@ single (non-repeating) appointments on. See <a
 href="#syncing-contacts-from-your-accounts">Syncing Contacts from Your
 Accounts</a> and the <a href="#calendar">Calendar</a> section for
 details.</p>
-<h3 id="pop3-accounts">POP3 accounts</h3>
-<p>Some mail services offer POP3 and nothing else. QuickMail can collect
-mail over POP3 and send over SMTP as usual — but POP3 works differently
-enough from IMAP that it is worth reading this section before you choose
-it.</p>
-<p><strong>Turning it on.</strong> POP3 is off until you ask for it. In
-<strong>File → Settings</strong> (Ctrl+comma), open the
-<strong>Advanced</strong> tab, and under <strong>Account Types</strong>
-check <strong>Offer POP3 when adding an account</strong>. It takes
-effect the next time QuickMail starts. (Equivalently,
-<code>Pop3Backend = true</code> under <code>[features]</code> in
-<code>config.ini</code>, or <code>--feature Pop3Backend</code> at launch
-— they are the same switch, so there is no need to set more than
-one.)</p>
-<p><strong>Adding the account.</strong> Add it as you would any other:
-<strong>New</strong> in Manage Accounts, then open <strong>Advanced
-settings</strong> and choose <strong>POP3/SMTP</strong> under
-<strong>Connection method</strong>. The <strong>Incoming Mail
-(POP3)</strong> fields replace the IMAP ones. Gmail, Outlook.com and
-Yahoo Mail fill in their POP3 server for you; for anything else, type
-the server, port and security yourself. iCloud is not offered a POP3
-server because Apple does not run one — iCloud is IMAP only.</p>
-<p>Two things most services require before POP3 will answer at all: POP3
-switched on in the service’s own web settings, and — for Gmail and Yahoo
-— an app password rather than your account password.</p>
-<p><strong>What is different from IMAP:</strong></p>
-<ul>
-<li><strong>Messages are downloaded whole and kept on this
-computer.</strong> Reading a message, opening its attachments, and
-searching all work with no network.</li>
-<li><strong>Four folders — Inbox, Sent, Drafts and Trash — and they
-belong to QuickMail.</strong> A POP3 server has no folders to show, so
-these are QuickMail’s own. Creating, renaming, moving and deleting
-folders are not offered for a POP3 account; QuickMail says so rather
-than failing at the server.</li>
-<li><strong>Read and unread, flags, and moves between those folders stay
-on this computer.</strong> POP3 has nowhere on the server to record
-them, so another mail program reading the same mailbox will not see
-them.</li>
-<li><strong>New mail arrives on the sync interval</strong>, not the
-moment it lands. POP3 has no equivalent of the live connection QuickMail
-holds open for IMAP, so there is no instant notification.</li>
-<li><strong>Sending is unchanged.</strong> A POP3 account sends over
-SMTP exactly like an IMAP one, and a copy of each sent message is filed
-in QuickMail’s own Sent folder.</li>
-</ul>
-<p><strong>Keep mail on the server after downloading.</strong> This is
-checked by default, and while it is checked QuickMail never deletes
-anything from your mail service: collect mail here and it is still there
-for your phone, webmail, or anything else you use.</p>
-<p>Clear it and QuickMail removes each message from the server once it
-is safely stored here — the classic POP3 behaviour, and the reason POP3
-has the reputation it has. <strong>This computer then holds the only
-copy</strong>, so think about backups before choosing it. You can change
-the setting later in Manage Accounts. Clearing it also applies to mail
-collected earlier, as POP3 programs have traditionally worked: on the
-next collection QuickMail removes the server copies of messages it
-already downloaded — every one of them is already stored here, so
-nothing is lost, but if your phone or another program has not collected
-that mailbox yet, leave the setting checked until it has.</p>
-<p>Either way, deleting a message in QuickMail is two steps, as it is
-everywhere else: to Trash, then permanently. Only the permanent delete
-can reach the server, and only for an account set to remove collected
-mail. QuickMail confirms it is deleting the right message first — a
-message some other program has already collected is left alone rather
-than deleted by position.</p>
-<p>With <strong>keep mail on the server</strong> checked, a permanent
-delete (including emptying the Trash) is local and final: the message is
-gone from QuickMail for good, the server copy stays where it is for
-whatever else reads that mailbox, and QuickMail remembers the deletion
-so the message is never downloaded again.</p>
-<p><strong>Where your POP3 mail lives.</strong> In QuickMail’s data
-folder for that profile (<code>%APPDATA%\QuickMail</code> by default),
-in <code>mail.db</code>. For an IMAP account that file is a cache and
-can be deleted safely; for a POP3 account with “keep mail on the server”
-cleared, it is your mail. Back it up accordingly, and see <a
-href="#moving-to-a-new-computer">Moving to a new computer</a>.</p>
 <h3 id="editing-an-account">Editing an account</h3>
 <p>Select an account in the <strong>Accounts</strong> list and its
 settings appear beside it. You can change:</p>
@@ -986,10 +883,8 @@ entered.</p>
 Google</strong> are here too, for when a sign-in needs renewing.</p>
 <p><strong>Set Default</strong> marks the selected account as your
 default — the account new messages are sent from unless you choose
-another, and the one the Rules Manager opens on when you are not in a
-particular account (in <strong>All Inboxes</strong>, for example). The
-default account is announced as “default” alongside its name in the
-list.</p>
+another, and the one new mail rules are created for. The default account
+is announced as “default” alongside its name in the list.</p>
 <p>Server settings sit behind the same <strong>Advanced
 settings</strong> expander as in Add Account, so an account that is
 working needs no scrolling past hosts and ports to reach the settings
@@ -997,72 +892,16 @@ people actually change. The <strong>Provider</strong> at the top is
 fixed when the account is created; to change it, remove the account and
 add it again.</p>
 <h3 id="removing-an-account">Removing an account</h3>
-<p>Select the account and press <strong>Delete</strong>. For an ordinary
-account there is no confirmation step, and the removal happens at once:
-QuickMail forgets the account’s password from Windows Credential
-Manager, deletes the mail it had cached, removes any contacts synced
-from it, and for Microsoft and Google accounts signs out as well. You
-hear “Account deleted. Cleaning up…”, then “Account deleted.” when the
-tidying has finished. (Deleting an account that a shared mailbox reads
-through does ask first, because it removes the shared mailbox too — see
-<a href="#shared-mailboxes">Shared mailboxes</a>.)</p>
+<p>Select the account and press <strong>Delete</strong>. There is no
+confirmation step, and the removal happens at once: QuickMail forgets
+the account’s password from Windows Credential Manager, deletes the mail
+it had cached, removes any contacts synced from it, and for Microsoft
+and Google accounts signs out as well. You hear “Account deleted.
+Cleaning up…”, then “Account deleted.” when the tidying has
+finished.</p>
 <p><strong>Nothing is deleted from the mail server.</strong> Removing an
 account removes it from QuickMail only — add it again and your mail is
 still there.</p>
-<h3 id="shared-mailboxes">Shared mailboxes</h3>
-<p>A shared mailbox is a mailbox several people read and send from — a
-<code>support@</code>, <code>info@</code>, or <code>sales@</code>
-address that belongs to a team rather than a person. If your
-organization has given you access to one, you can add it to QuickMail
-and it appears as its own mailbox in the folder tree, alongside your own
-accounts.</p>
-<p>Shared mailboxes are a <strong>Microsoft 365 work or school</strong>
-feature. You add one through an account you already have: QuickMail
-reads and sends the shared mailbox using your existing sign-in, so there
-is no separate password and no separate sign-in for it. Personal
-Outlook.com accounts and non-Microsoft (IMAP) accounts do not have
-shared mailboxes, so the option is offered only when you have a work or
-school Microsoft 365 account to read it through.</p>
-<p><strong>To add a shared mailbox:</strong> open <strong>Account
-Manager</strong> (Tools menu), activate <strong>Add shared
-mailbox</strong>, choose the work or school account that has access to
-it if you are asked, and type the shared mailbox’s email address. Press
-<strong>Add</strong>. The mailbox connects using that account and its
-folders load. You do not need access to a password — access comes from
-your own account’s permission to the mailbox, which your organization
-grants.</p>
-<p><strong>Reading and sending.</strong> A shared mailbox reads like any
-other: select it in the folder tree and open its folders. To send from
-it, choose the shared address in the <strong>From</strong> list when
-composing — the message goes out as the shared mailbox, not as you.</p>
-<p><strong>Freshness.</strong> A shared mailbox updates on a timer
-rather than the instant new mail arrives: <strong>shared mailboxes
-update every few minutes, not instantly.</strong> Your own mailboxes
-still update live; only the shared one waits for the next check.</p>
-<p><strong>New-mail notifications are off for a shared mailbox by
-default.</strong> A shared mailbox is often a busy team address, so
-QuickMail does not pop a notification for every message that lands in
-it. If you do want notifications for a particular shared mailbox, select
-it in Account Manager and turn on <strong>Notify me of new mail in this
-shared mailbox</strong>. The main <strong>Show a Notification When New
-Mail Arrives</strong> setting still has to be on for any notification to
-appear.</p>
-<p><strong>Rules.</strong> A shared mailbox’s rules are managed in
-Outlook, not in QuickMail, so a shared mailbox is not in the Rules
-Manager’s <strong>Account</strong> list. QuickMail cannot reach a shared
-mailbox’s server-side rules, and a client-side rule would act, from your
-computer only, on mail everyone else reads. <strong>Create Rule from
-Message</strong> is not in the context menu for a shared mailbox’s
-messages, and <strong>Ctrl+Shift+T</strong> and the command palette say
-so on the status bar instead of making a rule from one. In the mailbox’s
-folders, the rule summary on the status bar says its rules are managed
-in Outlook. A client-side rule saved on a shared mailbox by an earlier
-version is kept but no longer runs.</p>
-<p><strong>Removing.</strong> Removing the account that a shared mailbox
-reads through also removes the shared mailbox — you are told which
-shared mailboxes will go when you delete their parent account. Removing
-a shared mailbox on its own leaves the account it read through
-untouched.</p>
 <hr />
 <h2 id="for-microsoft-365-administrators-and-tenant-owners">For
 Microsoft 365 Administrators and Tenant Owners</h2>
@@ -1188,15 +1027,6 @@ you straight to an error page (see Troubleshooting).</p>
 <p>Replace <code>organizations</code> with your tenant ID or a verified
 domain to target a specific tenant. Review the permission list Microsoft
 shows and approve. This grants consent tenant-wide in one step.</p>
-<p><strong>Option C — from inside QuickMail.</strong> If you have
-QuickMail installed, choose <strong>Help → Grant Admin Consent for Your
-Organization…</strong>. Sign in as one of the admin roles above in the
-window that opens, review the permission list, and approve. This grants
-QuickMail’s Microsoft Graph permissions tenant-wide in one step without
-building a URL by hand, and it works even before anyone in your
-organization has added an account — the consent itself registers
-QuickMail in your tenant. QuickMail tells you when consent has been
-granted.</p>
 <p>After approval, your users sign in normally with no further
 prompts.</p>
 <h3 id="if-you-would-rather-not-grant-blanket-approval">If you would
@@ -1372,55 +1202,6 @@ person’s name in the From and To trees.</p>
 <p>The same typing works in the <strong>Go to Folder</strong> picker, in
 the address book’s contact, group, and member lists, and in the <a
 href="#message-list-fields">Message List Fields</a> window.</p>
-<h3 id="expanding-and-collapsing-folders">Expanding and Collapsing
-Folders</h3>
-<p>Right and Left arrow still open and close one folder at a time, and
-that has not changed. What is new is four actions for doing it in bulk —
-useful when an account has folders nested several levels deep, or when
-several accounts have filled the tree.</p>
-<ul>
-<li><strong>Expand Folder</strong> opens the selected folder and
-everything inside it, all the way down, rather than one level.</li>
-<li><strong>Collapse Folder</strong> closes it and everything inside it,
-so the whole branch folds back to a single line.</li>
-<li><strong>Expand All Folders</strong> opens every folder in the
-tree.</li>
-<li><strong>Collapse All Folders</strong> closes everything, account
-headers included, leaving the tree as a short list of accounts.</li>
-</ul>
-<p>Each is reachable three ways:</p>
-<ul>
-<li>Choose <strong>Folder → Expand Folder</strong>, <strong>Collapse
-Folder</strong>, <strong>Expand All Folders</strong>, or
-<strong>Collapse All Folders</strong> from the menu bar.</li>
-<li>Press <strong>Shift+F10</strong> on the folder tree and choose it
-from the context menu. On a calendar the first two read <strong>Expand
-Calendar</strong> and <strong>Collapse Calendar</strong>; they do the
-same thing.</li>
-<li>Open the Command Palette (<strong>Ctrl+Shift+P</strong>) and choose
-it there. None of the four has a shortcut key to begin with, so if you
-use one often, assign it your own in <a
-href="#keyboard-customization">Keyboard Customization</a>.</li>
-</ul>
-<p>The two “all folders” actions say what they did — “All folders
-collapsed” — because you can start them from the menu bar with focus
-anywhere. The two single-folder actions say nothing extra when you use
-the context menu: the folder keeps focus and your screen reader reports
-its own expanded or collapsed state. Started from the Folder menu or the
-Command Palette with focus outside the tree, where nothing is there to
-report it, they say what they did instead.</p>
-<p>If collapsing hides the folder you were on, the selection moves up to
-the nearest folder still showing rather than disappearing into a closed
-branch. Choosing Expand or Collapse Folder on a folder with nothing
-inside it says so instead of doing nothing.</p>
-<p>How you leave the tree is how you find it: a folder you collapse
-stays collapsed while QuickMail refreshes its folder list, and coming
-back to the tree with <strong>F6</strong> or <strong>Ctrl+2</strong>
-leaves it collapsed rather than re-opening the branch holding the folder
-you are reading. Go to a different folder and the tree opens up to show
-it again, as it always has. Expansion is not remembered between runs —
-QuickMail starts each account open, and opens whatever it needs to reach
-the folder it lands in.</p>
 <h3 id="creating-folders">Creating Folders</h3>
 <p>Create a new folder in any of these ways:</p>
 <ul>
@@ -1516,41 +1297,6 @@ menu) to switch how messages are grouped:</p>
 <li><strong>From</strong> — messages grouped by sender</li>
 <li><strong>To</strong> — messages grouped by recipient</li>
 </ul>
-<h3 id="moving-to-the-next-unread-message">Moving to the Next Unread
-Message</h3>
-<p><code>Alt+Down</code> moves to the nearest unread message below where
-you are; <code>Alt+Up</code> moves to the nearest one above. They are
-also <strong>Next Unread Message</strong> and <strong>Previous Unread
-Message</strong> in the command palette, and you can give them different
-keys in <strong>File → Settings → Keyboard Shortcuts</strong>.</p>
-<p>In the <strong>Messages</strong> view they move down or up the list,
-skipping everything already read. In <strong>Conversations</strong>,
-<strong>From</strong>, and <strong>To</strong> they run through every
-message the tree holds, in group order — so they cross from one
-conversation or sender into the next rather than stopping at the end of
-the one you are in. Closed groups are searched too, and a closed group
-holding the unread message is opened so that message can take focus. It
-stays open afterwards, like any group you open yourself.</p>
-<p>Below and above mean what they say on screen: which of them is newer
-depends on how the folder is sorted.</p>
-<p>Both keys act while you are in the message list or a group tree —
-including when you are moving through the list with the reading pane
-open beside it. They do nothing while focus is inside the reading pane
-itself, and an open message window has its own keys:
-<strong>Alt+Left</strong> and <strong>Alt+Right</strong> already move to
-the previous and next message there.</p>
-<p>While a message tab is showing there is no list to move through, and
-the two actions are not offered in that window’s command palette. Start
-one from the main window’s palette while the calendar is open, or while
-a message tab covers the list, and QuickMail says why instead of going
-quiet.</p>
-<p>Neither wraps around. When there is no unread message left in the
-direction you are going, nothing moves and QuickMail says “No unread
-messages below” or “No unread messages above”, so that running out is
-never mistaken for a key that did not register. (That is a
-<strong>Result</strong> announcement — see <a
-href="#screen-reader-announcements">Screen Reader Announcements</a> if
-you have those switched off.)</p>
 <h3 id="each-folder-remembers-how-you-left-it">Each Folder Remembers How
 You Left It</h3>
 <p>Folders do not all want the same treatment. An inbox reads well
@@ -1586,263 +1332,18 @@ Density</strong>, and <strong>Density: Comfortable</strong> and
 reader reports about it, is identical either way — that is set in <a
 href="#message-list-fields">Message List Fields</a>.</p>
 <h3 id="searching">Searching</h3>
-<p>Press <code>Ctrl+Shift+S</code>, or <code>/</code> in the message
-list, to open the search box. The list narrows as you type to the
-matching messages in the folder you are in — an ordinary folder, or a
-combined one such as <strong>All Inboxes</strong> or <strong>All
-Mail</strong> — and the number found is announced when you pause. Press
-<strong>Down</strong> or <strong>Tab</strong> to move into the results,
-and <strong>Escape</strong> to clear the search and return to the whole
-folder.</p>
-<p>Search reads the whole message, not only what the list shows: the
-sender, the recipients and Cc, the subject, the text of the message, and
-the names of its attachments. It searches the copy QuickMail keeps on
-this computer, so the text of a message is searchable once it has been
-downloaded — because you opened it, because QuickMail fetched it ahead
-of time, or because it is inside <strong>Download messages for offline
-reading</strong> (see <a
-href="#reading-messages-without-a-connection">Reading messages without a
-connection</a>). The sender, recipients, subject and preview are always
-searchable, and there a match can be part of a word.</p>
-<p><strong>Words.</strong> Every word you type has to be in the message,
-in any order. A word finds the words that begin with it, so
-<code>budg</code> finds “budget”, and capitals and accents don’t
-matter.</p>
-<ul>
-<li>Put words in quotes to find them together, in that order:
-<code>"quarterly report"</code>.</li>
-<li>Put a minus sign in front of a word or quoted phrase to leave out
-the messages that contain it: <code>budget -draft</code>.</li>
-</ul>
-<p><strong>Where a word is.</strong> Put one of these in front of a
-word, or of a quoted phrase, to look for it in one place only:</p>
-<table>
-<thead>
-<tr class="header">
-<th>Type</th>
-<th>To find it in</th>
-</tr>
-</thead>
-<tbody>
-<tr class="odd">
-<td><code>from:sam</code></td>
-<td>the sender’s name or address</td>
-</tr>
-<tr class="even">
-<td><code>to:ann</code></td>
-<td>the recipients</td>
-</tr>
-<tr class="odd">
-<td><code>cc:lee</code></td>
-<td>the Cc recipients</td>
-</tr>
-<tr class="even">
-<td><code>subject:invoice</code></td>
-<td>the subject</td>
-</tr>
-<tr class="odd">
-<td><code>body:agenda</code></td>
-<td>the text of the message</td>
-</tr>
-<tr class="even">
-<td><code>attachment:report</code></td>
-<td>the names of attached files</td>
-</tr>
-</tbody>
-</table>
-<p><strong>Which messages.</strong> These narrow the results without
-looking for any text:</p>
-<table>
-<colgroup>
-<col style="width: 27%" />
-<col style="width: 72%" />
-</colgroup>
-<thead>
-<tr class="header">
-<th>Type</th>
-<th>Finds messages</th>
-</tr>
-</thead>
-<tbody>
-<tr class="odd">
-<td><code>has:attachment</code></td>
-<td>with attachments</td>
-</tr>
-<tr class="even">
-<td><code>is:unread</code>, <code>is:read</code></td>
-<td>not yet read, or read</td>
-</tr>
-<tr class="odd">
-<td><code>is:flagged</code>, <code>is:unflagged</code></td>
-<td>flagged, or not</td>
-</tr>
-<tr class="even">
-<td><code>after:2026-01-15</code></td>
-<td>received on that day or later</td>
-</tr>
-<tr class="odd">
-<td><code>before:2026-02-01</code></td>
-<td>received before that day</td>
-</tr>
-<tr class="even">
-<td><code>folder:projects</code></td>
-<td>in a folder whose name contains “projects” — useful in All Mail</td>
-</tr>
-<tr class="odd">
-<td><code>account:work</code></td>
-<td>in an account whose name or address contains “work”</td>
-</tr>
-</tbody>
-</table>
-<p>A minus sign in front of <code>has:</code> or <code>is:</code>
-reverses it: <code>-has:attachment</code> finds messages with none.
-Write dates as year, month and day, or the way Windows shows a short
-date on your computer.</p>
-<p>Anything else with a colon in it — <code>Re:</code>, a time such as
-<code>10:30</code>, a web address — is searched for as ordinary text, so
-pasting a subject line works.</p>
-<p>Everything combines:
-<code>from:sam budget -draft is:unread after:2026-01-01</code> finds
-unread messages from Sam since the start of the year that mention the
-budget and don’t mention a draft.</p>
-<h3 id="advanced-search">Advanced Search</h3>
-<p>Press <strong>Ctrl+/</strong>, or choose <strong>View → Advanced
-Search…</strong>, to search with a form instead of typing the syntax.
-You can assign a different shortcut in <strong>File → Settings →
-Keyboard Shortcuts</strong>.</p>
-<p>The form has a field for each part of a message — <strong>Words
-anywhere</strong>, <strong>From</strong>, <strong>To</strong>,
-<strong>Cc</strong>, <strong>Subject</strong>, <strong>Body</strong> and
-<strong>Attachment name</strong> — and for the conditions: <strong>Has
-attachments</strong>, <strong>Read state</strong>,
-<strong>Flag</strong>, <strong>Received from</strong> and
-<strong>Received up to</strong> (both days included). Every word in a
-field is looked for in that part of the message, so
-<strong>From</strong> <code>Sam Smith</code> finds a sender with both
-words in the name or address. <strong>Words anywhere</strong> also takes
-everything the search box understands, such as
-<code>folder:projects</code>.</p>
-<p>Under <strong>Look in</strong>, choose where to search:</p>
-<ul>
-<li><strong>This folder</strong> searches the folder you were in,
-exactly as the search box does: the search box opens showing the search,
-so you can see how it is written and change it there.</li>
-<li><strong>Every folder of these accounts</strong> searches all of your
-mail in the accounts you leave checked — every account, unless you
-uncheck some — including Sent and Trash. The results open as a
-<strong>Search results</strong> folder.</li>
-</ul>
-<p>The accounts are a single list: <strong>Tab</strong> reaches it,
-<strong>Up</strong> and <strong>Down</strong> move between accounts, and
-<strong>Space</strong> checks or unchecks the one you are on. Below it,
-<strong>Also search the mail server</strong> asks each account’s server
-as well as this computer — for mail older than the <strong>Sync
-range</strong>, or whose text was never downloaded (see <a
-href="#searching-the-server-too">Searching the server too</a>). When a
-search of this computer alone finds nothing, QuickMail says so and
-suggests it.</p>
-<p>Press <strong>Enter</strong> to search. When something is found the
-form closes, focus moves to the first result, and the number found is
-announced. When nothing is found the form stays open with focus back in
-<strong>Words anywhere</strong>, so you can change the search and try
-again. A search of every folder of your accounts leaves you in the
-folder you were in; a search of <strong>This folder</strong> leaves its
-words in that folder’s search box. While a search is running,
-<strong>Escape</strong> waits for it to finish. <strong>Clear</strong>
-empties the fields but keeps your choice of where to look, and
-<strong>Escape</strong> closes the form. <strong>F6</strong> moves
-between the fields, <strong>Look in</strong>, the list of accounts and
-the buttons.</p>
-<h4 id="searching-the-server-too">Searching the server too</h4>
-<p>Search looks at the mail on this computer. To also find mail that
-isn’t here — older than the <strong>Sync range</strong>, or whose text
-was never downloaded — check <strong>Also search the mail
-server</strong> in Advanced Search, or with Search results already open
-choose <strong>Search the Server</strong> on the results bar, or
-<strong>Search the Server Too</strong> in the command palette. QuickMail
-asks each account’s mail server for the same search and adds what it
-finds that the results don’t already have; you hear how many more were
-found, or that there were none. An account whose server refuses the
-search is named, and the others still count; one QuickMail already knows
-is offline is left out quietly.</p>
-<p>What each server can search for differs. Gmail and Microsoft 365
-search the whole mailbox at once — for Gmail that is everything except
-Spam and Trash, and a search naming a folder goes folder by folder
-instead. Other mail servers are asked one folder at a time, which takes
-longer on a large account, and some search the text of a message more
-thoroughly than others. Messages found this way are shown but not kept:
-they stay in the results until you refresh or close them.</p>
-<h4 id="saving-a-search">Saving a search</h4>
-<p>While a <strong>Search results</strong> folder is open, <strong>View
-→ Views → Save View…</strong> — or <strong>Save Search as View…</strong>
-in the command palette — saves it as a view, with a name and, if you
-like, a keyboard shortcut. Choosing the view later runs the search
-again, so it always shows what matches now.</p>
-<p>The <strong>Search results</strong> folder works like any other
-folder: every view, sort, filter and message command applies, and the
-search box searches within the results. Above the list, a bar shows how
-many were found and for what, with <strong>Change Search</strong> — or
-<strong>Ctrl+/</strong> — to reopen the form with this search filled in,
-and <strong>Close</strong> — or <strong>Escape</strong> — to go back to
-the folder you started from. New mail that arrives while the results are
-open joins them if its sender, recipients, subject or preview match; a
-message that matches only in its text appears the next time the results
-are refreshed with <strong>F5</strong>.</p>
-<p>The first time you start a version of QuickMail with this search, it
-builds its index of the mail it already has, in the background, newest
-mail first. Until that finishes, older messages are found by their
-sender, recipients, subject and preview only. When QuickMail runs in
-online mode (<code>--online</code>) there is no copy on this computer,
-so search matches the sender, recipients, subject and preview of the
-messages in the list, and <code>cc:</code> and <code>attachment:</code>
-find nothing.</p>
+<p>Press <code>Ctrl+Shift+S</code> to open the search box. Type your
+query and press Enter. Results appear in the message list. Press Escape
+to clear the search and return to the full folder.</p>
 <h3 id="searching-folders">Searching Folders</h3>
 <p>Press <code>Ctrl+Shift+F</code> to search folder names. Type to
 filter the tree, press Enter to navigate to the matching folder.</p>
 <h3 id="refreshing">Refreshing</h3>
 <p>Press <strong>F5</strong> to manually refresh the current folder.</p>
 <h3 id="command-palette">Command Palette</h3>
-<p>Press <strong>Ctrl+Shift+P</strong> to open the command palette. It
-opens with focus in a filter box, and below it every command, sorted by
-category and then by name, with each command’s shortcut key where it has
-one. This is the fastest way to discover and run any action in the app,
-including the many that have no shortcut key.</p>
-<p><strong>Start typing and the list narrows to what matches.</strong>
-You do not have to type the start of a command’s name, or even whole
-words:</p>
-<ul>
-<li><strong>Any part of the name.</strong> Typing <code>arch</code>
-finds <strong>Move to Archive</strong>.</li>
-<li><strong>The initials.</strong> Typing <code>gtf</code> finds
-<strong>Go to Folder</strong>.</li>
-<li><strong>The category.</strong> Typing <code>mail</code> lists the
-Mail commands.</li>
-<li><strong>Several words, in any order.</strong> Typing
-<code>arch mail</code> finds the Mail category’s Archive command.</li>
-</ul>
-<p>The best match is always at the top of the list and is the one
-<strong>Enter</strong> runs. The command at the top is reported as it
-changes, and so is each command you reach by arrowing
-<strong>Up</strong> and <strong>Down</strong> — reported by Windows from
-the list itself, not announced by QuickMail over the top of it, so no
-announcement setting can switch it off. When a keystroke narrows the
-list without changing the command at the top, you hear the new count on
-its own — “3 commands” — because nothing else would tell you the list
-had moved.</p>
-<p>Focus stays in the filter box the whole time, so you can keep typing
-to narrow further without moving anywhere first.</p>
-<p><strong>Escape</strong> clears the filter if you have typed anything,
-and closes the palette if the box is already empty. <strong>Page
-Up</strong> and <strong>Page Down</strong> move through the list ten at
-a time. If nothing matches what you have typed, you hear “No matching
-commands”, and Enter says so too rather than doing nothing silently.</p>
-<p>The palette opens from anywhere in the main window, including while
-you are reading a message in the reading pane. Closing it puts you back
-where you were reading, and a command you choose runs before focus
-returns to the message.</p>
-<p>Other windows have their own palettes on the same key — the compose
-window, an open message, the address book, the rules window and more —
-listing the commands that belong to that window.</p>
+<p>Press <strong>Ctrl+Shift+P</strong> to open the command palette. Type
+any part of a command name to find it. Press Enter to run it. This is
+the fastest way to discover and run any action in the app.</p>
 <h3 id="keyboard-customization">Keyboard Customization</h3>
 <p>Open <strong>File → Settings → Keyboard Shortcuts</strong> to
 reassign any shortcut to a different key. Select a command’s field and
@@ -1876,7 +1377,7 @@ that behavior and its notifications are configurable — see <a
 href="#installing-and-updating-quickmail">Installing and Updating
 QuickMail</a> for the full walkthrough.</p>
 <p><strong>The portable exe does not update itself.</strong> If you run
-the standalone <code>QuickMail.exe</code>, the Help menu entry still
+the standalone <code>EudoraQM.exe</code>, the Help menu entry still
 tells you when a new version exists; activating it opens the releases
 page, and updating remains a manual download of the new exe.</p>
 <p>The <strong>Help</strong> menu also has a <strong>Keyboard
@@ -1905,33 +1406,6 @@ regardless of the Reading Mode setting.</p>
 <h3 id="reading-pane">Reading Pane</h3>
 <p>The reading pane renders HTML messages with WebView2. Links open in
 your default browser.</p>
-<p><strong>Links have a context menu.</strong> With a link focused,
-press <strong>Shift+F10</strong> or the Applications key (or right-click
-it) for <strong>Open</strong>, <strong>Copy Address</strong>, and — when
-the link’s text is not simply its address again — <strong>Copy
-Text</strong>. On an email address link a <strong>New Message to This
-Address</strong> entry (last in the menu) opens a new message in
-QuickMail, instead of handing the address to whichever mail client
-Windows has registered. A copy that works says nothing — it did what you
-asked, and it clears any earlier failure notice. A copy that fails
-writes a line at the end of the message, starting
-<strong>QuickMail:</strong>, saying what could not be copied. Read to
-the end of the message to find it. In the reading pane and in a tab it
-also goes to the status bar, so <strong>Ctrl+9</strong> reads back the
-most recent one.</p>
-<p>That line is not usually spoken as it appears: it is written just as
-the menu closes, while your screen reader is announcing its way back
-into the message, so it arrives in the middle of that and is passed
-over. It is there to be found rather than to interrupt — which is the
-right trade for something that only happens when the clipboard is
-briefly held by another program. Copying the address is how you check
-where a link actually goes before following it, and comparing it with
-the link’s text is how you spot one that does not go where it says it
-does. Closing the menu returns you to the link you opened it on, not to
-the top of the message. The menu is offered for ordinary web and email
-links; it does not appear on the <strong>Accept</strong> /
-<strong>Tentative</strong> / <strong>Decline</strong> buttons of a
-meeting invitation, which are internal to QuickMail.</p>
 <p>Images from remote sources are not loaded — fetching them tells the
 sender your address is live, which is what a tracking pixel in a
 newsletter is for. Where the sender wrote a description for a picture,
@@ -2091,8 +1565,15 @@ window showing sender, recipients, date, size, and flags.</p>
 read. Messages are also marked read automatically when you open them
 (configurable in <strong>Settings → General</strong>).</p>
 <h3 id="deleting-messages">Deleting Messages</h3>
-<p>Press <strong>Delete</strong>. Deleted messages go to Trash. Press
-<code>Ctrl+Shift+E</code> to empty the Trash for the selected
+<p>Press <strong>Delete</strong> to move messages to Trash. Press
+<strong>Shift+Delete</strong> to move them to the
+<strong>RecoveryDeleted</strong> system folder instead. RecoveryDeleted
+is a safety net for accidental permanent deletion and is purged after
+the number of days configured in <strong>Settings → Mail
+Actions</strong> (one day by default; zero means never automatically).
+The context menus for Trash, Junk, and RecoveryDeleted each provide a
+permanent <strong>Empty…</strong> command with confirmation.
+<code>Ctrl+Shift+E</code> continues to empty Trash for the selected
 account.</p>
 <h3 id="archiving-messages">Archiving Messages</h3>
 <p>Press <strong>Ctrl+Shift+M</strong> to archive the selected message —
@@ -2533,82 +2014,12 @@ resolved and how many are invalid.</p>
 <p>QuickMail saves your compose as a draft automatically every 2 minutes
 (on by default). A quiet status line in the compose window shows
 “Auto-saved 3:42 PM” after each save — no announcement interrupts your
-writing. When the server cannot be reached, the status line reads “Kept
-on this computer 3:42 PM” instead and that is announced once; see <a
-href="#working-offline-drafts-and-the-outbox">Working Offline: Drafts
-and the Outbox</a>. If a save fails entirely, it is announced once. You
-can check the last auto-save time from the command palette:
-<strong>Ctrl+Shift+P → Announce Last Auto-Save</strong>.</p>
+writing. If a save fails, it is announced once. You can check the last
+auto-save time from the command palette: <strong>Ctrl+Shift+P → Announce
+Last Auto-Save</strong>.</p>
 <p>Control auto-save in <strong>Settings → General → Composing</strong>:
 turn it off, change the interval (30 seconds to 10 minutes), and set the
 default compose mode for new messages.</p>
-<h3 id="working-offline-drafts-and-the-outbox">Working Offline: Drafts
-and the Outbox</h3>
-<p>A dropped connection no longer traps your message in the compose
-window. QuickMail always tries your account first and falls back to this
-computer only when the server does not answer:</p>
-<ul>
-<li><strong>Save Draft</strong> (<code>Ctrl+S</code>) and auto-save keep
-the draft on this computer when the server cannot be reached. You hear
-“Draft saved on this computer. It will upload when you’re online.” The
-draft goes to your account’s Drafts folder the next time QuickMail
-connects.</li>
-<li><strong>Send</strong> (<code>Alt+S</code>) queues the message when
-the server cannot be reached. You hear “Message queued. It will be sent
-when you’re online.”, the window closes, and the message leaves the
-moment a connection returns. A server that answers and refuses the
-message — a bad address, a rejected login — still fails in the window,
-where you can fix it.</li>
-<li><strong>Closing</strong> a window with unsaved changes and choosing
-Save keeps the draft on this computer if the server is unreachable, and
-the window closes. It stays open only when the draft could be saved
-nowhere at all.</li>
-</ul>
-<p>Everything waiting lives in the <strong>Outbox</strong>, the last
-entry in the All Mail group of the folder tree. The folder’s count is
-spoken as “waiting” rather than “unread”. Each row shows the account it
-will leave from, and its subject starts with its state: “Waiting to
-send”, “Waiting to upload draft”, “Sending…”, or “Failed” followed by
-the reason.</p>
-<table>
-<colgroup>
-<col style="width: 51%" />
-<col style="width: 48%" />
-</colgroup>
-<thead>
-<tr class="header">
-<th>In the Outbox</th>
-<th>What happens</th>
-</tr>
-</thead>
-<tbody>
-<tr class="odd">
-<td><code>Enter</code> on a row</td>
-<td>Reopens it in the compose window, exactly as it was written —
-recipients, Bcc, attachments, and compose mode included. Saving or
-sending from there replaces the queued copy.</td>
-</tr>
-<tr class="even">
-<td><code>Delete</code> on a row</td>
-<td>Asks first, then removes it from the queue. There is no Trash to
-recover from: the message has never been anywhere but this
-computer.</td>
-</tr>
-<tr class="odd">
-<td><strong>Send Outbox Now</strong> (Message menu, or
-<code>Ctrl+Shift+P</code> → Send Outbox Now)</td>
-<td>Tries every queued item right away, including any marked
-Failed.</td>
-</tr>
-</tbody>
-</table>
-<p>The Outbox drains on its own when QuickMail connects at startup, when
-the connection returns, and on each background sync. A drain is
-announced once as a whole, for example “Outbox: 2 messages sent, 1 draft
-uploaded.” A message the server refused stays in the Outbox marked
-“Failed” with the reason, until you reopen and fix it, or remove it. The
-Outbox is not available in <code>--online</code> mode, which runs
-without the local store.</p>
 <h3 id="forwarding-with-attachments">Forwarding with Attachments</h3>
 <p>When forwarding a message that has attachments, QuickMail opens an
 <strong>Include Attachments</strong> dialog before downloading. All
@@ -2693,6 +2104,14 @@ just the folder you were in. Mail older than your sync range is not
 stored locally, so it is not included. <strong>Find mail to this
 contact</strong> matches the To line, so a message where the person was
 only in Cc does not appear.</p>
+<p>The message-list context menu also has a <strong>History</strong>
+submenu. <strong>Email history</strong> finds messages exchanged with
+that exact address; <strong>Domain history</strong> finds messages
+exchanged with any address at the same domain. From history, search, or
+an aggregate view, <strong>Go to message</strong> opens the message’s
+physical folder and selects it. If a history lookup lasts more than two
+seconds, QuickMail displays a small progress window while the indexed
+local search finishes.</p>
 <h3 id="syncing-contacts-from-your-accounts">Syncing Contacts from Your
 Accounts</h3>
 <p>QuickMail can fill the address book from the contacts already stored
@@ -2864,272 +2283,160 @@ you describe — filing newsletters into a folder, marking a mailing list
 as read, deleting something you never want to see.</p>
 <p>Open the <strong>Rules Manager</strong> from the
 <strong>Tools</strong> menu (<code>Ctrl+Shift+L</code>) or the command
-palette. It lists the selected account’s rules, and beside the list a
-<strong>Rule detail</strong> pane reads out the selected rule in full:
-what it applies to, and what it does. Rules are written in a separate
-editor window. <strong>New</strong> (<code>Ctrl+N</code>) opens it for a
-new rule, and <strong>Edit</strong> — or <strong>Enter</strong> on a
-rule in the list — opens it for the selected one. It is the same window
-whatever kind of account you have; it shows what the selected account
-supports.</p>
-<p><strong>Client-side and server-side.</strong> A rule QuickMail runs
-itself is a <strong>client-side</strong> rule: it is stored on this
-computer and it acts on your mail while QuickMail is open. A
-<strong>work or school</strong> account added with the <strong>Microsoft
-365 (Graph)</strong> connection method can also carry
-<strong>server-side</strong> rules, which your mail provider runs for
-you whether QuickMail is open or not — see <a
-href="#microsoft-365-server-side-rules">Microsoft 365: server-side
-rules</a>. Every other account has client-side rules only, including a
-work or school account you added over Standard IMAP/SMTP. Each row in
-the rules list is marked <strong>on client</strong> or <strong>on
-server</strong>, and the status line says which kinds the selected
-account can have, so neither is ever a guess.</p>
-<p><strong>One account at a time.</strong> When you have more than one
-account, the Rules Manager opens on a single account chosen in an
-<strong>Account</strong> list at the top, rather than listing every
-account’s rules together. Choose the account whose rules you want, and
-the list below shows just that mailbox’s rules. If you have only one
-account there is no picker. It opens on the account you were in; see <a
-href="#rules-belong-to-one-account">Rules belong to one account</a>.
-This is the first thing to notice if you are used to seeing every
-account’s rules in one list: your rules are not gone, they are behind
-the account picker. The <strong>status line</strong> just below the
-picker says how many rules the account has, where they run, and which
-kinds that account can have — so an empty list is never a mystery.
-<strong>F6</strong> cycles the panes — account list, rules, details,
-status line — so it reaches the status line and reads it back at any
-time.</p>
+palette. It opens with the list of rules on the left and the selected
+rule’s settings on the right.</p>
 <h3 id="what-a-rule-is-made-of">What a rule is made of</h3>
-<p>The editor has the same parts whichever kind of rule you are
-writing.</p>
 <ul>
-<li><strong>Rule name</strong> — how you recognize it in the list. A
-rule must have one.</li>
+<li><strong>Rule name</strong> — how you recognize it in the list.</li>
 <li><strong>Enabled</strong> — turn a rule off without deleting it.</li>
-<li><strong>Apply when a message matches</strong> — <strong>From
-addresses</strong> and <strong>Subject contains</strong>. Each condition
-is switched on by the checkbox in front of it: check the ones you want
-and type the text to look for. A message must satisfy
-<strong>every</strong> condition you checked, so leaving one unchecked
-is how you say “don’t care”. Matching ignores case. The
-<em>contains</em> conditions look for your text anywhere in the field;
-<strong>From addresses</strong> and <strong>Sent to addresses</strong>
-are for email addresses. A client-side rule’s <strong>Body
-contains</strong> looks at the start of the message that QuickMail keeps
-as its preview, not the whole message. Clearing a checkbox leaves the
-text sitting in its box, now read-only and skipped by Tab, so a
-condition you turned off is one keystroke from being turned back on
-rather than something you have to retype.</li>
-<li><strong>Then do this</strong> — <strong>Move to folder</strong>,
-<strong>Mark as read</strong>, <strong>Delete</strong>, and <strong>Stop
-processing more rules</strong>. <strong>Delete</strong> moves the
-message to the account’s Trash, which Microsoft 365 calls Deleted Items.
-Choosing Move to folder adds a <strong>Choose folder…</strong> button;
-the button then shows the folder you picked. The picker is the same
-folder tree used everywhere else you choose a destination, showing the
-folders of the rule’s own account — a rule files mail within one
-mailbox. It opens on the folder the rule already files into, or on the
-first folder for a new rule. If the folder you want to file into does
-not exist yet, activate <strong>New Folder</strong> (or
-<strong>Alt+N</strong>) in the picker to create one under the selected
-folder and target it without leaving the rule you are writing. The
-button is not offered for a POP3 account, which has no server folders to
-create, nor for a rule QuickMail cannot tie to one account — a rule that
-has no account of its own, or an account whose folders have not been
-read yet. The picker then falls back to showing every account, where a
-folder created under the selected node could land in a different mailbox
-from the one the rule files in; you can still pick an existing folder
-there.</li>
-<li><strong>Advanced conditions &amp; actions</strong> — more conditions
-(<strong>Sender contains</strong>, <strong>Sent to addresses</strong>,
-<strong>Subject or body contains</strong>, <strong>Body
-contains</strong>, <strong>Sent to me</strong>, <strong>Sent only to
-me</strong>, <strong>Has attachments</strong>, and <strong>Importance
-is</strong>) and more actions (<strong>Mark as unread</strong>,
-<strong>Copy to folder</strong>, <strong>Set importance to</strong>, and
-<strong>Forward to</strong>). The section starts collapsed for a new
-rule, and opens by itself when you edit a rule that uses anything in it,
-so editing never hides a field that is in use.</li>
+<li><strong>Account</strong> — which mailbox the rule watches. Every
+rule belongs to exactly one account; see <a
+href="#rules-belong-to-one-account">Rules belong to one
+account</a>.</li>
+<li><strong>Conditions</strong> — <strong>From</strong>,
+<strong>To</strong>, <strong>Subject</strong>, <strong>Body</strong>,
+and <strong>Has attachments</strong>. Check the ones you want and type
+the text to look for; the match is not case sensitive and looks for your
+text anywhere in the field. A message must satisfy
+<strong>every</strong> condition you checked, so leaving a condition
+unchecked is how you say “don’t care”.</li>
+<li><strong>Action</strong> — one of <strong>Mark as read</strong>,
+<strong>Mark as unread</strong>, <strong>Move to folder</strong>, or
+<strong>Delete</strong>. Choosing Move to folder adds a <strong>Choose
+Folder…</strong> button; the button then shows the folder you picked.
+The picker is the same folder tree used everywhere else you choose a
+destination, showing the folders of the rule’s own account — a rule
+files mail within one mailbox. It opens on the folder the rule already
+files into, or on the first folder for a new rule.</li>
 </ul>
-<p><strong>Save</strong> stores the rule and closes the editor;
-<strong>Cancel</strong> closes it without saving. A <strong>Move to
-folder</strong>, <strong>Copy to folder</strong> or
-<strong>Delete</strong> rule needs at least one condition — with none it
-would act on every message — so QuickMail will not save it until you add
-one. <strong>Mark as read</strong> and <strong>Mark as unread</strong>
-rules can have none.</p>
-<p><strong>What a client-side rule can use.</strong> A client-side rule
-can test <strong>From addresses</strong> (one address), <strong>Subject
-contains</strong>, <strong>Sender contains</strong> (but not together
-with From addresses), <strong>Sent to addresses</strong> (one address),
-<strong>Body contains</strong>, and <strong>Has attachments</strong>. It
-can <strong>Mark as read</strong> or <strong>Mark as unread</strong>,
-<strong>Copy to folder</strong>, and <strong>Move to folder</strong> or
-<strong>Delete</strong>, and it can do more than one of them — but not
-mark a message both read and unread, or both move and delete it. It does
-them in that order: marking first, then copying, then moving or
-deleting, since after that the message is no longer in the Inbox.
-<strong>Mark as unread</strong> changes only this computer’s copy of the
-message, so it cannot be combined with moving or deleting, which would
-throw that copy away and the mark with it. A client-side rule cannot
-copy into the Inbox either: it runs on the Inbox, so each copy would be
-copied again on the next check. Everything else in the editor needs a
-server-side rule: the other conditions and actions, and more than one
-address in a field. <strong>Mark as unread</strong> is the reverse —
-only a client-side rule can do it, which is why its label says so.
-Editing never changes a rule’s kind, so a client-side rule stays
-client-side. The editor offers the server-side options even where they
-cannot be used — on an account with client-side rules only, and when you
-edit a client-side rule — and <strong>Save</strong> refuses a rule that
-uses one. For a new rule it names the option to remove; for an edited
-one it asks you to remove what a client-side rule cannot do. While you
-edit a server-side rule, <strong>Mark as unread</strong> is unavailable,
-because the server has no way to do it.</p>
-<p><strong>The order rules run in.</strong> Every enabled rule for the
-account is tried, and each one that matches acts. Server-side rules run
-on the server as mail is delivered, in the order the list shows;
-<strong>Move Up</strong> and <strong>Move Down</strong> change it, and
-<strong>Stop processing more rules</strong> tells the server to skip the
-server-side rules after it. Client-side rules run when QuickMail sees
-the mail, in the order they were created, and cannot be reordered. A
-client-side rule that moves or deletes a message takes it out of the
-running for the client-side rules after it, both on mail as it arrives
-and when you use <strong>Run on Existing Mail</strong>.</p>
+<p><strong>Test Rule</strong> runs the rule against the messages
+currently in your list and tells you how many it would match, so you can
+check a rule before letting it loose. <strong>Save</strong> stores the
+rule; <strong>New Rule</strong> and <strong>Delete</strong> manage the
+list.</p>
+<p>Every enabled rule for the account is tried, in list order, and each
+one that matches acts. A rule that moves or deletes a message takes it
+out of the running for the rest of the list.</p>
+<h3 id="rule-previews-expiration-and-template-replies">Rule previews,
+expiration and template replies</h3>
+<p><strong>Test Rule</strong> opens a read-only report for the selected
+messages: number examined, matches, incoming/outgoing counts, proposed
+action, and up to 20 examples. <strong>Preview…</strong> uses the
+current folder (plus Out when configured), and evaluates cached complete
+bodies and CC/BCC where those conditions require them. Neither option
+sends, moves or marks messages. Forward/reply counts are condition
+matches: delivery protections and previously queued replies can reduce
+the number actually sent.</p>
+<p>Enable <strong>Active until (inclusive)</strong> to limit a rule to a
+local calendar date. After that date the rule remains saved but is
+skipped, including manual execution. Clear the checkbox to remove
+expiration. Changing the date does not retroactively undo earlier
+actions.</p>
+<p>The <strong>Reply template</strong> action selects an existing
+template and sends its text from the receiving account to Reply-To (or
+From if Reply-To is absent). It preserves the original message, uses the
+template subject when supplied (otherwise <code>Re:</code> plus the
+original subject), and does not attach the original attachments. The
+existing <code>{sender}</code>, <code>{date}</code> and
+<code>{time}</code> template substitutions are supported. Create/edit
+templates from the composer before choosing them in Rule Manager.</p>
+<p>For vacation replies, choose the account, template and expiration
+date, enable automatic processing, and leave conditions empty if the
+reply should cover all eligible incoming senders. There is at most one
+queued reply per sender, rule and expiration date, even after restarting
+EQM. Changing expiration starts a new response period. Without
+expiration, the same sender receives only one reply for that rule.
+Removing a queued automatic reply does not reset that protection.</p>
+<p>Automatic/bulk messages, known no-reply/bounce addresses, outgoing
+messages and your own configured addresses are skipped to reduce loops.
+Replies use the durable Scheduled queue and follow its offline/focus and
+retry behavior. Disabling a rule prevents new replies; remove any
+already queued reply from Scheduled if it must not be sent. As with any
+automatic responder, consider whether replying to unknown senders is
+appropriate before enabling an unrestricted rule.</p>
 <h3 id="when-rules-run">When rules run</h3>
 <p>Rules run <strong>on your Inbox, on mail as it arrives</strong> —
 including mail that arrives while QuickMail is sitting open, not only at
-a full sync. A rule runs on a message when it arrives, however QuickMail
-first picks it up: the background check, or opening the Inbox a moment
-before that check comes round. If the Inbox is open when a matching
-message lands, the message can appear in the list for a moment before
-the rule acts on it. Rules only ever run on your Inbox, and this is
-deliberate: a rule never reaches back into Sent, Archive, Junk, Trash,
-or a folder you filed something into by hand, so nothing you
-deliberately put somewhere is moved or deleted behind your back. Mail
-already in the mailbox before a rule existed is left alone too, and so
-is older mail QuickMail shows for the first time because you widened the
-<strong>Sync range</strong>.</p>
+a full sync. This is deliberate: a rule never reaches back into Sent,
+Archive, Junk, Trash, or a folder you filed something into by hand, so
+nothing you deliberately put somewhere is moved or deleted behind your
+back. Mail already in the mailbox before a rule existed is left alone
+too.</p>
 <p>To apply your rules to mail that is already there, use <strong>Run on
-Existing Mail</strong>. It runs the selected account’s enabled
-client-side rules over that account’s Inbox — again, the Inbox only —
-across the mail QuickMail has stored locally, and tells you how many
-messages were moved or deleted. (Marking read or unread and copying
-still happen; they are not counted.) An account whose Inbox QuickMail
-has not read yet in this session is skipped rather than guessed at, and
-the skip is noted in the log.</p>
+Existing Mail</strong>. It runs every enabled rule over the Inbox of
+each account — again, the Inbox only — across the mail QuickMail has
+stored locally, and tells you how many messages were moved or deleted.
+(Mark as read and mark as unread still happen; they are not counted.) An
+account whose Inbox QuickMail has not read yet in this session is
+skipped rather than guessed at, and the skip is noted in the log.</p>
 <h3 id="rules-belong-to-one-account">Rules belong to one account</h3>
-<p>Each rule watches one account: the one chosen in the Rules Manager’s
-<strong>Account</strong> list when you create it. The editor has no
-account field of its own, so to write a rule for another account, choose
-that account in the list first. Changing the list while the editor is
-open doesn’t move the rule: when you save, the list goes back to the
-rule’s account and selects it, and the status line starts by saying so,
-for example “Rule saved to Home.” The Rules Manager opens on the account
-you were in. From a view that spans accounts, such as <strong>All
-Inboxes</strong>, it opens on your default account — the one marked with
-<strong>Set Default</strong> in Account Manager. A rule made with <a
-href="#creating-a-rule-from-a-message">Create Rule from Message</a>
-belongs to that message’s account. Shared mailboxes are not in the list,
-because their rules are managed in Outlook; if you open the Rules
-Manager from one, it shows your default account instead, names that
-account in its title, and says why on its status line. See <a
-href="#shared-mailboxes">Shared mailboxes</a>.</p>
+<p>Each rule watches one account. Choose it in the
+<strong>Account</strong> list in the rule’s settings; a new rule starts
+on your default account. The account each rule belongs to is shown
+beside its name in the rules list.</p>
 <p>If you had rules from an earlier version that applied to <strong>all
-accounts</strong>, QuickMail converts each one into a separate rule for
-every account that is not connected through Microsoft 365 directly, the
-first time it starts, so they keep doing what they did there. An old
-rule is never copied onto a Microsoft 365 mailbox, so it cannot start
-acting on one without your say-so; in a profile whose only accounts are
-Microsoft 365, it is dropped and the reason is written to the log.</p>
+accounts</strong>, QuickMail converts each one into a separate rule per
+account the first time it starts, so they keep doing what they did. The
+one exception is a profile whose only accounts connect through Microsoft
+365 directly: those mailboxes have no client-side rule to convert to, so
+an old all-accounts rule is dropped and the reason is written to the
+log.</p>
 <h3 id="reading-the-rules-list">Reading the rules list</h3>
-<p>The list shows one account at a time, so a row does not repeat the
-account: it says the rule’s name, where it runs, and whether it is
-enabled. Turn on <strong>Show field labels in the rules list</strong> in
-<strong>Settings → General → Screen Reader Announcements</strong> to
-hear those pieces named (“Rule … runs … status …”) rather than run
+<p>Each row in the rules list says the rule’s name and the account it
+belongs to. Turn on <strong>Show field labels in the rules list</strong>
+in <strong>Settings → General → Screen Reader Announcements</strong> to
+hear those pieces named (“Name … account …”) rather than run
 together.</p>
-<p>In the list, <strong>Enter</strong> edits the selected rule,
-<strong>Space</strong> turns it on or off, and <strong>Delete</strong>
-deletes it after asking. The buttons below the list are
-<strong>New</strong>, <strong>Edit</strong>, <strong>Delete</strong>,
-<strong>Enable</strong> or <strong>Disable</strong>, <strong>Move
-Up</strong>, <strong>Move Down</strong>, <strong>Test</strong>,
-<strong>Run on Existing Mail</strong>, and <strong>Close</strong>; most
-are on the list’s context menu as well, and every one is in the command
-palette (<code>Ctrl+Shift+P</code>). <strong>Escape</strong> closes the
-window.</p>
-<p><strong>Test</strong> runs the selected client-side rule against the
-messages that were in the message list when you opened the Rules
-Manager, and says how many of them it would match, so you can check a
-rule before letting it loose. Only messages in the rule’s own account
-are counted, because the rule never acts on any others.</p>
 <h3 id="creating-a-rule-from-a-message">Creating a Rule from a
 Message</h3>
 <p>Select a message and choose <strong>Create Rule from Message</strong>
 from the context menu or the command palette. QuickMail opens a new rule
-pre-filled from that message: the sender is filled in and its condition
-is <strong>checked</strong>, so the rule matches everything from that
-sender. The subject is filled in too, but its condition starts
-<strong>unchecked</strong> — a rule that has to match one sender
-<em>and</em> one exact subject line matches, in practice, only the
-conversation you made it from. If you did want the subject as well,
-check its box; the text is already there. This does not work on a
-message in a shared mailbox, whose rules are managed in Outlook; see <a
-href="#shared-mailboxes">Shared mailboxes</a>.</p>
+pre-filled with a condition matching the sender and, if present, the
+subject — a quick starting point you can adjust before saving.</p>
 <h3 id="microsoft-365-server-side-rules">Microsoft 365: server-side
 rules</h3>
-<p>If you have a <strong>work or school</strong> Microsoft 365
-(Exchange) account, the Rules Manager does a little more. Alongside your
-client-side rules, it shows the <strong>server-side rules</strong> on
-your Exchange mailbox — the same rules Outlook calls “Inbox rules.” A
-server rule runs on Microsoft’s servers, so it acts on your mail
-<strong>even when QuickMail is closed</strong>, and it applies wherever
-you read that mailbox.</p>
-<p>Server-side rules are an organization feature, so <strong>personal
-Outlook.com, Hotmail, and Live.com accounts do not have them</strong> —
-even when connected through Microsoft 365 directly. For a personal
-account the Rules Manager shows only client-side rules, the same as any
-other non-Exchange account.</p>
-<p><strong>One list, marked where each rule runs.</strong> For a work or
-school account, server-side and client-side rules appear together in a
-single list. Each row says where the rule runs — <strong>on
-server</strong> or <strong>on client</strong> — along with its name and
-whether it is enabled. Creating, editing, enabling or disabling, and
-deleting all work the same way whichever kind a rule is; only
-server-side rules can be reordered. The status line counts them the same
-way — “4 rules: 3 on server, 1 on client” — so which kinds an account is
-holding is on screen, and <strong>F6</strong> cycles round to read it
-back. If one kind can’t be loaded, the status line says so and counts
-only the kind that did.</p>
+<p>If you have a Microsoft 365 (Exchange) account, the Rules Manager
+does a little more. Alongside the rules that run inside QuickMail, it
+shows the <strong>server-side rules</strong> on your Exchange mailbox —
+the same rules Outlook calls “Inbox rules.” A server rule runs on
+Microsoft’s servers, so it acts on your mail <strong>even when QuickMail
+is closed</strong>, and it applies wherever you read that mailbox.</p>
+<p><strong>One account at a time.</strong> With a Microsoft 365 account
+present, the Rules Manager opens on a single account chosen in an
+<strong>Account</strong> list at the top, rather than listing every
+account’s rules together. Choose the account whose rules you want, and
+the list below shows just that mailbox’s rules. If you have only one
+account there is no picker. This is the first thing to notice if you are
+used to seeing every account’s rules in one list: your rules are not
+gone, they are behind the account picker.</p>
+<p><strong>One list, marked where each rule runs.</strong> Server rules
+and QuickMail rules appear together in a single list. Each row says
+where the rule runs — <strong>on server</strong> or <strong>in
+QuickMail</strong> — along with its name and whether it is enabled.
+Creating, editing, enabling or disabling, reordering, and deleting all
+work the same way whichever kind a rule is.</p>
 <p><strong>QuickMail chooses where a new rule lives.</strong> When you
 create a rule, QuickMail saves it as a server rule whenever it can, so
 it keeps working while QuickMail is closed. A rule that needs something
 only QuickMail can do — today that is <strong>Mark as unread</strong> —
-is saved as a client-side rule instead. On a work or school account,
-which <em>does</em> also do server rules, QuickMail announces that when
-it happens; the saved rule’s own row says <strong>on client</strong>
-either way, so where it went is there to read whether or not you have
-announcements turned on.</p>
-<p><strong>Some server rules cannot be edited here.</strong> A rule you
-built in Outlook may use conditions or actions QuickMail cannot yet
-represent exactly. Rather than risk turning it into something you did
-not intend, QuickMail turns <strong>Edit</strong> off for that rule, and
-the detail pane says why. You can still read it, turn it on or off,
-reorder it, and delete it; change the rule itself in Outlook. A rule the
-server marks <strong>read-only</strong> is different: it cannot be
-changed here at all, so Edit, Delete, Enable or Disable, and Move are
-all turned off.</p>
-<p><strong>Testing.</strong> <strong>Test</strong> works on
-<strong>client-side rules only</strong>; for a <strong>server
+is saved as a QuickMail rule instead, and QuickMail tells you why.</p>
+<p><strong>Some server rules are read-only.</strong> A rule you built in
+Outlook may use conditions or actions QuickMail cannot yet represent
+exactly. Rather than risk turning it into something you did not intend,
+QuickMail shows that rule as <strong>read-only</strong>: you can read
+it, but Edit, Delete, and Move are turned off. Change that rule in
+Outlook.</p>
+<p><strong>Testing.</strong> <strong>Test</strong> runs a rule against
+the messages in your list and reports how many it would match. It works
+on <strong>QuickMail rules only</strong>; for a <strong>server
 rule</strong> the Test control is turned off, the same way Edit and
 Delete are for a read-only rule — a server rule runs in Exchange, so
 there is nothing local to test it against.</p>
 <p><strong>Run on Existing Mail.</strong> This applies <strong>the
-selected account’s</strong> client-side rules to the mail already in its
+selected account’s</strong> QuickMail rules to the mail already in its
 Inbox — matching the one-account-at-a-time layout, so it never acts on
 rules for an account you are not looking at. It is available only when
-that account has at least one enabled client-side rule; a Microsoft 365
+that account has at least one enabled QuickMail rule; a Microsoft 365
 account whose rules are all server-side has nothing for it to do (server
 rules run in Exchange and cannot be applied to existing mail from here),
 so the control is turned off in that case.</p>
@@ -3409,21 +2716,11 @@ or set up a repeating appointment (see below).</li>
 <li><strong>Notes</strong> — free text.</li>
 <li><strong>Calendar</strong> — when you have a Microsoft, Google, or
 iCloud account connected, a picker lets you choose where the new
-appointment is saved. It lists your <strong>Local Calendar</strong>
-first, then every calendar you can write to on each connected account,
-named account-first: <strong>Work: Team</strong>, <strong>Apple:
-Family</strong>. Microsoft and Google accounts also get an entry for the
-account itself — <strong>Work (default calendar)</strong> — meaning
-whichever calendar that account normally files things into, which is
-useful when you do not mind and would rather it follow whatever you set
-on the provider’s own site. iCloud has no such entry: an iCloud
-appointment always names the calendar it goes on. Calendars you only
-subscribe to, such as a holidays feed or someone else’s calendar shared
-with you read-only, are left out: they are there to be read, and an
-appointment saved to one would only be refused. A calendar with nothing
-in it yet is offered like any other, so you can file the first
-appointment into it. With no connected calendar this picker does not
-appear and everything is saved locally. The picker starts on your <a
+appointment is saved: your <strong>Local Calendar</strong> or a
+connected account. For iCloud the picker lists each of your Apple
+calendars (Home, Family, …) so you can choose which one. With no
+connected calendar this picker does not appear and everything is saved
+locally. The picker starts on your <a
 href="#choosing-a-default-calendar-for-new-appointments">default
 calendar</a> if you have set one, and on <strong>Local Calendar</strong>
 if you have not.</li>
@@ -3498,18 +2795,14 @@ the arrow keys without typing anything.</p>
 </table>
 <p>Stepping a time past midnight moves the date with it, so 11:50 PM
 stepped up becomes 12:00 AM the next day.</p>
-<p>You can also just type. Moving to one of these fields with the
-keyboard selects the value it is holding, so the first thing you type
-replaces it rather than being added on to the end of it. If you leave
-the field part-way through typing and come back to it, what you had
-typed is still there and still where you left it. Dates accept “8/3”,
-“August 3”, “2026-08-03”, “today”, “tomorrow”, “friday”, “next tuesday”,
-a bare day number like “3” for that day of the month shown, and offsets
-like “+7”, “-3”, “+2w”, “+1m”, “+1y”. Times accept “9”, “930”, “9:30”,
-“9:30 AM”, “9p”, “14:30”, “noon”, “midnight”, and offsets like “+30” or
-“-15”. Press Enter or move to another field to apply what you typed; if
-it isn’t something QuickMail can read as a date or a time, the field
-puts its previous value back.</p>
+<p>You can also just type. Dates accept “8/3”, “August 3”, “2026-08-03”,
+“today”, “tomorrow”, “friday”, “next tuesday”, a bare day number like
+“3” for that day of the month shown, and offsets like “+7”, “-3”, “+2w”,
+“+1m”, “+1y”. Times accept “9”, “930”, “9:30”, “9:30 AM”, “9p”, “14:30”,
+“noon”, “midnight”, and offsets like “+30” or “-15”. Press Enter or move
+to another field to apply what you typed; if it isn’t something
+QuickMail can read as a date or a time, the field puts its previous
+value back.</p>
 <p><strong>The end follows the start.</strong> When you change the start
 date or start time, the end moves by the same amount, so a 30-minute
 appointment stays 30 minutes long and you are never sent back to fix an
@@ -3685,16 +2978,11 @@ was granted when you signed in for mail.</td>
 <td>Yes, for single (non-repeating) events</td>
 <td>Check <strong>Sync calendar from this account</strong>. QuickMail
 uses the app-specific password you already entered for the account — no
-separate setup.</td>
+separate setup. When you create an appointment you can choose which
+iCloud calendar (Home, Family, …) it goes on.</td>
 </tr>
 </tbody>
 </table>
-<p>When you create an appointment you can choose which of an account’s
-calendars it goes on — see the <strong>Calendar</strong> picker under <a
-href="#creating-an-appointment">Creating an appointment</a>. This works
-for Microsoft, Google and iCloud alike; Microsoft and Google
-additionally let you say “this account’s usual calendar” without naming
-one.</p>
 <p><strong>Turning it on for an account you already have:</strong> open
 <strong>Manage Accounts</strong>, select the account, and check
 <strong>Sync calendar from this account</strong>. It applies immediately
@@ -3702,17 +2990,13 @@ one.</p>
 tree and the events sync in the background. Unchecking it removes
 them.</p>
 <p>Connected calendars refresh automatically in the background (roughly
-every 15 minutes, and once shortly after startup), and again whenever
-you open the calendar, so an appointment you added somewhere else is
-there when you look. The list opens straight away from what QuickMail
-already has and folds in anything new when the account answers; opening
-the calendar again within half a minute reuses what it just fetched
-rather than asking again. Press <strong>F5</strong> to refresh on
-demand, or use <strong>Sync Calendars Now</strong> from the command
-palette. Syncing is a one-directional download plus, for Microsoft and
-Google, the single-event write-back described above; it never opens a
-sign-in prompt on its own — if an account needs you to sign in again for
-calendar access, QuickMail tells you.</p>
+every 15 minutes, and once shortly after startup). Press
+<strong>F5</strong> to refresh on demand, or use <strong>Sync Calendars
+Now</strong> from the command palette. Syncing is a one-directional
+download plus, for Microsoft and Google, the single-event write-back
+described above; it never opens a sign-in prompt on its own — if an
+account needs you to sign in again for calendar access, QuickMail tells
+you.</p>
 <h3 id="what-the-calendar-does-and-does-not-do">What the calendar does
 and does not do</h3>
 <p>To set expectations clearly:</p>
@@ -3867,10 +3151,7 @@ over.</p>
 <td><strong>Messages</strong></td>
 <td>Two-way</td>
 <td>Read and unread, moving between folders, deleting, and sending all
-go to the server. Another program sees the same state. <strong>POP3
-accounts are the exception</strong> — the protocol has nowhere to record
-any of it, so everything but sending stays on this computer. See <a
-href="#pop3-accounts">POP3 accounts</a>.</td>
+go to the server. Another program sees the same state.</td>
 </tr>
 <tr class="even">
 <td><strong>The built-in flag</strong></td>
@@ -3908,31 +3189,11 @@ only</a>.</td>
 update your calendar.</td>
 </tr>
 <tr class="odd">
-<td><strong>Client-side mail rules</strong></td>
+<td><strong>Mail rules</strong></td>
 <td>This computer only</td>
-<td>They run inside QuickMail as mail arrives. They are not server-side
+<td>Rules run inside QuickMail as mail arrives. They are not server
 rules — your provider does not know about them, and they do nothing
 while QuickMail is closed.</td>
-</tr>
-<tr class="even">
-<td><strong>Server-side mail rules</strong></td>
-<td>Two-way</td>
-<td>Only on a work or school Microsoft 365 account, and not on a shared
-mailbox, whose rules are managed in Outlook. They live on your Exchange
-mailbox, so they run while QuickMail is closed and apply wherever you
-read that mailbox. Your organization may need to allow QuickMail to
-manage them, and a rule the server marks read-only cannot be changed
-here. See <a href="#microsoft-365-server-side-rules">Microsoft 365:
-server-side rules</a>.</td>
-</tr>
-<tr class="odd">
-<td><strong>The Outbox</strong></td>
-<td>This computer only, until sent</td>
-<td>Messages and drafts queued while the server was unreachable wait in
-QuickMail’s data folder and go to your account the next time it
-connects. No other program sees them until then. See <a
-href="#working-offline-drafts-and-the-outbox">Working Offline: Drafts
-and the Outbox</a>.</td>
 </tr>
 <tr class="even">
 <td><strong>Everything else in QuickMail</strong></td>
@@ -3954,108 +3215,11 @@ book, <strong>F5</strong> in the calendar).</p>
 <h3 id="moving-to-a-new-computer">Moving to a new computer</h3>
 <p>Your mail, your contacts, and your connected calendars come back on
 their own once you add your accounts again, because they live on the
-server. The <strong>This computer only</strong> rows above do not:
-client-side rules, flags you named, templates, signatures, saved views,
-and your settings are stored in QuickMail’s data folder
+server. The <strong>This computer only</strong> row above does not:
+rules, flags you named, templates, signatures, saved views, and your
+settings are stored in QuickMail’s data folder
 (<code>%APPDATA%\QuickMail</code>) and need to be copied across if you
 want them.</p>
-<p><strong>A <a href="#pop3-accounts">POP3 account</a> is the exception
-to the first sentence.</strong> If it is set to remove mail from the
-server once collected, the server has nothing left to give back and
-<code>mail.db</code> in that data folder is your mail — copy it across,
-or back it up, like any other document.</p>
-<hr />
-<h2 id="working-offline">Working Offline</h2>
-<p>QuickMail keeps a copy of your recent mail on this computer, and when
-the connection drops you keep reading it. The status bar’s connection
-label reads <strong>Offline</strong>; screen readers hear “Offline.
-Showing cached messages.” once, and “Back online.” when the connection
-returns. QuickMail waits a few seconds before saying Offline, so a
-momentary blip never interrupts you.</p>
-<h3 id="what-works-offline">What works offline</h3>
-<ul>
-<li>Reading any message you have opened before, or that QuickMail
-fetched ahead of time (it keeps the newest messages of each folder you
-open, and the ones around any message you read). To keep more, see <a
-href="#reading-messages-without-a-connection">Reading messages without a
-connection</a>.</li>
-<li>The message list of every folder you have opened, with its unread
-state and flags.</li>
-<li>Searching and filtering what is on this computer, the calendar, and
-the address book.</li>
-<li>Composing. Saving a draft keeps it on this computer, and Send queues
-the message; both go to your account the moment the connection returns.
-See <a href="#working-offline-drafts-and-the-outbox">Working Offline:
-Drafts and the Outbox</a>.</li>
-</ul>
-<p>When you open a folder offline the status bar reads “Offline —
-showing 12 cached messages.” or “Offline — no cached messages in
-Projects.” It never sits on “Loading…”.</p>
-<h3 id="what-needs-a-connection">What needs a connection</h3>
-<ul>
-<li>A message that was never downloaded: “This message is not available
-offline.” Reply and Forward on it say the same and open nothing.</li>
-<li>Attachments: “Attachments are not available offline.”</li>
-<li>New mail, folder changes, and everything else a server has to do.
-Marking read, flagging, moving and deleting are not queued: offline they
-fail with a message, and the next sync after the connection returns puts
-the message back the way the server has it. Only composing waits for
-you.</li>
-</ul>
-<h3 id="reading-messages-without-a-connection">Reading messages without
-a connection</h3>
-<p>By default QuickMail keeps the full text of a message only once you
-have opened it, or when it fetched a few ahead of time. To have more
-ready before the connection drops, choose a window under
-<strong>Settings → General → Sync → Download messages for offline
-reading</strong>: <strong>Off</strong> (the default); the last
-<strong>7</strong>, <strong>30</strong> or <strong>90</strong> days; the
-last <strong>6 months</strong> or <strong>year</strong>; or <strong>All
-mail</strong>.</p>
-<p>With a window set, the sync at launch and each background check
-(<strong>Check for new mail every</strong>) finish by downloading the
-text of each Inbox message in that window that QuickMail does not have
-yet, newest first, a few hundred at a time; new mail arriving in the
-Inbox gets its text straight away. When a pass completes you hear
-“Downloaded 120 messages for offline reading.” once. A few things to
-know:</p>
-<ul>
-<li>Inbox only, unless you also check <strong>Include other folders, not
-just the Inbox</strong>. Then Sent, Archive and your other folders are
-downloaded too — everything except Trash, Junk and Drafts — Inbox first.
-Search finds words in the text of those messages only once they are
-downloaded, so this is what makes searching your sent and archived mail
-work without opening each message. It can download a great deal more, so
-it is off by default. Without it, other folders keep working the way
-they always have: a message is kept once you open it.</li>
-<li>Never wider than the <strong>Sync range</strong> above it, since
-QuickMail cannot keep what it has not synced.</li>
-<li>Attachments are not included. Opening one still needs a
-connection.</li>
-<li>POP3 accounts already keep every message whole, so the setting does
-not apply to them.</li>
-<li>The text lives in <code>mail.db</code> in QuickMail’s data folder,
-which grows accordingly — roughly tens of megabytes for a month of a
-busy Inbox, so a year or all mail can run to hundreds of megabytes or
-more.</li>
-<li>The status bar says how it is going: “Messages: 1,240 of 2,000
-downloaded”, and “Messages: downloading 120 of 500” while a batch is
-coming down. Press <strong>Ctrl+9</strong> to reach the status bar (when
-no tabs are open; with tabs, <strong>Ctrl+9</strong> goes to the last
-tab) and <strong>Right</strong> to move along it. Nothing is said aloud
-as it changes; it is there to be read when you want it.</li>
-<li>A large window fills in gradually. Each pass downloads up to 500
-messages per Inbox, newest first, so a big Inbox set to a year or all
-mail takes many background checks to finish.</li>
-</ul>
-<h3 id="getting-back-online">Getting back online</h3>
-<p>Nothing to press. When Windows reports the network again QuickMail
-reconnects every account by itself; if the network is up but the server
-does not answer (a hotel or airport sign-in page, an outage at the
-provider), it keeps trying on its own, first every half minute and then
-every five. <strong>F5</strong> forces an attempt at any time. Once
-something answers, the folder you are looking at refreshes and anything
-waiting in the Outbox goes out.</p>
 <hr />
 <h2 id="notifications">Notifications</h2>
 <p>New-mail notifications and the option to keep QuickMail running in
@@ -4074,13 +3238,6 @@ QuickMail to the foreground and opens that message.</p>
 (“5 new messages”) and brings QuickMail to the foreground when
 activated. Single-message notifications show the sender’s name and
 subject and open that message.</p>
-<p><strong>Shared mailboxes are an exception:</strong> they do not
-notify by default, even with this setting on, because a shared mailbox
-is often a busy team address. To get notifications for a specific shared
-mailbox, turn on <strong>Notify me of new mail in this shared
-mailbox</strong> for it in Account Manager. This setting still has to be
-on for those notifications to appear. See <a
-href="#shared-mailboxes">Shared mailboxes</a>.</p>
 <p>Notifications require <strong>Windows 10 1809 or later</strong>.</p>
 <h3
 id="keep-running-in-the-notification-area-when-you-close-the-window">Keep
@@ -4258,7 +3415,7 @@ contact.</td>
 </tr>
 <tr class="odd">
 <td><strong>3. Email</strong></td>
-<td><code>support@theideaplace.net</code></td>
+<td><code>quickmailissues@theideaplace.net</code></td>
 <td>Yes (by email)</td>
 <td>You’d rather use email and want a personal reply.</td>
 </tr>
@@ -4295,7 +3452,7 @@ contacted and to follow along.</p>
 <h3 id="email-us-personal-follow-up">3. Email us (personal
 follow-up)</h3>
 <p>If you’d rather not use the in-app tool at all, email <strong><a
-href="mailto:support@theideaplace.net">support@theideaplace.net</a></strong>.
+href="mailto:quickmailissues@theideaplace.net">quickmailissues@theideaplace.net</a></strong>.
 Describe the problem in your own words — the more detail (what you did,
 what happened, what you expected), the better.</p>
 <p>Choose this option when you <strong>don’t mind sending an
@@ -4306,14 +3463,8 @@ included in a report — and what’s never included</h3>
 short <strong>Environment</strong> section so a problem can be
 reproduced in the right context: the QuickMail version, your Windows
 version, the .NET runtime version, the active color theme, the current
-view, the current sort order, the message open mode (reading pane, tab,
-or window), and how many accounts you have set up together with the mail
-protocols they connect over — for example
-<code>2 (IMAP, Microsoft 365)</code>. Any shared mailboxes are counted
-separately, as in <code>2 (Microsoft 365), plus 1 shared mailbox</code>,
-since a shared mailbox is not one of your own accounts. That last line
-is counts and protocol names only: no address, server name, or account
-name is included.</p>
+view, the current sort order, and the message open mode (reading pane,
+tab, or window).</p>
 <p><strong>No message content, email addresses, account settings,
 passwords, or log file content is ever collected or sent.</strong> The
 Preview shows the full report verbatim, so you always see exactly what
@@ -4357,18 +3508,6 @@ with Google)</strong> provider and a Google choice under
 next time QuickMail starts. Gmail accounts already using Google sign-in
 keep working whether this is on or off. See <a
 href="#gmail-google-account">Gmail (Google Account)</a>.</li>
-</ul>
-<p><strong>Account Types</strong></p>
-<ul>
-<li><strong>Offer POP3 when adding an account</strong> — off by default.
-Adds <strong>POP3/SMTP</strong> to the <strong>Connection
-method</strong> list under <strong>Advanced settings</strong> in the
-account dialogs, for mail services that offer no IMAP. Takes effect the
-next time QuickMail starts. POP3 downloads each message to this computer
-and keeps it there, in QuickMail’s own Inbox, Sent, Drafts and Trash, so
-the local copy is the only copy once a message leaves the server — read
-<a href="#pop3-accounts">POP3 accounts</a> before turning it on.
-Accounts already using POP3 keep working whether this is on or off.</li>
 </ul>
 <p><strong>QuickMail Logging</strong></p>
 <ul>
@@ -4491,18 +3630,13 @@ description of each built-in theme.</p>
 </tr>
 <tr class="even">
 <td>Announce results</td>
-<td>Action outcomes (messages copied, addresses saved, flag
-changes)</td>
+<td>Action outcomes (messages moved, addresses saved, flag changes)</td>
 </tr>
 <tr class="odd">
-<td>Announce delete, archive and move actions</td>
-<td>Delete, archive and move outcomes that are worth saying: a count
-when you acted on several at once (“3 messages deleted”), and “Folder is
-now empty”. Deleting, archiving or moving a single message says nothing
-either way — the row is gone and the next one is read, so there is
-nothing left to tell you. Failures are announced as results, so they are
-heard even with this turned off, as long as <strong>Announce action
-results</strong> is on</td>
+<td>Announce delete and archive actions</td>
+<td>Delete and archive outcomes (“1 message archived”). Turn off to stop
+these from interrupting the screen reader as it reads the next message;
+failures are still announced</td>
 </tr>
 <tr class="even">
 <td>Announce formatting while navigating</td>
@@ -4538,8 +3672,7 @@ account …”); when off, they speak concise field data only</td>
 </tr>
 <tr class="odd">
 <td>Show field labels in the rules list</td>
-<td>When on, rules-list rows speak field names (“Rule … runs … status
-…”)</td>
+<td>When on, rules-list rows speak field names (“Name … account …”)</td>
 </tr>
 </tbody>
 </table>
@@ -4988,14 +4121,6 @@ box with any screen reader.</p>
 <td>User Guide</td>
 </tr>
 <tr class="even">
-<td><code>Alt+Down</code></td>
-<td>Next unread message</td>
-</tr>
-<tr class="odd">
-<td><code>Alt+Up</code></td>
-<td>Previous unread message</td>
-</tr>
-<tr class="even">
 <td><code>Shift+,</code></td>
 <td>First message in group</td>
 </tr>
@@ -5009,15 +4134,15 @@ box with any screen reader.</p>
 </tr>
 </tbody>
 </table>
+<p>While composing, <code>Ctrl+F4</code> closes the compose tab or
+window and uses the normal unsaved-message confirmation.</p>
 <p><strong>Move to Folder…</strong> and <strong>Copy to Folder…</strong>
 are available from the context menu (Shift+F10) or the command palette;
 they have no default keyboard shortcut. <strong>Manage Themes</strong>,
 <strong>Next Theme</strong>, <strong>Previous Theme</strong>,
 <strong>Message List Fields…</strong>, <strong>Density:
 Comfortable</strong>, <strong>Density: Compact</strong>, <strong>Manage
-Flags…</strong>, <strong>Expand Folder</strong>, <strong>Collapse
-Folder</strong>, <strong>Expand All Folders</strong>, <strong>Collapse
-All Folders</strong>, and <strong>Report a Bug</strong> likewise have no
+Flags…</strong>, and <strong>Report a Bug</strong> likewise have no
 default key — reach them from the menus or the command palette, or
 assign a shortcut yourself in File → Settings → Keyboard Shortcuts.</p>
 <p><code>Ctrl+1</code>, <code>Ctrl+2</code>, and <code>Ctrl+3</code>
@@ -5191,5 +4316,57 @@ href="#calendar">Calendar</a> section for the full list.</p>
 <p><strong>Insert Template…</strong> and <strong>Save as
 Template</strong> are available from the command palette; they have no
 default keyboard shortcut.</p>
+<h2 id="private-notes-and-message-investigation">Private Notes and
+message investigation</h2>
+<p><strong>Notes:</strong> beneath Subject in composition and the
+existing-message editor holds private keywords or annotations. It is
+stored locally and backed up with the database, never sent to
+recipients. The message list has a sortable Notes column. General search
+includes notes; use <code>N:project</code> to search only Notes. Bare
+<code>N</code> continues to mean unread messages. Private notes require
+the local store and are unavailable in online-only mode.</p>
+<p>Before sending to more than three distinct visible TO/CC addresses
+across different domains, EQM offers to protect their addresses.
+<strong>Yes</strong> puts your own address in TO and moves the original
+TO/CC recipients to BCC, preserving existing BCC recipients and removing
+duplicates. <strong>No</strong> keeps them visible;
+<strong>Cancel</strong> returns without sending. Domain differences are
+a warning heuristic, not a determination that the people do not know one
+another.</p>
+<p>To export correspondence, open Email History, select the desired
+messages (Ctrl+A selects the displayed list), then choose <strong>Export
+→ Selection with attachments and index…</strong>. A new directory
+contains EML messages, native attachments and an <code>index.html</code>
+linking them. Only selected, loaded rows are exported. Missing content
+is reported as incomplete in the index; Notes are not exported.</p>
+<p><strong>Activity…</strong> in the message context menu shows recent
+local observations, rule actions, moves, snooze/wake events and
+acceptance of queued sends. Recording starts with this version; it
+cannot reconstruct older operations. Local catalogue additions/removals
+are not proof of server delivery or deletion. Events are retained up to
+90 days and 100,000 events per profile, with the latest 500 shown per
+message. Gmail labels sharing a Message-ID share the activity history
+within the account. # Attachment investigation tools</p>
+<p><strong>Tools &gt; Attachment explorer</strong> lists cached
+attachments in the current folder, or throughout EQM with
+<strong>Everywhere</strong>. Search filenames, senders or subjects; sort
+the columns; save selected files without overwriting existing names; or
+use <strong>Go to message</strong>. Embedded images and messages whose
+attachment metadata has not been downloaded are excluded. A capped
+result asks you to refine the search.</p>
+<p>For a missing file, select <strong>Locate missing
+attachment</strong>, choose a backup directory and inspect the
+candidates. <strong>Recover a copy</strong> copies into EQM; <strong>Use
+candidate location</strong> changes only this reference. Both require
+confirmation. Name/size matches are not proof; a known SHA-256 must
+match. Backup files are never deleted. Reopen the message after
+repair.</p>
+<p><strong>Analyze rule conflicts</strong> in Tools or the message
+context menu examines the selected messages, listing active matching
+rules in execution order and flagging competing actions. Blocked later
+rules remain visible. This is a read-only simulation, not execution or a
+guarantee of remote delivery.</p>
+<p>See <a href="ATTACHMENT-INVESTIGATION.md">Attachment
+investigation</a> for scope, keyboard navigation and limitations.</p>
 </body>
 </html>

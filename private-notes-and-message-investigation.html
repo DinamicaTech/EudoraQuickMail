@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Private Notes and message investigation - QuickMail User Guide</title>
+  <style>
+  body { max-width: 860px; margin: 0 auto; padding: 1rem 2rem; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; line-height: 1.6; color: #222; }
+  h1 { border-bottom: 2px solid #ddd; padding-bottom: 0.3em; }
+  h2 { border-bottom: 1px solid #eee; padding-bottom: 0.2em; margin-top: 2em; }
+  table { border-collapse: collapse; width: 100%; margin: 1em 0; }
+  th, td { border: 1px solid #ccc; padding: 0.5rem 0.75rem; text-align: left; }
+  th { background: #f5f5f5; font-weight: 600; }
+  code { background: #f0f0f0; padding: 0.15em 0.35em; border-radius: 3px; font-size: 0.88em; font-family: "Cascadia Code", "Consolas", monospace; }
+  pre { background: #f0f0f0; padding: 1rem; border-radius: 4px; overflow-x: auto; }
+  pre code { background: none; padding: 0; }
+  a { color: #0969da; }
+  hr { border: none; border-top: 1px solid #ddd; margin: 2rem 0; }
+  blockquote { border-left: 3px solid #ddd; margin-left: 0; padding-left: 1rem; color: #555; }
+  .nav { margin-bottom: 2em; padding-bottom: 0.75em; border-bottom: 1px solid #ddd; font-size: 0.9em; }
+  .nav a { margin-right: 1em; color: #0969da; text-decoration: none; }
+  .nav a:hover { text-decoration: underline; }
+  .version { color: #666; font-size: 0.85em; margin-top: -1em; margin-bottom: 2em; }
+</style>
+
+</head>
+<body>
+  <div class="nav"><a href="index.html">Contents</a> | <a href="full.html">Single Page</a> | <a href="keyboard-shortcuts.html">Previous: Keyboard Shortcuts</a></div>
+  <h1 id="private-notes-and-message-investigation">Private Notes and
+message investigation</h1>
+<p><strong>Notes:</strong> beneath Subject in composition and the
+existing-message editor holds private keywords or annotations. It is
+stored locally and backed up with the database, never sent to
+recipients. The message list has a sortable Notes column. General search
+includes notes; use <code>N:project</code> to search only Notes. Bare
+<code>N</code> continues to mean unread messages. Private notes require
+the local store and are unavailable in online-only mode.</p>
+<p>Before sending to more than three distinct visible TO/CC addresses
+across different domains, EQM offers to protect their addresses.
+<strong>Yes</strong> puts your own address in TO and moves the original
+TO/CC recipients to BCC, preserving existing BCC recipients and removing
+duplicates. <strong>No</strong> keeps them visible;
+<strong>Cancel</strong> returns without sending. Domain differences are
+a warning heuristic, not a determination that the people do not know one
+another.</p>
+<p>To export correspondence, open Email History, select the desired
+messages (Ctrl+A selects the displayed list), then choose <strong>Export
+→ Selection with attachments and index…</strong>. A new directory
+contains EML messages, native attachments and an <code>index.html</code>
+linking them. Only selected, loaded rows are exported. Missing content
+is reported as incomplete in the index; Notes are not exported.</p>
+<p><strong>Activity…</strong> in the message context menu shows recent
+local observations, rule actions, moves, snooze/wake events and
+acceptance of queued sends. Recording starts with this version; it
+cannot reconstruct older operations. Local catalogue additions/removals
+are not proof of server delivery or deletion. Events are retained up to
+90 days and 100,000 events per profile, with the latest 500 shown per
+message. Gmail labels sharing a Message-ID share the activity history
+within the account. # Attachment investigation tools</p>
+<p><strong>Tools &gt; Attachment explorer</strong> lists cached
+attachments in the current folder, or throughout EQM with
+<strong>Everywhere</strong>. Search filenames, senders or subjects; sort
+the columns; save selected files without overwriting existing names; or
+use <strong>Go to message</strong>. Embedded images and messages whose
+attachment metadata has not been downloaded are excluded. A capped
+result asks you to refine the search.</p>
+<p>For a missing file, select <strong>Locate missing
+attachment</strong>, choose a backup directory and inspect the
+candidates. <strong>Recover a copy</strong> copies into EQM; <strong>Use
+candidate location</strong> changes only this reference. Both require
+confirmation. Name/size matches are not proof; a known SHA-256 must
+match. Backup files are never deleted. Reopen the message after
+repair.</p>
+<p><strong>Analyze rule conflicts</strong> in Tools or the message
+context menu examines the selected messages, listing active matching
+rules in execution order and flagging competing actions. Blocked later
+rules remain visible. This is a read-only simulation, not execution or a
+guarantee of remote delivery.</p>
+<p>See <a href="ATTACHMENT-INVESTIGATION.md">Attachment
+investigation</a> for scope, keyboard navigation and limitations.</p>
+
+  <div class="nav"><a href="index.html">Contents</a> | <a href="full.html">Single Page</a> | <a href="keyboard-shortcuts.html">Previous: Keyboard Shortcuts</a></div>
+</body>
+</html>

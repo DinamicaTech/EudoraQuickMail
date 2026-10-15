@@ -65,18 +65,6 @@ next time QuickMail starts. Gmail accounts already using Google sign-in
 keep working whether this is on or off. See <a
 href="#gmail-google-account">Gmail (Google Account)</a>.</li>
 </ul>
-<p><strong>Account Types</strong></p>
-<ul>
-<li><strong>Offer POP3 when adding an account</strong> — off by default.
-Adds <strong>POP3/SMTP</strong> to the <strong>Connection
-method</strong> list under <strong>Advanced settings</strong> in the
-account dialogs, for mail services that offer no IMAP. Takes effect the
-next time QuickMail starts. POP3 downloads each message to this computer
-and keeps it there, in QuickMail’s own Inbox, Sent, Drafts and Trash, so
-the local copy is the only copy once a message leaves the server — read
-<a href="#pop3-accounts">POP3 accounts</a> before turning it on.
-Accounts already using POP3 keep working whether this is on or off.</li>
-</ul>
 <p><strong>QuickMail Logging</strong></p>
 <ul>
 <li><strong>Enable logging</strong> — when checked, QuickMail writes
@@ -198,18 +186,13 @@ description of each built-in theme.</p>
 </tr>
 <tr class="even">
 <td>Announce results</td>
-<td>Action outcomes (messages copied, addresses saved, flag
-changes)</td>
+<td>Action outcomes (messages moved, addresses saved, flag changes)</td>
 </tr>
 <tr class="odd">
-<td>Announce delete, archive and move actions</td>
-<td>Delete, archive and move outcomes that are worth saying: a count
-when you acted on several at once (“3 messages deleted”), and “Folder is
-now empty”. Deleting, archiving or moving a single message says nothing
-either way — the row is gone and the next one is read, so there is
-nothing left to tell you. Failures are announced as results, so they are
-heard even with this turned off, as long as <strong>Announce action
-results</strong> is on</td>
+<td>Announce delete and archive actions</td>
+<td>Delete and archive outcomes (“1 message archived”). Turn off to stop
+these from interrupting the screen reader as it reads the next message;
+failures are still announced</td>
 </tr>
 <tr class="even">
 <td>Announce formatting while navigating</td>
@@ -245,8 +228,7 @@ account …”); when off, they speak concise field data only</td>
 </tr>
 <tr class="odd">
 <td>Show field labels in the rules list</td>
-<td>When on, rules-list rows speak field names (“Rule … runs … status
-…”)</td>
+<td>When on, rules-list rows speak field names (“Name … account …”)</td>
 </tr>
 </tbody>
 </table>

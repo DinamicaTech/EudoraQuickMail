@@ -101,26 +101,15 @@ send.</li>
 <li><strong>Sync contacts from this account</strong> and <strong>Sync
 calendar from this account</strong> appear for iCloud accounts and for
 accounts that sign in — Microsoft, and Gmail when you choose Google
-sign-in. Check them <em>before</em> signing in, so the permission can be
+sign-in. Check them <em>before</em> signing in, so the permission is
 part of the same sign-in. (A Gmail account using an app password has no
 contact or calendar sync, so the boxes do not appear.)</li>
 <li>Press <strong>Add Account</strong>.</li>
 </ol>
-<p>Whether that permission really is part of the same sign-in depends on
-the account. Google sign-in folds it in, and so does a personal
-Outlook.com account set to connect over <strong>Microsoft 365
-(Graph)</strong> — one screen lists mail, contacts, and calendar
-together. A work or school Microsoft account asks separately once the
-account is added, on purpose: organizations that restrict what their
-users may approve would turn one over-asking screen into a failed
-sign-in, and no account at all.</p>
 <p>Server names, ports, and SSL settings are behind <strong>Advanced
 settings</strong>, an expander that stays closed unless you need it. Tab
 reaches its header before its contents, so one keystroke moves past the
-whole thing. <strong>Sign in with Microsoft</strong> and <strong>Sign in
-with Google</strong> come last of all, after Advanced settings and
-everything inside it — signing in is the last thing you do, so it is the
-last thing you tab to. The same is true in Manage Accounts.</p>
+whole thing.</p>
 <p>If something required is missing, <strong>Add Account</strong> does
 not close the dialog. It says what is missing and moves focus to the
 field that needs attention — the email address, the password, or, when
@@ -185,14 +174,8 @@ settings</strong> for any provider, to enter:</p>
 server logs in under a different name than your email address. See <a
 href="#when-your-login-is-not-your-email-address">When your login is not
 your email address</a>.</li>
-<li><strong>Connection method</strong> — Standard IMAP/SMTP, Microsoft
-365 (Graph) for Microsoft accounts, and POP3/SMTP when you have turned
-POP3 on. The incoming fields below follow whichever you choose; see <a
-href="#pop3-accounts">POP3 accounts</a>.</li>
 <li><strong>IMAP host</strong>, port, <strong>Use SSL</strong> (port
-993), and whether to accept invalid certificates — or <strong>POP3
-host</strong>, port and <strong>Use SSL</strong> (port 995) for a POP3
-account</li>
+993), and whether to accept invalid certificates</li>
 <li><strong>SMTP host</strong>, port, implicit SSL on connect (port 465
 — leave it unchecked for STARTTLS on port 587), and whether to accept
 invalid certificates</li>
@@ -272,10 +255,10 @@ Live.com</strong> accounts alike.</p>
 <strong>Outlook.com / Microsoft 365</strong> — or just type your
 address, which selects it for you. The password box disappears;
 Microsoft accounts sign in instead.</li>
-<li>Activate <strong>Sign in with Microsoft</strong> — the last tab stop
-in the dialog, after Advanced settings. A Microsoft sign-in window opens
-inside QuickMail. Sign in and approve the permissions QuickMail
-requests; the window closes itself and returns you to the dialog.</li>
+<li>Activate <strong>Sign in with Microsoft</strong>. A Microsoft
+sign-in window opens inside QuickMail. Sign in and approve the
+permissions QuickMail requests; the window closes itself and returns you
+to the dialog.</li>
 <li>Activate <strong>Add Account</strong>.</li>
 </ol>
 <p>Sign in as <strong>the same address you typed</strong> into the
@@ -315,15 +298,6 @@ href="#for-microsoft-365-administrators-and-tenant-owners">For Microsoft
 365 Administrators and Tenant Owners</a>; once they approve QuickMail,
 sign-in works normally. Personal Outlook.com accounts are not affected
 and need no approval.</p>
-<p>If an administrator signs in at that approval screen, they can
-approve QuickMail for the whole organization there (there is a “consent
-on behalf of your organization” option). Because the administrator’s
-account is not the one you were adding, QuickMail leaves your account
-unchanged and <strong>offers to sign you in again as yourself</strong> —
-choose <strong>Yes</strong> to finish connecting. An administrator can
-also approve QuickMail ahead of time without this back-and-forth via
-<strong>Help → Grant Admin Consent for Your Organization</strong> or the
-administrators section above.</p>
 </blockquote>
 <p>To bring this account’s contacts into your address book, check
 <strong>Sync contacts from this account</strong> before signing in. See
@@ -441,83 +415,6 @@ single (non-repeating) appointments on. See <a
 href="#syncing-contacts-from-your-accounts">Syncing Contacts from Your
 Accounts</a> and the <a href="#calendar">Calendar</a> section for
 details.</p>
-<h3 id="pop3-accounts">POP3 accounts</h3>
-<p>Some mail services offer POP3 and nothing else. QuickMail can collect
-mail over POP3 and send over SMTP as usual — but POP3 works differently
-enough from IMAP that it is worth reading this section before you choose
-it.</p>
-<p><strong>Turning it on.</strong> POP3 is off until you ask for it. In
-<strong>File → Settings</strong> (Ctrl+comma), open the
-<strong>Advanced</strong> tab, and under <strong>Account Types</strong>
-check <strong>Offer POP3 when adding an account</strong>. It takes
-effect the next time QuickMail starts. (Equivalently,
-<code>Pop3Backend = true</code> under <code>[features]</code> in
-<code>config.ini</code>, or <code>--feature Pop3Backend</code> at launch
-— they are the same switch, so there is no need to set more than
-one.)</p>
-<p><strong>Adding the account.</strong> Add it as you would any other:
-<strong>New</strong> in Manage Accounts, then open <strong>Advanced
-settings</strong> and choose <strong>POP3/SMTP</strong> under
-<strong>Connection method</strong>. The <strong>Incoming Mail
-(POP3)</strong> fields replace the IMAP ones. Gmail, Outlook.com and
-Yahoo Mail fill in their POP3 server for you; for anything else, type
-the server, port and security yourself. iCloud is not offered a POP3
-server because Apple does not run one — iCloud is IMAP only.</p>
-<p>Two things most services require before POP3 will answer at all: POP3
-switched on in the service’s own web settings, and — for Gmail and Yahoo
-— an app password rather than your account password.</p>
-<p><strong>What is different from IMAP:</strong></p>
-<ul>
-<li><strong>Messages are downloaded whole and kept on this
-computer.</strong> Reading a message, opening its attachments, and
-searching all work with no network.</li>
-<li><strong>Four folders — Inbox, Sent, Drafts and Trash — and they
-belong to QuickMail.</strong> A POP3 server has no folders to show, so
-these are QuickMail’s own. Creating, renaming, moving and deleting
-folders are not offered for a POP3 account; QuickMail says so rather
-than failing at the server.</li>
-<li><strong>Read and unread, flags, and moves between those folders stay
-on this computer.</strong> POP3 has nowhere on the server to record
-them, so another mail program reading the same mailbox will not see
-them.</li>
-<li><strong>New mail arrives on the sync interval</strong>, not the
-moment it lands. POP3 has no equivalent of the live connection QuickMail
-holds open for IMAP, so there is no instant notification.</li>
-<li><strong>Sending is unchanged.</strong> A POP3 account sends over
-SMTP exactly like an IMAP one, and a copy of each sent message is filed
-in QuickMail’s own Sent folder.</li>
-</ul>
-<p><strong>Keep mail on the server after downloading.</strong> This is
-checked by default, and while it is checked QuickMail never deletes
-anything from your mail service: collect mail here and it is still there
-for your phone, webmail, or anything else you use.</p>
-<p>Clear it and QuickMail removes each message from the server once it
-is safely stored here — the classic POP3 behaviour, and the reason POP3
-has the reputation it has. <strong>This computer then holds the only
-copy</strong>, so think about backups before choosing it. You can change
-the setting later in Manage Accounts. Clearing it also applies to mail
-collected earlier, as POP3 programs have traditionally worked: on the
-next collection QuickMail removes the server copies of messages it
-already downloaded — every one of them is already stored here, so
-nothing is lost, but if your phone or another program has not collected
-that mailbox yet, leave the setting checked until it has.</p>
-<p>Either way, deleting a message in QuickMail is two steps, as it is
-everywhere else: to Trash, then permanently. Only the permanent delete
-can reach the server, and only for an account set to remove collected
-mail. QuickMail confirms it is deleting the right message first — a
-message some other program has already collected is left alone rather
-than deleted by position.</p>
-<p>With <strong>keep mail on the server</strong> checked, a permanent
-delete (including emptying the Trash) is local and final: the message is
-gone from QuickMail for good, the server copy stays where it is for
-whatever else reads that mailbox, and QuickMail remembers the deletion
-so the message is never downloaded again.</p>
-<p><strong>Where your POP3 mail lives.</strong> In QuickMail’s data
-folder for that profile (<code>%APPDATA%\QuickMail</code> by default),
-in <code>mail.db</code>. For an IMAP account that file is a cache and
-can be deleted safely; for a POP3 account with “keep mail on the server”
-cleared, it is your mail. Back it up accordingly, and see <a
-href="#moving-to-a-new-computer">Moving to a new computer</a>.</p>
 <h3 id="editing-an-account">Editing an account</h3>
 <p>Select an account in the <strong>Accounts</strong> list and its
 settings appear beside it. You can change:</p>
@@ -546,10 +443,8 @@ entered.</p>
 Google</strong> are here too, for when a sign-in needs renewing.</p>
 <p><strong>Set Default</strong> marks the selected account as your
 default — the account new messages are sent from unless you choose
-another, and the one the Rules Manager opens on when you are not in a
-particular account (in <strong>All Inboxes</strong>, for example). The
-default account is announced as “default” alongside its name in the
-list.</p>
+another, and the one new mail rules are created for. The default account
+is announced as “default” alongside its name in the list.</p>
 <p>Server settings sit behind the same <strong>Advanced
 settings</strong> expander as in Add Account, so an account that is
 working needs no scrolling past hosts and ports to reach the settings
@@ -557,72 +452,16 @@ people actually change. The <strong>Provider</strong> at the top is
 fixed when the account is created; to change it, remove the account and
 add it again.</p>
 <h3 id="removing-an-account">Removing an account</h3>
-<p>Select the account and press <strong>Delete</strong>. For an ordinary
-account there is no confirmation step, and the removal happens at once:
-QuickMail forgets the account’s password from Windows Credential
-Manager, deletes the mail it had cached, removes any contacts synced
-from it, and for Microsoft and Google accounts signs out as well. You
-hear “Account deleted. Cleaning up…”, then “Account deleted.” when the
-tidying has finished. (Deleting an account that a shared mailbox reads
-through does ask first, because it removes the shared mailbox too — see
-<a href="#shared-mailboxes">Shared mailboxes</a>.)</p>
+<p>Select the account and press <strong>Delete</strong>. There is no
+confirmation step, and the removal happens at once: QuickMail forgets
+the account’s password from Windows Credential Manager, deletes the mail
+it had cached, removes any contacts synced from it, and for Microsoft
+and Google accounts signs out as well. You hear “Account deleted.
+Cleaning up…”, then “Account deleted.” when the tidying has
+finished.</p>
 <p><strong>Nothing is deleted from the mail server.</strong> Removing an
 account removes it from QuickMail only — add it again and your mail is
 still there.</p>
-<h3 id="shared-mailboxes">Shared mailboxes</h3>
-<p>A shared mailbox is a mailbox several people read and send from — a
-<code>support@</code>, <code>info@</code>, or <code>sales@</code>
-address that belongs to a team rather than a person. If your
-organization has given you access to one, you can add it to QuickMail
-and it appears as its own mailbox in the folder tree, alongside your own
-accounts.</p>
-<p>Shared mailboxes are a <strong>Microsoft 365 work or school</strong>
-feature. You add one through an account you already have: QuickMail
-reads and sends the shared mailbox using your existing sign-in, so there
-is no separate password and no separate sign-in for it. Personal
-Outlook.com accounts and non-Microsoft (IMAP) accounts do not have
-shared mailboxes, so the option is offered only when you have a work or
-school Microsoft 365 account to read it through.</p>
-<p><strong>To add a shared mailbox:</strong> open <strong>Account
-Manager</strong> (Tools menu), activate <strong>Add shared
-mailbox</strong>, choose the work or school account that has access to
-it if you are asked, and type the shared mailbox’s email address. Press
-<strong>Add</strong>. The mailbox connects using that account and its
-folders load. You do not need access to a password — access comes from
-your own account’s permission to the mailbox, which your organization
-grants.</p>
-<p><strong>Reading and sending.</strong> A shared mailbox reads like any
-other: select it in the folder tree and open its folders. To send from
-it, choose the shared address in the <strong>From</strong> list when
-composing — the message goes out as the shared mailbox, not as you.</p>
-<p><strong>Freshness.</strong> A shared mailbox updates on a timer
-rather than the instant new mail arrives: <strong>shared mailboxes
-update every few minutes, not instantly.</strong> Your own mailboxes
-still update live; only the shared one waits for the next check.</p>
-<p><strong>New-mail notifications are off for a shared mailbox by
-default.</strong> A shared mailbox is often a busy team address, so
-QuickMail does not pop a notification for every message that lands in
-it. If you do want notifications for a particular shared mailbox, select
-it in Account Manager and turn on <strong>Notify me of new mail in this
-shared mailbox</strong>. The main <strong>Show a Notification When New
-Mail Arrives</strong> setting still has to be on for any notification to
-appear.</p>
-<p><strong>Rules.</strong> A shared mailbox’s rules are managed in
-Outlook, not in QuickMail, so a shared mailbox is not in the Rules
-Manager’s <strong>Account</strong> list. QuickMail cannot reach a shared
-mailbox’s server-side rules, and a client-side rule would act, from your
-computer only, on mail everyone else reads. <strong>Create Rule from
-Message</strong> is not in the context menu for a shared mailbox’s
-messages, and <strong>Ctrl+Shift+T</strong> and the command palette say
-so on the status bar instead of making a rule from one. In the mailbox’s
-folders, the rule summary on the status bar says its rules are managed
-in Outlook. A client-side rule saved on a shared mailbox by an earlier
-version is kept but no longer runs.</p>
-<p><strong>Removing.</strong> Removing the account that a shared mailbox
-reads through also removes the shared mailbox — you are told which
-shared mailboxes will go when you delete their parent account. Removing
-a shared mailbox on its own leaves the account it read through
-untouched.</p>
 <hr />
 
   <div class="nav"><a href="index.html">Contents</a> | <a href="full.html">Single Page</a> | <a href="installing-and-updating-quickmail.html">Previous: Installing and Updating QuickMail</a> | <a href="for-microsoft-365-administrators-and-tenant-owners.html">Next: For Microsoft 365 Administrators and Tenant Owners</a></div>

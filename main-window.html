@@ -155,55 +155,6 @@ person’s name in the From and To trees.</p>
 <p>The same typing works in the <strong>Go to Folder</strong> picker, in
 the address book’s contact, group, and member lists, and in the <a
 href="#message-list-fields">Message List Fields</a> window.</p>
-<h3 id="expanding-and-collapsing-folders">Expanding and Collapsing
-Folders</h3>
-<p>Right and Left arrow still open and close one folder at a time, and
-that has not changed. What is new is four actions for doing it in bulk —
-useful when an account has folders nested several levels deep, or when
-several accounts have filled the tree.</p>
-<ul>
-<li><strong>Expand Folder</strong> opens the selected folder and
-everything inside it, all the way down, rather than one level.</li>
-<li><strong>Collapse Folder</strong> closes it and everything inside it,
-so the whole branch folds back to a single line.</li>
-<li><strong>Expand All Folders</strong> opens every folder in the
-tree.</li>
-<li><strong>Collapse All Folders</strong> closes everything, account
-headers included, leaving the tree as a short list of accounts.</li>
-</ul>
-<p>Each is reachable three ways:</p>
-<ul>
-<li>Choose <strong>Folder → Expand Folder</strong>, <strong>Collapse
-Folder</strong>, <strong>Expand All Folders</strong>, or
-<strong>Collapse All Folders</strong> from the menu bar.</li>
-<li>Press <strong>Shift+F10</strong> on the folder tree and choose it
-from the context menu. On a calendar the first two read <strong>Expand
-Calendar</strong> and <strong>Collapse Calendar</strong>; they do the
-same thing.</li>
-<li>Open the Command Palette (<strong>Ctrl+Shift+P</strong>) and choose
-it there. None of the four has a shortcut key to begin with, so if you
-use one often, assign it your own in <a
-href="#keyboard-customization">Keyboard Customization</a>.</li>
-</ul>
-<p>The two “all folders” actions say what they did — “All folders
-collapsed” — because you can start them from the menu bar with focus
-anywhere. The two single-folder actions say nothing extra when you use
-the context menu: the folder keeps focus and your screen reader reports
-its own expanded or collapsed state. Started from the Folder menu or the
-Command Palette with focus outside the tree, where nothing is there to
-report it, they say what they did instead.</p>
-<p>If collapsing hides the folder you were on, the selection moves up to
-the nearest folder still showing rather than disappearing into a closed
-branch. Choosing Expand or Collapse Folder on a folder with nothing
-inside it says so instead of doing nothing.</p>
-<p>How you leave the tree is how you find it: a folder you collapse
-stays collapsed while QuickMail refreshes its folder list, and coming
-back to the tree with <strong>F6</strong> or <strong>Ctrl+2</strong>
-leaves it collapsed rather than re-opening the branch holding the folder
-you are reading. Go to a different folder and the tree opens up to show
-it again, as it always has. Expansion is not remembered between runs —
-QuickMail starts each account open, and opens whatever it needs to reach
-the folder it lands in.</p>
 <h3 id="creating-folders">Creating Folders</h3>
 <p>Create a new folder in any of these ways:</p>
 <ul>
@@ -299,41 +250,6 @@ menu) to switch how messages are grouped:</p>
 <li><strong>From</strong> — messages grouped by sender</li>
 <li><strong>To</strong> — messages grouped by recipient</li>
 </ul>
-<h3 id="moving-to-the-next-unread-message">Moving to the Next Unread
-Message</h3>
-<p><code>Alt+Down</code> moves to the nearest unread message below where
-you are; <code>Alt+Up</code> moves to the nearest one above. They are
-also <strong>Next Unread Message</strong> and <strong>Previous Unread
-Message</strong> in the command palette, and you can give them different
-keys in <strong>File → Settings → Keyboard Shortcuts</strong>.</p>
-<p>In the <strong>Messages</strong> view they move down or up the list,
-skipping everything already read. In <strong>Conversations</strong>,
-<strong>From</strong>, and <strong>To</strong> they run through every
-message the tree holds, in group order — so they cross from one
-conversation or sender into the next rather than stopping at the end of
-the one you are in. Closed groups are searched too, and a closed group
-holding the unread message is opened so that message can take focus. It
-stays open afterwards, like any group you open yourself.</p>
-<p>Below and above mean what they say on screen: which of them is newer
-depends on how the folder is sorted.</p>
-<p>Both keys act while you are in the message list or a group tree —
-including when you are moving through the list with the reading pane
-open beside it. They do nothing while focus is inside the reading pane
-itself, and an open message window has its own keys:
-<strong>Alt+Left</strong> and <strong>Alt+Right</strong> already move to
-the previous and next message there.</p>
-<p>While a message tab is showing there is no list to move through, and
-the two actions are not offered in that window’s command palette. Start
-one from the main window’s palette while the calendar is open, or while
-a message tab covers the list, and QuickMail says why instead of going
-quiet.</p>
-<p>Neither wraps around. When there is no unread message left in the
-direction you are going, nothing moves and QuickMail says “No unread
-messages below” or “No unread messages above”, so that running out is
-never mistaken for a key that did not register. (That is a
-<strong>Result</strong> announcement — see <a
-href="#screen-reader-announcements">Screen Reader Announcements</a> if
-you have those switched off.)</p>
 <h3 id="each-folder-remembers-how-you-left-it">Each Folder Remembers How
 You Left It</h3>
 <p>Folders do not all want the same treatment. An inbox reads well
@@ -369,263 +285,18 @@ Density</strong>, and <strong>Density: Comfortable</strong> and
 reader reports about it, is identical either way — that is set in <a
 href="#message-list-fields">Message List Fields</a>.</p>
 <h3 id="searching">Searching</h3>
-<p>Press <code>Ctrl+Shift+S</code>, or <code>/</code> in the message
-list, to open the search box. The list narrows as you type to the
-matching messages in the folder you are in — an ordinary folder, or a
-combined one such as <strong>All Inboxes</strong> or <strong>All
-Mail</strong> — and the number found is announced when you pause. Press
-<strong>Down</strong> or <strong>Tab</strong> to move into the results,
-and <strong>Escape</strong> to clear the search and return to the whole
-folder.</p>
-<p>Search reads the whole message, not only what the list shows: the
-sender, the recipients and Cc, the subject, the text of the message, and
-the names of its attachments. It searches the copy QuickMail keeps on
-this computer, so the text of a message is searchable once it has been
-downloaded — because you opened it, because QuickMail fetched it ahead
-of time, or because it is inside <strong>Download messages for offline
-reading</strong> (see <a
-href="#reading-messages-without-a-connection">Reading messages without a
-connection</a>). The sender, recipients, subject and preview are always
-searchable, and there a match can be part of a word.</p>
-<p><strong>Words.</strong> Every word you type has to be in the message,
-in any order. A word finds the words that begin with it, so
-<code>budg</code> finds “budget”, and capitals and accents don’t
-matter.</p>
-<ul>
-<li>Put words in quotes to find them together, in that order:
-<code>"quarterly report"</code>.</li>
-<li>Put a minus sign in front of a word or quoted phrase to leave out
-the messages that contain it: <code>budget -draft</code>.</li>
-</ul>
-<p><strong>Where a word is.</strong> Put one of these in front of a
-word, or of a quoted phrase, to look for it in one place only:</p>
-<table>
-<thead>
-<tr class="header">
-<th>Type</th>
-<th>To find it in</th>
-</tr>
-</thead>
-<tbody>
-<tr class="odd">
-<td><code>from:sam</code></td>
-<td>the sender’s name or address</td>
-</tr>
-<tr class="even">
-<td><code>to:ann</code></td>
-<td>the recipients</td>
-</tr>
-<tr class="odd">
-<td><code>cc:lee</code></td>
-<td>the Cc recipients</td>
-</tr>
-<tr class="even">
-<td><code>subject:invoice</code></td>
-<td>the subject</td>
-</tr>
-<tr class="odd">
-<td><code>body:agenda</code></td>
-<td>the text of the message</td>
-</tr>
-<tr class="even">
-<td><code>attachment:report</code></td>
-<td>the names of attached files</td>
-</tr>
-</tbody>
-</table>
-<p><strong>Which messages.</strong> These narrow the results without
-looking for any text:</p>
-<table>
-<colgroup>
-<col style="width: 27%" />
-<col style="width: 72%" />
-</colgroup>
-<thead>
-<tr class="header">
-<th>Type</th>
-<th>Finds messages</th>
-</tr>
-</thead>
-<tbody>
-<tr class="odd">
-<td><code>has:attachment</code></td>
-<td>with attachments</td>
-</tr>
-<tr class="even">
-<td><code>is:unread</code>, <code>is:read</code></td>
-<td>not yet read, or read</td>
-</tr>
-<tr class="odd">
-<td><code>is:flagged</code>, <code>is:unflagged</code></td>
-<td>flagged, or not</td>
-</tr>
-<tr class="even">
-<td><code>after:2026-01-15</code></td>
-<td>received on that day or later</td>
-</tr>
-<tr class="odd">
-<td><code>before:2026-02-01</code></td>
-<td>received before that day</td>
-</tr>
-<tr class="even">
-<td><code>folder:projects</code></td>
-<td>in a folder whose name contains “projects” — useful in All Mail</td>
-</tr>
-<tr class="odd">
-<td><code>account:work</code></td>
-<td>in an account whose name or address contains “work”</td>
-</tr>
-</tbody>
-</table>
-<p>A minus sign in front of <code>has:</code> or <code>is:</code>
-reverses it: <code>-has:attachment</code> finds messages with none.
-Write dates as year, month and day, or the way Windows shows a short
-date on your computer.</p>
-<p>Anything else with a colon in it — <code>Re:</code>, a time such as
-<code>10:30</code>, a web address — is searched for as ordinary text, so
-pasting a subject line works.</p>
-<p>Everything combines:
-<code>from:sam budget -draft is:unread after:2026-01-01</code> finds
-unread messages from Sam since the start of the year that mention the
-budget and don’t mention a draft.</p>
-<h3 id="advanced-search">Advanced Search</h3>
-<p>Press <strong>Ctrl+/</strong>, or choose <strong>View → Advanced
-Search…</strong>, to search with a form instead of typing the syntax.
-You can assign a different shortcut in <strong>File → Settings →
-Keyboard Shortcuts</strong>.</p>
-<p>The form has a field for each part of a message — <strong>Words
-anywhere</strong>, <strong>From</strong>, <strong>To</strong>,
-<strong>Cc</strong>, <strong>Subject</strong>, <strong>Body</strong> and
-<strong>Attachment name</strong> — and for the conditions: <strong>Has
-attachments</strong>, <strong>Read state</strong>,
-<strong>Flag</strong>, <strong>Received from</strong> and
-<strong>Received up to</strong> (both days included). Every word in a
-field is looked for in that part of the message, so
-<strong>From</strong> <code>Sam Smith</code> finds a sender with both
-words in the name or address. <strong>Words anywhere</strong> also takes
-everything the search box understands, such as
-<code>folder:projects</code>.</p>
-<p>Under <strong>Look in</strong>, choose where to search:</p>
-<ul>
-<li><strong>This folder</strong> searches the folder you were in,
-exactly as the search box does: the search box opens showing the search,
-so you can see how it is written and change it there.</li>
-<li><strong>Every folder of these accounts</strong> searches all of your
-mail in the accounts you leave checked — every account, unless you
-uncheck some — including Sent and Trash. The results open as a
-<strong>Search results</strong> folder.</li>
-</ul>
-<p>The accounts are a single list: <strong>Tab</strong> reaches it,
-<strong>Up</strong> and <strong>Down</strong> move between accounts, and
-<strong>Space</strong> checks or unchecks the one you are on. Below it,
-<strong>Also search the mail server</strong> asks each account’s server
-as well as this computer — for mail older than the <strong>Sync
-range</strong>, or whose text was never downloaded (see <a
-href="#searching-the-server-too">Searching the server too</a>). When a
-search of this computer alone finds nothing, QuickMail says so and
-suggests it.</p>
-<p>Press <strong>Enter</strong> to search. When something is found the
-form closes, focus moves to the first result, and the number found is
-announced. When nothing is found the form stays open with focus back in
-<strong>Words anywhere</strong>, so you can change the search and try
-again. A search of every folder of your accounts leaves you in the
-folder you were in; a search of <strong>This folder</strong> leaves its
-words in that folder’s search box. While a search is running,
-<strong>Escape</strong> waits for it to finish. <strong>Clear</strong>
-empties the fields but keeps your choice of where to look, and
-<strong>Escape</strong> closes the form. <strong>F6</strong> moves
-between the fields, <strong>Look in</strong>, the list of accounts and
-the buttons.</p>
-<h4 id="searching-the-server-too">Searching the server too</h4>
-<p>Search looks at the mail on this computer. To also find mail that
-isn’t here — older than the <strong>Sync range</strong>, or whose text
-was never downloaded — check <strong>Also search the mail
-server</strong> in Advanced Search, or with Search results already open
-choose <strong>Search the Server</strong> on the results bar, or
-<strong>Search the Server Too</strong> in the command palette. QuickMail
-asks each account’s mail server for the same search and adds what it
-finds that the results don’t already have; you hear how many more were
-found, or that there were none. An account whose server refuses the
-search is named, and the others still count; one QuickMail already knows
-is offline is left out quietly.</p>
-<p>What each server can search for differs. Gmail and Microsoft 365
-search the whole mailbox at once — for Gmail that is everything except
-Spam and Trash, and a search naming a folder goes folder by folder
-instead. Other mail servers are asked one folder at a time, which takes
-longer on a large account, and some search the text of a message more
-thoroughly than others. Messages found this way are shown but not kept:
-they stay in the results until you refresh or close them.</p>
-<h4 id="saving-a-search">Saving a search</h4>
-<p>While a <strong>Search results</strong> folder is open, <strong>View
-→ Views → Save View…</strong> — or <strong>Save Search as View…</strong>
-in the command palette — saves it as a view, with a name and, if you
-like, a keyboard shortcut. Choosing the view later runs the search
-again, so it always shows what matches now.</p>
-<p>The <strong>Search results</strong> folder works like any other
-folder: every view, sort, filter and message command applies, and the
-search box searches within the results. Above the list, a bar shows how
-many were found and for what, with <strong>Change Search</strong> — or
-<strong>Ctrl+/</strong> — to reopen the form with this search filled in,
-and <strong>Close</strong> — or <strong>Escape</strong> — to go back to
-the folder you started from. New mail that arrives while the results are
-open joins them if its sender, recipients, subject or preview match; a
-message that matches only in its text appears the next time the results
-are refreshed with <strong>F5</strong>.</p>
-<p>The first time you start a version of QuickMail with this search, it
-builds its index of the mail it already has, in the background, newest
-mail first. Until that finishes, older messages are found by their
-sender, recipients, subject and preview only. When QuickMail runs in
-online mode (<code>--online</code>) there is no copy on this computer,
-so search matches the sender, recipients, subject and preview of the
-messages in the list, and <code>cc:</code> and <code>attachment:</code>
-find nothing.</p>
+<p>Press <code>Ctrl+Shift+S</code> to open the search box. Type your
+query and press Enter. Results appear in the message list. Press Escape
+to clear the search and return to the full folder.</p>
 <h3 id="searching-folders">Searching Folders</h3>
 <p>Press <code>Ctrl+Shift+F</code> to search folder names. Type to
 filter the tree, press Enter to navigate to the matching folder.</p>
 <h3 id="refreshing">Refreshing</h3>
 <p>Press <strong>F5</strong> to manually refresh the current folder.</p>
 <h3 id="command-palette">Command Palette</h3>
-<p>Press <strong>Ctrl+Shift+P</strong> to open the command palette. It
-opens with focus in a filter box, and below it every command, sorted by
-category and then by name, with each command’s shortcut key where it has
-one. This is the fastest way to discover and run any action in the app,
-including the many that have no shortcut key.</p>
-<p><strong>Start typing and the list narrows to what matches.</strong>
-You do not have to type the start of a command’s name, or even whole
-words:</p>
-<ul>
-<li><strong>Any part of the name.</strong> Typing <code>arch</code>
-finds <strong>Move to Archive</strong>.</li>
-<li><strong>The initials.</strong> Typing <code>gtf</code> finds
-<strong>Go to Folder</strong>.</li>
-<li><strong>The category.</strong> Typing <code>mail</code> lists the
-Mail commands.</li>
-<li><strong>Several words, in any order.</strong> Typing
-<code>arch mail</code> finds the Mail category’s Archive command.</li>
-</ul>
-<p>The best match is always at the top of the list and is the one
-<strong>Enter</strong> runs. The command at the top is reported as it
-changes, and so is each command you reach by arrowing
-<strong>Up</strong> and <strong>Down</strong> — reported by Windows from
-the list itself, not announced by QuickMail over the top of it, so no
-announcement setting can switch it off. When a keystroke narrows the
-list without changing the command at the top, you hear the new count on
-its own — “3 commands” — because nothing else would tell you the list
-had moved.</p>
-<p>Focus stays in the filter box the whole time, so you can keep typing
-to narrow further without moving anywhere first.</p>
-<p><strong>Escape</strong> clears the filter if you have typed anything,
-and closes the palette if the box is already empty. <strong>Page
-Up</strong> and <strong>Page Down</strong> move through the list ten at
-a time. If nothing matches what you have typed, you hear “No matching
-commands”, and Enter says so too rather than doing nothing silently.</p>
-<p>The palette opens from anywhere in the main window, including while
-you are reading a message in the reading pane. Closing it puts you back
-where you were reading, and a command you choose runs before focus
-returns to the message.</p>
-<p>Other windows have their own palettes on the same key — the compose
-window, an open message, the address book, the rules window and more —
-listing the commands that belong to that window.</p>
+<p>Press <strong>Ctrl+Shift+P</strong> to open the command palette. Type
+any part of a command name to find it. Press Enter to run it. This is
+the fastest way to discover and run any action in the app.</p>
 <h3 id="keyboard-customization">Keyboard Customization</h3>
 <p>Open <strong>File → Settings → Keyboard Shortcuts</strong> to
 reassign any shortcut to a different key. Select a command’s field and
@@ -659,7 +330,7 @@ that behavior and its notifications are configurable — see <a
 href="#installing-and-updating-quickmail">Installing and Updating
 QuickMail</a> for the full walkthrough.</p>
 <p><strong>The portable exe does not update itself.</strong> If you run
-the standalone <code>QuickMail.exe</code>, the Help menu entry still
+the standalone <code>EudoraQM.exe</code>, the Help menu entry still
 tells you when a new version exists; activating it opens the releases
 page, and updating remains a manual download of the new exe.</p>
 <p>The <strong>Help</strong> menu also has a <strong>Keyboard
