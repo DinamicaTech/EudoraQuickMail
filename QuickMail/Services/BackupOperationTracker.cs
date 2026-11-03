@@ -44,11 +44,15 @@ internal sealed class BackupAwareSender(ISendMailService inner) : ISendMailServi
 {
     public async Task SendAsync(ComposeModel compose, AccountModel account, string? password, CancellationToken ct = default)
     {
-        using var operation = BackupOperationTracker.Enter(); await inner.SendAsync(compose, account, password, ct);
+        using var operation = BackupOperationTracker.Enter();
+        try { await inner.SendAsync(compose, account, password, ct); AccountHealthJournal.Observe(account.Id, "Send"); }
+        catch (Exception ex) { AccountHealthJournal.Observe(account.Id, "Send", ex); throw; }
     }
     public async Task SendIcsReplyAsync(string content, AccountModel account, string? password, string organizerEmail, CancellationToken ct = default)
     {
-        using var operation = BackupOperationTracker.Enter(); await inner.SendIcsReplyAsync(content, account, password, organizerEmail, ct);
+        using var operation = BackupOperationTracker.Enter();
+        try { await inner.SendIcsReplyAsync(content, account, password, organizerEmail, ct); AccountHealthJournal.Observe(account.Id, "Send"); }
+        catch (Exception ex) { AccountHealthJournal.Observe(account.Id, "Send", ex); throw; }
     }
     public Task VerifyAsync(AccountModel account, string? password, CancellationToken ct = default) => inner.VerifyAsync(account, password, ct);
 }

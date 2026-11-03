@@ -14,6 +14,14 @@ public interface ILocalStoreService
     Task<List<MailMessageSummary>> LoadAllSummariesAsync();
     Task<List<MailMessageSummary>> LoadAllSummariesAsync(Guid accountId);
     Task<List<MailMessageSummary>> LoadFolderSummariesAsync(Guid accountId, string folderName, int? limit = null);
+    Task<IReadOnlyList<(string Id, DateTimeOffset ReceivedUtc, bool IsRead)>> LoadFolderMessageIdDatesUnfilteredAsync(
+        Guid accountId, string folderName, CancellationToken ct = default) =>
+        Task.FromResult<IReadOnlyList<(string, DateTimeOffset, bool)>>([]);
+    /// <summary>Messages temporarily parked by Snooze must not be processed by Inbox rule sweeps.</summary>
+    Task<IReadOnlySet<SnoozedMessageKey>> LoadActiveSnoozedKeysAsync(CancellationToken ct = default) =>
+        Task.FromResult<IReadOnlySet<SnoozedMessageKey>>(new HashSet<SnoozedMessageKey>());
+    Task<string?> GetSnoozedOriginalFolderAsync(Guid accountId, string parkedFolder,
+        string messageId, CancellationToken ct = default) => Task.FromResult<string?>(null);
     Task DeleteSummariesAsync(Guid accountId, string folderName, IEnumerable<string> messageIds);
     Task DeleteAccountDataAsync(Guid accountId);
 

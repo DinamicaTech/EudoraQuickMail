@@ -71,6 +71,8 @@ public partial class LocalStoreService
     {
         if (string.IsNullOrWhiteSpace(message.MessageId)) throw new ArgumentException("MessageId is required.");
         if (string.IsNullOrWhiteSpace(message.FolderName)) throw new ArgumentException("FolderName is required.");
+        var phase = Stopwatch.GetTimestamp();
+        var timingDetails = $"account={message.AccountId}; attachments={message.Attachments.Count}";
         if (uidl is not null)
             await MaterializePop3ResourcesAsync(message, ct);
         else
@@ -80,14 +82,20 @@ public partial class LocalStoreService
             if (pending.Count > 0)
                 await MaterializePop3ResourcesAsync(new MailMessageDetail { Date = message.Date, Attachments = pending }, ct, "Local");
         }
+        if (uidl is not null)
+            PerformanceLogService.Record("POP3 store: materialize attachments", Stopwatch.GetElapsedTime(phase), timingDetails);
         var attachmentJson = message.Attachments.Count == 0 ? null : JsonSerializer.Serialize(
             message.Attachments.Select(a => new
             {
                 a.FileName, a.ContentType, a.FileSize, a.PartSpecifier, a.ContentId, a.IsInline,
             }));
         var hasVisibleAttachments = message.Attachments.Any(a => !a.IsInline);
+        phase = Stopwatch.GetTimestamp();
         await using var conn = await OpenAsync();
         await using var tx = (SqliteTransaction)await conn.BeginTransactionAsync(ct);
+        if (uidl is not null)
+            PerformanceLogService.Record("POP3 store: open and begin transaction", Stopwatch.GetElapsedTime(phase), timingDetails);
+        phase = Stopwatch.GetTimestamp();
         // A locally-authored message is authoritative. Ensure its folder is catalogued in the same
         // transaction so a scheduled message or draft can never exist in SQLite while remaining
         // invisible from the folder tree.
@@ -125,7 +133,10 @@ public partial class LocalStoreService
             await folder.ExecuteNonQueryAsync(ct);
         }
         await EnsureNotContainerAsync(conn, tx, message.AccountId, message.FolderName, allowMissing: true, ct);
+        if (uidl is not null)
+            PerformanceLogService.Record("POP3 store: ensure folder", Stopwatch.GetElapsedTime(phase), timingDetails);
 
+        phase = Stopwatch.GetTimestamp();
         await using (var summary = conn.CreateCommand())
         {
             summary.Transaction = tx;
@@ -157,7 +168,10 @@ public partial class LocalStoreService
             summary.Parameters.AddWithValue("$direction", (int)message.Direction);
             await summary.ExecuteNonQueryAsync(ct);
         }
+        if (uidl is not null)
+            PerformanceLogService.Record("POP3 store: write summary", Stopwatch.GetElapsedTime(phase), timingDetails);
 
+        phase = Stopwatch.GetTimestamp();
         await using (var detail = conn.CreateCommand())
         {
             detail.Transaction = tx;
@@ -185,7 +199,10 @@ public partial class LocalStoreService
             detail.Parameters.AddWithValue("$language", message.DraftSpellLanguage ?? string.Empty);
             await detail.ExecuteNonQueryAsync(ct);
         }
+        if (uidl is not null)
+            PerformanceLogService.Record("POP3 store: write detail", Stopwatch.GetElapsedTime(phase), timingDetails);
 
+        phase = Stopwatch.GetTimestamp();
         await using (var fts = conn.CreateCommand())
         {
             fts.Transaction = tx;
@@ -209,6 +226,8 @@ public partial class LocalStoreService
                 ? message.HtmlBody ?? string.Empty : message.PlainTextBody);
             await fts.ExecuteNonQueryAsync(ct);
         }
+        if (uidl is not null)
+            PerformanceLogService.Record("POP3 store: update search index", Stopwatch.GetElapsedTime(phase), timingDetails);
 
         if (uidl is not null)
         {
@@ -224,8 +243,11 @@ public partial class LocalStoreService
             receipt.Parameters.AddWithValue("$now", DateTimeOffset.UtcNow.UtcTicks);
             await receipt.ExecuteNonQueryAsync(ct);
         }
+        phase = Stopwatch.GetTimestamp();
         await UpdateFolderCountsAsync(conn, tx, message.AccountId, message.FolderName, ct);
         await tx.CommitAsync(ct);
+        if (uidl is not null)
+            PerformanceLogService.Record("POP3 store: update counts and commit", Stopwatch.GetElapsedTime(phase), timingDetails);
     }
 
     private async Task MaterializePop3ResourcesAsync(MailMessageDetail message, CancellationToken ct, string attachmentCategory = "Received")
@@ -520,8 +542,10 @@ public partial class LocalStoreService
             or QuickSearchField.Body);
         var requiresDetail = terms.Any(t => t.Field is QuickSearchField.AttachmentCount
             or QuickSearchField.AttachmentName);
-        var ftsJoin = requiresFts
-            ? "LEFT JOIN LocalMessageFts f ON f.account_id=s.account_id AND f.unique_id=s.unique_id AND f.folder_name=s.folder_name"
+        var needsFtsRows = requiresFts && (QuickSearchParser.HasSlowWildcard(query.Text)
+            || query.Sort == LocalSearchSort.Relevance);
+        var ftsJoin = needsFtsRows
+            ? "LEFT JOIN LocalMessageFtsKey k ON k.account_id=s.account_id AND k.unique_id=s.unique_id AND k.folder_name=s.folder_name LEFT JOIN LocalMessageFts f ON f.rowid=k.fts_rowid"
             : string.Empty;
         var detailJoin = requiresDetail
             ? "LEFT JOIN MessageDetail d ON d.account_id=s.account_id AND d.unique_id=s.unique_id AND d.folder_name=s.folder_name"
@@ -556,27 +580,14 @@ public partial class LocalStoreService
         await using var conn = await OpenAsync();
         await PopulateFolderScopesAsync(conn, query.FolderScopes, ct);
         await PopulateExcludedFolderScopesAsync(conn, query.ExcludedFolderScopes, ct);
+        // ExecuteScalarAsync is synchronous in SQLite; interrupt the native VM when cancelled.
+        using var interrupt = ct.Register(() => SQLitePCL.raw.sqlite3_interrupt(conn.Handle));
+        ct.ThrowIfCancellationRequested();
         PerformanceLogService.Record("Search SQLite: open and prepare scope",
             Stopwatch.GetElapsedTime(stageStarted), detail);
         await using var predicateCommand = conn.CreateCommand();
         var predicate = BuildQuickSearchPredicate(parsed, predicateCommand);
-        long total;
-        await using (var count = conn.CreateCommand())
-        {
-            CopyParameters(predicateCommand, count);
-            count.CommandText = $"""
-                SELECT count(*) FROM MessageSummary s
-                {ftsJoin}
-                {detailJoin}
-                WHERE ({predicate}){accountFilter}{folderFilter}{folderScopesFilter}{BuildExcludedFolderScopesFilter("s.", query.ExcludedFolderScopes)};
-                """;
-            AddScopeParameters(count, query);
-            stageStarted = Stopwatch.GetTimestamp();
-            total = Convert.ToInt64(await count.ExecuteScalarAsync(ct) ?? 0);
-            PerformanceLogService.Record("Search SQLite: count matches",
-                Stopwatch.GetElapsedTime(stageStarted), $"{detail}; total={total}");
-        }
-
+        var offset = Math.Max(0, query.Offset);
         var messages = new List<MailMessageSummary>();
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = $"""
@@ -592,15 +603,42 @@ public partial class LocalStoreService
         CopyParameters(predicateCommand, cmd);
         AddScopeParameters(cmd, query);
         cmd.Parameters.AddWithValue("$limit", limit);
-        cmd.Parameters.AddWithValue("$offset", Math.Max(0, query.Offset));
+        cmd.Parameters.AddWithValue("$offset", offset);
         stageStarted = Stopwatch.GetTimestamp();
-        await using var reader = await cmd.ExecuteReaderAsync(ct);
-        PerformanceLogService.Record("Search SQLite: execute page query",
-            Stopwatch.GetElapsedTime(stageStarted), $"{detail}; limit={limit}");
-        stageStarted = Stopwatch.GetTimestamp();
-        while (await reader.ReadAsync(ct)) messages.Add(ReadLocalSummary(reader));
-        PerformanceLogService.Record("Search SQLite: materialize page rows",
-            Stopwatch.GetElapsedTime(stageStarted), $"{detail}; rows={messages.Count}");
+        await using (var reader = await cmd.ExecuteReaderAsync(ct))
+        {
+            PerformanceLogService.Record("Search SQLite: execute page query",
+                Stopwatch.GetElapsedTime(stageStarted), $"{detail}; limit={limit}");
+            stageStarted = Stopwatch.GetTimestamp();
+            while (await reader.ReadAsync(ct)) messages.Add(ReadLocalSummary(reader));
+            PerformanceLogService.Record("Search SQLite: materialize page rows",
+                Stopwatch.GetElapsedTime(stageStarted), $"{detail}; rows={messages.Count}");
+        }
+        ct.ThrowIfCancellationRequested();
+        long total;
+        if (messages.Count < limit && (offset == 0 || messages.Count > 0))
+        {
+            // A short page already gives the exact total. An empty page beyond offset zero does
+            // not: messages may have disappeared since navigation, so retain the count fallback.
+            total = (long)offset + messages.Count;
+            PerformanceLogService.Marker("Search SQLite: count inferred from page", $"{detail}; total={total}");
+        }
+        else
+        {
+            await using var count = conn.CreateCommand();
+            CopyParameters(predicateCommand, count);
+            count.CommandText = $"""
+                SELECT count(*) FROM MessageSummary s
+                {ftsJoin}
+                {detailJoin}
+                WHERE ({predicate}){accountFilter}{folderFilter}{folderScopesFilter}{BuildExcludedFolderScopesFilter("s.", query.ExcludedFolderScopes)};
+                """;
+            AddScopeParameters(count, query);
+            stageStarted = Stopwatch.GetTimestamp();
+            total = Convert.ToInt64(await count.ExecuteScalarAsync(ct) ?? 0);
+            PerformanceLogService.Record("Search SQLite: count matches",
+                Stopwatch.GetElapsedTime(stageStarted), $"{detail}; total={total}");
+        }
         PerformanceLogService.Record("Search SQLite: total quick search",
             Stopwatch.GetElapsedTime(totalStarted), $"{detail}; rows={messages.Count}; total={total}");
         return new LocalSearchResult(messages, total);
@@ -772,13 +810,14 @@ public partial class LocalStoreService
                     continue;
                 }
 
-                var prefix = term.Value.EndsWith('*') && term.Value.Count(ch => ch == '*') == 1
+                var prefix = !term.Literal && term.Value.EndsWith('*') && term.Value.Count(ch => ch == '*') == 1
                     && !term.Value.Contains('?');
-                var wildcard = !prefix && (term.Value.Contains('?') || term.Value.Contains('*'));
+                var wildcard = !term.Literal && !prefix && (term.Value.Contains('?') || term.Value.Contains('*'));
                 if ((prefix || wildcard) &&
                     term.Value.Count(ch => char.IsLetterOrDigit(ch)) < 3)
                     throw new FormatException("Wildcard searches require at least three letters or digits.");
-                var likeValue = "%" + EscapeLike(term.Value).Replace("*", "%").Replace("?", "_") + "%";
+                var escapedLike = EscapeLike(term.Value);
+                var likeValue = "%" + (term.Literal ? escapedLike : escapedLike.Replace("*", "%").Replace("?", "_")) + "%";
                 var quoted = "\"" + (prefix ? term.Value[..^1] : term.Value).Replace("\"", "\"\"") + "\"";
                 var value = wildcard ? likeValue : prefix ? quoted + "*" : quoted;
                 command.Parameters.AddWithValue(p, value);
@@ -786,7 +825,7 @@ public partial class LocalStoreService
                     command.Parameters.AddWithValue(p + "l", likeValue);
                 string FieldPredicate(string column, string ftsColumn) => wildcard
                     ? $"{column} LIKE {p} ESCAPE '\\' COLLATE NOCASE"
-                    : $"f.rowid IN (SELECT rowid FROM LocalMessageFts WHERE LocalMessageFts MATCH '{ftsColumn}:' || {p})";
+                    : $"(s.account_id,s.unique_id,s.folder_name) IN (SELECT account_id,unique_id,folder_name FROM LocalMessageFts WHERE LocalMessageFts MATCH '{ftsColumn}:' || {p})";
                 var notesPredicate = wildcard
                     ? $"s.notes LIKE {p} ESCAPE '\\' COLLATE NOCASE"
                     : $"(s.account_id,s.unique_id,s.folder_name) IN (SELECT account_id,unique_id,folder_name FROM MessageNotesFts WHERE MessageNotesFts MATCH {p})";
@@ -810,7 +849,15 @@ public partial class LocalStoreService
                           $"(SELECT rowid FROM AttachmentContentFts WHERE AttachmentContentFts MATCH 'content_text:' || {p})))",
                     _ => wildcard
                         ? $"(f.from_addr LIKE {p} ESCAPE '\\' COLLATE NOCASE OR f.to_addr LIKE {p} ESCAPE '\\' COLLATE NOCASE OR f.cc_addr LIKE {p} ESCAPE '\\' COLLATE NOCASE OR f.subject LIKE {p} ESCAPE '\\' COLLATE NOCASE OR f.body_text LIKE {p} ESCAPE '\\' COLLATE NOCASE OR {notesPredicate})"
-                        : $"(f.rowid IN (SELECT rowid FROM LocalMessageFts WHERE LocalMessageFts MATCH {p}) OR {notesPredicate})",
+                        // Combining the composite-key IN clauses with OR makes SQLite scan all
+                        // summaries in the account scope. Resolve each FTS hit through the existing
+                        // primary key and union rowids, so the outer query seeks only matching rows.
+                        // UNION also prevents a match in both body and Notes from duplicating mail.
+                        : $"s.rowid IN (" +
+                          $"SELECT hit.rowid FROM MessageSummary hit WHERE (hit.account_id,hit.unique_id,hit.folder_name) IN " +
+                          $"(SELECT account_id,unique_id,folder_name FROM LocalMessageFts WHERE LocalMessageFts MATCH {p}) UNION " +
+                          $"SELECT hit.rowid FROM MessageSummary hit WHERE (hit.account_id,hit.unique_id,hit.folder_name) IN " +
+                          $"(SELECT account_id,unique_id,folder_name FROM MessageNotesFts WHERE MessageNotesFts MATCH {p}))",
                 });
             }
             groups.Add("(" + string.Join(" OR ", alternatives) + ")");
@@ -856,6 +903,8 @@ public partial class LocalStoreService
         await using var conn = await OpenAsync();
         await PopulateFolderScopesAsync(conn, query.FolderScopes, ct);
         await PopulateExcludedFolderScopesAsync(conn, query.ExcludedFolderScopes, ct);
+        using var interrupt = ct.Register(() => SQLitePCL.raw.sqlite3_interrupt(conn.Handle));
+        ct.ThrowIfCancellationRequested();
         await using var count = conn.CreateCommand();
         for (var i = 0; i < query.Criteria.Count; i++)
         {
@@ -890,10 +939,12 @@ public partial class LocalStoreService
                     "from" => "from_addr", "to" => "to_addr", "cc" => "cc_addr",
                     "subject" => "subject", _ => "body_text",
                 };
-                predicate = $"LocalMessageFts.{column} MATCH {parameter}";
+                // MATCH stays inside an indexed subquery: SQLite cannot evaluate MATCH
+                // across arbitrary OR branches, and joining UNINDEXED identity columns scans FTS.
+                predicate = $"(s.account_id,s.unique_id,s.folder_name) IN (SELECT account_id,unique_id,folder_name FROM LocalMessageFts WHERE {column} MATCH {parameter})";
                 count.Parameters.AddWithValue(parameter, "\"" + criterion.Value.Trim().Replace("\"", "\"\"") + "\"");
             }
-            predicates.Add(join + predicate);
+            predicates.Add(join + "(" + predicate + ")");
         }
         var scope = string.Empty;
         scope += BuildAccountFilter("s.", query.AccountId, query.AccountIds);
@@ -910,7 +961,7 @@ public partial class LocalStoreService
         AddFolderScopeParameters(count, query.FolderScopes);
         scope += BuildExcludedFolderScopesFilter("s.", query.ExcludedFolderScopes);
         var where = string.Concat(predicates);
-        count.CommandText = $"SELECT count(*) FROM MessageSummary s JOIN LocalMessageFts ON LocalMessageFts.account_id=s.account_id AND LocalMessageFts.unique_id=s.unique_id AND LocalMessageFts.folder_name=s.folder_name WHERE ({where}){scope};";
+        count.CommandText = $"SELECT count(*) FROM MessageSummary s WHERE ({where}){scope};";
         var total = Convert.ToInt64(await count.ExecuteScalarAsync(ct) ?? 0);
 
         await using var cmd = conn.CreateCommand();
@@ -940,7 +991,7 @@ public partial class LocalStoreService
             SELECT s.unique_id,s.account_id,s.folder_name,s.internet_message_id,s.from_disp,s.to_addr,
                    s.subject,s.date_ticks,s.is_read,s.preview_text,s.is_replied,s.is_forwarded,
                    s.has_attachments,s.is_mailing_list,s.flag_id,s.message_direction,s.notes
-            FROM MessageSummary s JOIN LocalMessageFts ON LocalMessageFts.account_id=s.account_id AND LocalMessageFts.unique_id=s.unique_id AND LocalMessageFts.folder_name=s.folder_name
+            FROM MessageSummary s
             WHERE ({where}){scope} ORDER BY {order} LIMIT $limit OFFSET $offset;
             """;
         var messages = new List<MailMessageSummary>();
@@ -986,7 +1037,7 @@ public partial class LocalStoreService
         await using var conn = await OpenAsync();
         await PopulateExcludedFolderScopesAsync(conn, excludedFolderScopes, ct);
         var excludedFilter = BuildExcludedFolderScopesFilter("MessageSummary.", excludedFolderScopes);
-        const string snoozeFilter = " AND NOT EXISTS(SELECT 1 FROM SnoozedMessage z WHERE z.account_id=MessageSummary.account_id AND z.folder_name=MessageSummary.folder_name AND z.unique_id=MessageSummary.unique_id AND z.wake_ticks>$now)";
+        const string snoozeFilter = "";
         PerformanceLogService.Record("Folder SQLite: open connection",
             Stopwatch.GetElapsedTime(stageStarted), detail);
 
@@ -1252,12 +1303,14 @@ public partial class LocalStoreService
             UPDATE Folder SET
                 message_count=(SELECT COUNT(*) FROM MessageSummary
                                WHERE account_id=$aid AND folder_name=$fn),
-                unread_count=(SELECT COUNT(*) FROM MessageSummary
-                              WHERE account_id=$aid AND folder_name=$fn AND is_read=0)
+                unread_count=CASE WHEN kind=$snoozed THEN 0 ELSE
+                    (SELECT COUNT(*) FROM MessageSummary
+                     WHERE account_id=$aid AND folder_name=$fn AND is_read=0) END
             WHERE account_id=$aid AND full_name=$fn;
             """;
         command.Parameters.AddWithValue("$aid", accountId.ToString());
         command.Parameters.AddWithValue("$fn", folderName);
+        command.Parameters.AddWithValue("$snoozed", (int)SpecialFolderKind.Snoozed);
         await command.ExecuteNonQueryAsync(ct);
     }
 
@@ -1307,6 +1360,8 @@ public partial class LocalStoreService
                   LEFT JOIN MessageDetail d USING(unique_id,account_id,folder_name)
                   LEFT JOIN ImapBodyCacheState q USING(unique_id,account_id,folder_name)
                  WHERE s.account_id IN ({accountSql})
+                   AND NOT EXISTS(SELECT 1 FROM SnoozedMessage z WHERE z.account_id=s.account_id
+                     AND z.folder_name=s.folder_name AND z.unique_id=s.unique_id)
                    AND (d.unique_id IS NULL OR (d.plain_body='' AND d.html_body=''))
                    AND COALESCE(q.status,0) NOT IN (1,2)
                    AND (COALESCE(q.status,0)<>3 OR q.updated_ticks <= $retry)
@@ -1339,6 +1394,8 @@ public partial class LocalStoreService
                   LEFT JOIN MessageDetail d USING(unique_id,account_id,folder_name)
                   LEFT JOIN ImapBodyCacheState q USING(unique_id,account_id,folder_name)
                  WHERE s.account_id IN ({accountSql})
+                   AND NOT EXISTS(SELECT 1 FROM SnoozedMessage z WHERE z.account_id=s.account_id
+                     AND z.folder_name=s.folder_name AND z.unique_id=s.unique_id)
                    AND (d.unique_id IS NULL OR (d.plain_body='' AND d.html_body=''))
                    AND COALESCE(q.status,0) NOT IN (1,2)
                    AND (COALESCE(q.status,0)<>3 OR q.updated_ticks <= $retry)

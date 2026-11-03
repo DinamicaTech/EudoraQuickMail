@@ -33,7 +33,7 @@ public static class Program
                 return Scheduled(job, jobPath, CancellationToken.None).GetAwaiter().GetResult();
             }
             var app = new Application { ShutdownMode = ShutdownMode.OnMainWindowClose };
-            app.Run(new AgentWindow(job, jobPath)); return 0;
+            app.Run(new AgentWindow(job, jobPath, Value("/tab"))); return 0;
         }
         catch (Exception ex)
         {

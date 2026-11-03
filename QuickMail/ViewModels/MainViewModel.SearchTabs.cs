@@ -10,7 +10,8 @@ public partial class MainViewModel
         BatchObservableCollection<MailMessageSummary> Rows, List<MailMessageSummary> Raw,
         ListState Presentation, string Query, bool Everywhere, bool Materialized, bool SearchVisible,
         IReadOnlyList<AdvancedSearchCriterion>? Advanced, SavedView? View, int Offset, long Total,
-        MailMessageSummary? Selection, string Status);
+        MailMessageSummary? Selection, string Status, bool HomePendingUnread);
+    private bool _homePendingUnread;
     private readonly Dictionary<TabSessionViewModel, SearchTabState> _searchTabStates = new();
     private TabSessionViewModel? _displayedListTab;
     private TabSessionViewModel? _restoredListTab;
@@ -20,10 +21,15 @@ public partial class MainViewModel
     private SearchTabState CaptureSearchTabState() => new(SelectedFolder, SelectedAccount, Messages,
         _rawMessages.ToList(), CurrentListState, SearchText, _searchEverywhere, _hasMaterializedSearch,
         IsSearchActive, _advancedSearchCriteria, ActiveView, LocalPageOffset, LocalTotalMessages,
-        SelectedMessage, StatusText);
+        SelectedMessage, StatusText, _homePendingUnread);
 
     partial void OnActiveTabChanging(TabSessionViewModel? value)
     {
+        if (value is HomeTabViewModel && ActiveTab is MessageListTabViewModel or SearchResultsTabViewModel or FilteredFolderTabViewModel)
+        {
+            _displayedListTab = ActiveTab;
+            _searchTabStates[ActiveTab] = CaptureSearchTabState();
+        }
         if (_searchTabStates.Count == 0) return;
         if (_displayedListTab != null)
         {
@@ -40,6 +46,8 @@ public partial class MainViewModel
 
     partial void OnActiveTabChanged(TabSessionViewModel? value)
     {
+        OnPropertyChanged(nameof(IsMessagesView));
+        if (value is HomeTabViewModel) { SelectedMessage = null; IsMessageOpen = false; }
         _restoredListTab = null;
         _displayedListTab = null;
         if (_searchTabStates.Count == 0) return;
@@ -54,6 +62,7 @@ public partial class MainViewModel
             SearchText = state.Query; _searchEverywhere = state.Everywhere;
             _advancedSearchCriteria = state.Advanced; _hasMaterializedSearch = state.Materialized;
             IsSearchActive = state.SearchVisible;
+            _homePendingUnread = state.HomePendingUnread;
             ApplyListState(state.Presentation);
             _rawMessages = state.Raw.ToList(); Messages = state.Rows;
             LocalPageOffset = state.Offset; LocalTotalMessages = state.Total;
@@ -64,9 +73,9 @@ public partial class MainViewModel
         _displayedListTab = value; _restoredListTab = value;
     }
 
-    private void PrepareSearchResultsTab(string title)
+    private void PrepareSearchResultsTab(string title, bool force = false)
     {
-        if (!_configService.Load().OpenSearchesInResultsTab) return;
+        if (!force && !_configService.Load().OpenSearchesInResultsTab) return;
         if (ActiveTab is SearchResultsTabViewModel current) { current.Title = title; return; }
         EnsureMessageListTab();
         var origin = ActiveTab is MessageListTabViewModel or FilteredFolderTabViewModel
@@ -87,9 +96,42 @@ public partial class MainViewModel
 
     public async Task RunQuickSearchInTabAsync(string query, bool everywhere)
     {
+        _homePendingUnread = false;
         if (!string.IsNullOrWhiteSpace(query))
             PrepareSearchResultsTab($"Search: {query} ({(everywhere ? "Everywhere" : SelectedFolder?.DisplayName ?? "current scope")})");
         await RunQuickSearchAsync(query, everywhere);
+    }
+
+    public async Task SearchFromHomeAsync(string query)
+    {
+        ActiveTab = OpenTabs.OfType<MessageListTabViewModel>().FirstOrDefault();
+        PrepareSearchResultsTab($"Search: {query} (Everywhere)", force: true);
+        _homePendingUnread = false;
+        await RunQuickSearchAsync(query, true);
+    }
+
+    public async Task SearchUnreadFromHomeAsync()
+    {
+        ActiveTab = OpenTabs.OfType<MessageListTabViewModel>().FirstOrDefault();
+        PrepareSearchResultsTab("Unread — excluding Trash, Junk and RecoveryDeleted (Everywhere)", force: true);
+        _homePendingUnread = true;
+        await RunQuickSearchAsync("N", true);
+    }
+
+    public async Task OpenHomeFolderAsync(Guid accountId, string fullName, bool unread)
+    {
+        var folder = _cachedFolders.GetValueOrDefault(accountId)?.FirstOrDefault(f => f.FullName == fullName)
+            ?? new MailFolderModel { AccountId = accountId, FullName = fullName, DisplayName = fullName };
+        await SelectFolderAsync(folder);
+        if (unread) await RunQuickSearchAsync("N", false);
+    }
+
+    public async Task OpenHomeScheduledAsync(Guid? accountId)
+    {
+        var folder = _cachedFolders.Where(p => !accountId.HasValue || p.Key == accountId)
+            .SelectMany(p => p.Value).FirstOrDefault(f => f.Kind == SpecialFolderKind.Scheduled);
+        if (folder == null) throw new InvalidOperationException("Scheduled folder is unavailable. Open the account's folder tree to review the queue.");
+        await SelectFolderAsync(folder);
     }
 
     public async Task RunAdvancedSearchInTabAsync(IReadOnlyList<AdvancedSearchCriterion> criteria)

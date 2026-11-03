@@ -32,9 +32,9 @@ public partial class RuleService
             if (matching.Count == 0) { report.AppendLine("No matching active rules."); continue; }
             if (matching.Where(x => x.Rule.Action == RuleAction.MoveToFolder).Select(x => x.Rule.TargetFolder).Distinct(StringComparer.OrdinalIgnoreCase).Count() > 1)
                 report.AppendLine("WARNING: competing destination folders.");
-            if (matching.Any(x => x.Rule.Action == RuleAction.Delete) && matching.Any(x => x.Rule.Action is RuleAction.Forward or RuleAction.ReplyTemplate))
+            if (matching.Any(x => x.Rule.Action == RuleAction.Delete) && matching.Any(x => x.Rule.GetActionSteps().Any(a => a.Action is RuleAction.Forward or RuleAction.ReplyTemplate or RuleAction.Autoresponse)))
                 report.AppendLine("WARNING: deletion combined with forwarding/automatic reply; inspect execution order.");
-            if (matching.Any(x => x.Rule.Action == RuleAction.MarkAsUnread) && matching.Any(x => x.Rule.Action == RuleAction.MarkAsRead || x.Rule.AlsoMarkAsRead))
+            if (matching.Any(x => x.Rule.GetActionSteps().Any(a => a.Action == RuleAction.MarkAsUnread)) && matching.Any(x => x.Rule.GetActionSteps().Any(a => a.Action == RuleAction.MarkAsRead) || x.Rule.AlsoMarkAsRead))
                 report.AppendLine("WARNING: competing read/unread actions.");
             string? blockedBy = null;
             foreach (var match in matching)
@@ -56,7 +56,8 @@ public partial class RuleService
         Cc = r.UseToCondition && r.AlsoCcBcc,
         Subject = r.UseSubjectCondition ? r.SubjectContains?.Trim().ToUpperInvariant() : null,
         Body = r.UseBodyCondition ? r.BodyContains?.Trim().ToUpperInvariant() : null,
-        r.MustHaveAttachments, r.Action, r.TargetFolder, r.ForwardTo, r.ReplyTemplateId, r.AlsoMarkAsRead,
+          r.MustHaveAttachments, r.Action, r.TargetFolder, r.ForwardTo, r.ReplyTemplateId, r.AlsoMarkAsRead, r.FlagId, r.AdditionalActions,
+          r.CommandLine, r.AddSubjectToCommandLine, r.AutoResponseSubject, r.AutoResponseBody,
         r.ApplyAutomatically, r.AlsoFilterOutMailbox, r.ActiveUntil
     });
 }

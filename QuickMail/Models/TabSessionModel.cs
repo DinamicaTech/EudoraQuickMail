@@ -12,6 +12,7 @@ public enum TabKind
     Compose,
     Unknown,
     SearchResults,
+    Home,
 }
 
 /// <summary>

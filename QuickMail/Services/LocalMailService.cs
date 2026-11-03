@@ -133,8 +133,7 @@ public sealed class LocalMailService : IMailService
         CancellationToken ct = default) => (await _store.GetAllMessageIdsAsync(accountId, folderName)).ToList();
     public async Task<IReadOnlyList<(string Id, DateTimeOffset ReceivedUtc, bool IsRead)>> GetFolderMessageIdDatesAsync(
         Guid accountId, string folderName, CancellationToken ct = default) =>
-        (await _store.LoadFolderSummariesAsync(accountId, folderName))
-        .Select(m => (m.MessageId, m.Date, m.IsRead)).ToList();
+        await _store.LoadFolderMessageIdDatesUnfilteredAsync(accountId, folderName, ct);
     public async Task<IReadOnlyDictionary<string, string>> FetchPreviewsAsync(Guid accountId, string folderName,
         IList<string> messageIds, int maxLines, CancellationToken ct = default) =>
         (await _store.LoadFolderSummariesAsync(accountId, folderName))

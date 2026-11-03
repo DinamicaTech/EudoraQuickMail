@@ -22,6 +22,9 @@ public partial class RuleService : IRuleService
     private bool _loaded;
     public Func<MailRule, MailMessageSummary, CancellationToken, Task>? ForwardMessageAsync { get; set; }
     public Func<MailRule, MailMessageSummary, CancellationToken, Task>? ReplyTemplateAsync { get; set; }
+    public Func<MailRule, MailMessageSummary, CancellationToken, Task>? AutoresponseAsync { get; set; }
+    public IFlagService? FlagService { get; set; }
+    internal Func<MailRule, MailMessageSummary, CancellationToken, Task> ExecuteCommandAsync { get; set; } = RuleExecuteService.ExecuteAsync;
 
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
 
@@ -44,22 +47,8 @@ public partial class RuleService : IRuleService
     {
         if (_loaded) return _cache;
 
-        if (!File.Exists(_filePath))
-        {
-            _cache = [];
-            _loaded = true;
-            return _cache;
-        }
-
-        try
-        {
-            var json = File.ReadAllText(_filePath);
-            _cache = JsonSerializer.Deserialize<List<MailRule>>(json) ?? [];
-        }
-        catch
-        {
-            _cache = [];
-        }
+        _cache = Helpers.ProtectedJsonFile.Read<List<MailRule>>(_filePath, () => []);
+        foreach (var rule in _cache.Where(r => r.AdditionalActions.Count > 0)) rule.SetActionSteps(rule.GetActionSteps());
         _loaded = true;
         ConsolidateLegacyAllAccountCopies();
         return _cache;
@@ -112,16 +101,22 @@ public partial class RuleService : IRuleService
         r.UseToCondition, r.ToContains, r.AlsoCcBcc,
         r.UseSubjectCondition, r.SubjectContains,
         r.UseBodyCondition, r.BodyContains,
-        r.MustHaveAttachments, r.Action, r.AlsoMarkAsRead, r.TargetFolder, r.ForwardTo, r.ReplyTemplateId, r.ActiveUntil);
+        r.MustHaveAttachments, r.Action, r.AlsoMarkAsRead, r.TargetFolder, r.ForwardTo, r.ReplyTemplateId, r.ActiveUntil,
+        r.FlagId, r.CommandLine, r.AddSubjectToCommandLine, r.AutoResponseSubject, r.AutoResponseBody,
+        JsonSerializer.Serialize(r.AdditionalActions));
 
     public void SaveRules(List<MailRule> rules)
     {
-        foreach (var rule in rules) SpamPolicy.Validate(rule);
-        _cache = rules;
+        foreach (var rule in rules)
+        {
+            SpamPolicy.Validate(rule);
+            if (rule.AdditionalActions.Count > 0) rule.SetActionSteps(rule.GetActionSteps());
+        }
         var dir = Path.GetDirectoryName(_filePath)!;
         Directory.CreateDirectory(dir);
 
-        Helpers.AtomicFile.WriteAllText(_filePath, JsonSerializer.Serialize(rules, JsonOptions));
+        Helpers.ProtectedJsonFile.Write(_filePath, rules, JsonOptions);
+        _cache = rules;
         _loaded = true;
     }
 
@@ -153,6 +148,7 @@ public partial class RuleService : IRuleService
         var criterion = candidate.FromContains.Trim();
         var existing = rules.FirstOrDefault(rule =>
             !rule.IsSpamFilter &&
+            rule.AdditionalActions.Count == 0 &&
             rule.Action == RuleAction.MoveToFolder &&
             rule.AccountId is null &&
             rule.UseFromCondition &&
@@ -207,6 +203,12 @@ public partial class RuleService : IRuleService
         var candidates = automaticOnly
             ? incoming.Where(message => message.Direction != MessageDirection.Outgoing).ToList()
             : incoming.ToList();
+        if (automaticOnly && candidates.Count > 0)
+        {
+            var snoozed = await _store.LoadActiveSnoozedKeysAsync(ct);
+            candidates.RemoveAll(message => snoozed.Contains(new SnoozedMessageKey(
+                message.AccountId, message.FolderName, message.MessageId)));
+        }
         var excludedOutgoing = incoming.Count - candidates.Count;
         LogService.Debug($"ApplyRulesAsync: {enabledRules.Count} enabled rules, {candidates.Count} candidate messages for account {accountId} (automatic={automaticOnly}, outgoing excluded={excludedOutgoing})");
         if (enabledRules.Count == 0)
@@ -355,7 +357,9 @@ public partial class RuleService : IRuleService
         string? storedCc = null, string? storedBcc = null)
     {
         if (rule.IsExpired) return false;
-        if (rule.Action == RuleAction.ReplyTemplate && msg.Direction == MessageDirection.Outgoing) return false;
+        if (msg.Direction == MessageDirection.Outgoing &&
+            (rule.Action is RuleAction.ReplyTemplate or RuleAction.Autoresponse ||
+             rule.AdditionalActions.Any(a => a.Action is RuleAction.ReplyTemplate or RuleAction.Autoresponse))) return false;
         if (rule.IsSpamFilter) return SpamPolicy.Matches(rule, msg);
         var fromCandidate = msg.Direction == MessageDirection.Outgoing ? msg.To : msg.From;
         if (rule.UseFromCondition
@@ -430,10 +434,92 @@ public partial class RuleService : IRuleService
     // ── Action Execution ────────────────────────────────────────────────────
 
     private async Task ExecuteActionAsync(
+        MailRule rule, List<MailMessageSummary> matched, Guid accountId, CancellationToken ct)
+    {
+        var steps = rule.GetActionSteps();
+        if (rule.IsSpamFilter) SpamPolicy.Validate(rule);
+        ValidateActionSteps(rule);
+        if (steps.Any(s => s.Action == RuleAction.SetFlag))
+        {
+            var flags = FlagService ?? throw new InvalidOperationException("Flags are not available.");
+            var definitions = await flags.LoadFlagDefinitionsAsync();
+            foreach (var step in steps.Where(s => s.Action == RuleAction.SetFlag && s.FlagId != null))
+                if (!definitions.Any(f => f.Id == Guid.Parse(step.FlagId!)))
+                    throw new InvalidOperationException("The selected flag no longer exists.");
+        }
+        if (steps.Count > 1) rule.SetActionSteps(steps);
+        if (steps.Count == 1 || rule.IsSpamFilter)
+        { await ExecuteSingleActionAsync(rule, matched, accountId, ct); return; }
+        var completed = new List<string>();
+        var readApplied = false;
+        var current = "";
+        try
+        {
+            foreach (var step in steps)
+            {
+                ct.ThrowIfCancellationRequested();
+                if (step.IsDestination && rule.AlsoMarkAsRead)
+                {
+                    current = "Also mark as read";
+                    await MarkAsReadAsync(matched, ct, strict: true);
+                    completed.Add(current); readApplied = true;
+                }
+                current = step.Description;
+                await FilterOperationTrace.RunAsync("Rules: action step",
+                    $"account={accountId}; action={step.Action}; messages={matched.Count}",
+                    $"Applying {current} to {matched.Count:N0} message(s)…",
+                    () => ExecuteSingleActionAsync(rule.ForAction(step), matched, accountId, ct, strict: true));
+                completed.Add(current);
+            }
+            if (rule.AlsoMarkAsRead && !readApplied)
+            {
+                current = "Also mark as read";
+                await MarkAsReadAsync(matched, ct, strict: true);
+            }
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException($"Rule '{rule.Name}': failed at {current}. " +
+                $"Completed actions: {(completed.Count == 0 ? "none" : string.Join("; ", completed))}. " +
+                "Remaining actions were not executed. An action may have partially processed the selected messages. " + ex.Message, ex);
+        }
+    }
+
+    public static void ValidateActionSteps(MailRule rule)
+    {
+        var steps = rule.GetActionSteps();
+        if (steps.Count(a => a.IsDestination) > 1)
+            throw new InvalidOperationException("Only one destination action (Move or Delete) is allowed per rule.");
+        if (rule.IsSpamFilter && steps.Count > 1)
+            throw new InvalidOperationException("SPAM filters cannot contain additional actions.");
+        if (steps.Count(a => a.Action is RuleAction.ReplyTemplate or RuleAction.Autoresponse) > 1)
+            throw new InvalidOperationException("Only one automatic reply action is allowed per rule.");
+        if (steps.Count > 1 && rule.AlsoMarkAsRead && steps.Any(a => a.Action == RuleAction.MarkAsUnread))
+            throw new InvalidOperationException("Disable Also mark as read before combining Mark as unread with other actions.");
+        foreach (var step in steps)
+        {
+            if (!Enum.IsDefined(step.Action)) throw new InvalidOperationException("Unknown rule action.");
+            if (step.Action == RuleAction.MoveToFolder && string.IsNullOrWhiteSpace(step.TargetFolder))
+                throw new InvalidOperationException("Target folder is required for Move to folder action.");
+            if (step.Action == RuleAction.Forward) RuleForwardService.ValidateDestination(step.ForwardTo);
+            if (step.Action == RuleAction.Execute) RuleExecuteService.CreateStartInfo(step.CommandLine, step.AddSubjectToCommandLine, "");
+            if (step.Action == RuleAction.ReplyTemplate && !step.ReplyTemplateId.HasValue)
+                throw new InvalidOperationException("Select an existing reply template.");
+            if (step.Action == RuleAction.Autoresponse &&
+                (string.IsNullOrWhiteSpace(step.AutoResponseSubject ?? "[SUBJECT]") ||
+                 string.IsNullOrWhiteSpace(step.AutoResponseBody ?? "[BODY]")))
+                throw new InvalidOperationException("Enter a subject and body for Autoresponse.");
+            if (step.Action == RuleAction.SetFlag && step.FlagId != null && !Guid.TryParse(step.FlagId, out _))
+                throw new InvalidOperationException("Select a valid flag or Remove flag.");
+        }
+    }
+
+    private async Task ExecuteSingleActionAsync(
         MailRule rule,
         List<MailMessageSummary> matched,
         Guid accountId,
-        CancellationToken ct)
+        CancellationToken ct, bool strict = false)
     {
         if (rule.IsSpamFilter)
         {
@@ -448,14 +534,33 @@ public partial class RuleService : IRuleService
             await MoveToFolderAsync(matched, junk.FullName, ct);
             return;
         }
-        if (rule.AlsoMarkAsRead && rule.Action is not (RuleAction.MarkAsRead or RuleAction.Forward or RuleAction.ReplyTemplate))
+        if (rule.AlsoMarkAsRead && rule.Action is not (RuleAction.MarkAsRead or RuleAction.Forward or RuleAction.ReplyTemplate or RuleAction.Autoresponse))
             await FilterOperationTrace.RunAsync("Rules: mark as read", $"account={accountId}; messages={matched.Count}",
                 $"Marking {matched.Count:N0} message(s) as read…", () => MarkAsReadAsync(matched, ct));
         switch (rule.Action)
         {
+            case RuleAction.Execute:
+                foreach (var message in matched) await ExecuteCommandAsync(rule, message, ct);
+                break;
+            case RuleAction.SetFlag:
+                var flags = FlagService ?? throw new InvalidOperationException("Flags are not available.");
+                foreach (var message in matched)
+                {
+                    // FlagService tolerates local-store failures for interactive online-only use;
+                    // a rule must persist the flag successfully before any later move is allowed.
+                    await _store.UpdateFlagIdAsync(message.AccountId, message.FolderName, message.MessageId, rule.FlagId);
+                    var definition = await flags.SetMessageFlagAsync(message, rule.FlagId, ct: ct);
+                    message.FlagId = rule.FlagId; message.FlagName = definition?.Name; message.FlagColorHex = definition?.ColorHex;
+                }
+                break;
             case RuleAction.ReplyTemplate:
                 if (ReplyTemplateAsync == null) throw new InvalidOperationException("Template replies are not available.");
                 foreach (var message in matched) await ReplyTemplateAsync(rule, message, ct);
+                if (rule.AlsoMarkAsRead) await MarkAsReadAsync(matched, ct);
+                break;
+            case RuleAction.Autoresponse:
+                if (AutoresponseAsync == null) throw new InvalidOperationException("Autoresponse is not available.");
+                foreach (var message in matched) await AutoresponseAsync(rule, message, ct);
                 if (rule.AlsoMarkAsRead) await MarkAsReadAsync(matched, ct);
                 break;
             case RuleAction.Forward:
@@ -464,11 +569,11 @@ public partial class RuleService : IRuleService
                 if (rule.AlsoMarkAsRead) await MarkAsReadAsync(matched, ct);
                 break;
             case RuleAction.MarkAsRead:
-                await MarkAsReadAsync(matched, ct);
+                await MarkAsReadAsync(matched, ct, strict);
                 break;
 
             case RuleAction.MarkAsUnread:
-                await MarkAsUnreadAsync(matched, ct);
+                await MarkAsUnreadAsync(matched, ct, strict);
                 break;
 
             case RuleAction.MoveToFolder:
@@ -480,7 +585,7 @@ public partial class RuleService : IRuleService
                 if (_store is LocalStoreService deleteActivityStore)
                     foreach (var message in matched)
                         await deleteActivityStore.RecordMessageActivityAsync(message, "Rule started", $"{rule.Name}: move to Trash requested", ct);
-                await DeleteAsync(matched, ct);
+                await DeleteAsync(matched, ct, strict);
                 break;
         }
         if (rule.Action is not (RuleAction.MoveToFolder or RuleAction.Delete) && _store is LocalStoreService activityStore)
@@ -490,11 +595,12 @@ public partial class RuleService : IRuleService
                     {
                         RuleAction.Forward => $" → {rule.ForwardTo}; processed with duplicate/loop protection (not delivery confirmation)",
                         RuleAction.ReplyTemplate => "; processed with duplicate/automatic-reply protection (not delivery confirmation)",
+                        RuleAction.Autoresponse => "; processed with duplicate/automatic-reply protection (not delivery confirmation)",
                         _ => ""
                     }), ct);
     }
 
-    private async Task MarkAsReadAsync(List<MailMessageSummary> messages, CancellationToken ct)
+    private async Task MarkAsReadAsync(List<MailMessageSummary> messages, CancellationToken ct, bool strict = false)
     {
         foreach (var group in messages.GroupBy(message => (message.AccountId, message.FolderName)))
         {
@@ -512,11 +618,12 @@ public partial class RuleService : IRuleService
             catch (Exception ex)
             {
                 LogService.Log($"MarkRead failed for {group.Count()} messages in {group.Key.FolderName}", ex);
+                if (strict) throw;
             }
         }
     }
 
-    private async Task MarkAsUnreadAsync(List<MailMessageSummary> messages, CancellationToken ct)
+    private async Task MarkAsUnreadAsync(List<MailMessageSummary> messages, CancellationToken ct, bool strict = false)
     {
         foreach (var msg in messages)
         {
@@ -532,6 +639,7 @@ public partial class RuleService : IRuleService
             catch (Exception ex)
             {
                 LogService.Log($"MarkUnread failed for UID {msg.MessageId}", ex);
+                if (strict) throw;
             }
         }
     }
@@ -627,7 +735,7 @@ public partial class RuleService : IRuleService
         return resolved;
     }
 
-    private async Task DeleteAsync(List<MailMessageSummary> messages, CancellationToken ct)
+    private async Task DeleteAsync(List<MailMessageSummary> messages, CancellationToken ct, bool strict = false)
     {
         var groups = messages.GroupBy(m => (m.AccountId, m.FolderName));
         foreach (var group in groups)
@@ -643,6 +751,7 @@ public partial class RuleService : IRuleService
             catch (Exception ex)
             {
                 LogService.Log($"Delete (move to trash) failed for {uids.Count} messages", ex);
+                if (strict) throw;
             }
         }
     }
@@ -666,9 +775,11 @@ public partial class RuleService : IRuleService
         // folder's FullName (set at sync time), matched Ordinal against the caller-supplied Inbox
         // FullName from the same folder enumeration.
         var allMessages = await store.LoadAllSummariesAsync();
+        var snoozed = await store.LoadActiveSnoozedKeysAsync(ct);
         var inboxMessages = allMessages.Where(m =>
             inboxFolderByAccount.TryGetValue(m.AccountId, out var inbox) &&
-            string.Equals(m.FolderName, inbox, StringComparison.Ordinal)).ToList();
+            string.Equals(m.FolderName, inbox, StringComparison.Ordinal) &&
+            !snoozed.Contains(new SnoozedMessageKey(m.AccountId, m.FolderName, m.MessageId))).ToList();
         var physicalOutMessages = allMessages.Where(m =>
             m.Direction == MessageDirection.Outgoing && IsPhysicalOutFolder(m.FolderName)).ToList();
         LogService.Debug($"ApplyRulesToExisting: {allMessages.Count} cached, {inboxMessages.Count} in Inbox, " +

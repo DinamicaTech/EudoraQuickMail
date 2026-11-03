@@ -1001,6 +1001,7 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
                 folder_name TEXT    NOT NULL,
                 unique_id   TEXT    NOT NULL,
                 wake_ticks  INTEGER NOT NULL,
+                original_folder TEXT NOT NULL DEFAULT '',
                 PRIMARY KEY(account_id, folder_name, unique_id)
             );
             CREATE INDEX IF NOT EXISTS idx_snoozed_wake ON SnoozedMessage(wake_ticks);
@@ -1077,6 +1078,7 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
 
         // Migration: add columns added after initial release.
         RunMigration(conn, "ALTER TABLE MessageSummary ADD COLUMN to_addr        TEXT    NOT NULL DEFAULT '';");
+        RunMigration(conn, "ALTER TABLE SnoozedMessage ADD COLUMN original_folder TEXT NOT NULL DEFAULT ''; ");
         RunMigration(conn, "ALTER TABLE MessageSummary ADD COLUMN preview_text  TEXT    NOT NULL DEFAULT '';");
         RunMigration(conn, "ALTER TABLE MessageSummary ADD COLUMN is_replied    INTEGER NOT NULL DEFAULT 0;");
         RunMigration(conn, "ALTER TABLE MessageSummary ADD COLUMN is_forwarded  INTEGER NOT NULL DEFAULT 0;");
@@ -1637,6 +1639,18 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
     {
         await using var conn = await OpenAsync();
         await using var tx = await conn.BeginTransactionAsync();
+        var parkedSourceKeys = new HashSet<(Guid AccountId, string FolderName, string MessageId)>();
+        await using (var parked = conn.CreateCommand())
+        {
+            parked.Transaction = (SqliteTransaction)tx;
+            parked.CommandText = """
+                SELECT account_id,COALESCE(NULLIF(original_folder,''),folder_name),unique_id
+                FROM SnoozedMessage;
+                """;
+            await using var reader = await parked.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+                parkedSourceKeys.Add((Guid.Parse(reader.GetString(0)), reader.GetString(1), reader.GetString(2)));
+        }
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = """
             INSERT INTO MessageSummary(unique_id, account_id, folder_name, from_disp, to_addr, subject, date_ticks, is_read, preview_text, is_replied, is_forwarded, is_mailing_list, flag_id, internet_message_id, message_direction)
@@ -1710,6 +1724,9 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
 
         foreach (var s in summaries)
         {
+            // A server refresh still sees the source copy while QuickMail has parked its
+            // local record in Snooze. Never recreate a second local In row for that copy.
+            if (parkedSourceKeys.Contains((s.AccountId, s.FolderName, s.MessageId))) continue;
             pUid.Value       = s.MessageId;
             pAid.Value       = s.AccountId.ToString();
             pFn.Value        = s.FolderName;
@@ -1769,13 +1786,10 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
         cmd.CommandText =
             "SELECT unique_id, account_id, folder_name, from_disp, to_addr, subject, date_ticks, is_read, preview_text, is_replied, is_forwarded, has_attachments, is_mailing_list, flag_id, internet_message_id, message_direction, notes " +
             "FROM MessageSummary WHERE account_id=$aid AND folder_name=$fn " +
-            "AND NOT EXISTS(SELECT 1 FROM SnoozedMessage z WHERE z.account_id=MessageSummary.account_id " +
-            "AND z.folder_name=MessageSummary.folder_name AND z.unique_id=MessageSummary.unique_id AND z.wake_ticks>$now) " +
             "ORDER BY date_ticks DESC" +
             (limit.HasValue ? " LIMIT $limit;" : ";");
         cmd.Parameters.AddWithValue("$aid", accountId.ToString());
         cmd.Parameters.AddWithValue("$fn",  folderName);
-        cmd.Parameters.AddWithValue("$now", DateTimeOffset.UtcNow.UtcTicks);
         if (limit.HasValue)
             cmd.Parameters.AddWithValue("$limit", Math.Max(0, limit.Value));
         return await ReadSummariesAsync(cmd);
@@ -2458,7 +2472,8 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
                             INSERT INTO Folder(account_id,full_name,display_name,parent_id,kind,
                                 exclude_from_all_mail,unread_count,message_count,sort_order,is_container)
                             VALUES($account,$path,$name,NULL,$kind,$exclude,
-                                (SELECT count(*) FROM MessageSummary WHERE account_id=$account AND folder_name=$path AND is_read=0),
+                                CASE WHEN $kind=$snoozed THEN 0 ELSE
+                                    (SELECT count(*) FROM MessageSummary WHERE account_id=$account AND folder_name=$path AND is_read=0) END,
                                 (SELECT count(*) FROM MessageSummary WHERE account_id=$account AND folder_name=$path),0,0)
                             ON CONFLICT(account_id,full_name) DO UPDATE SET
                                 kind=excluded.kind,exclude_from_all_mail=excluded.exclude_from_all_mail;
@@ -2467,6 +2482,7 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
                         folder.Parameters.AddWithValue("$path", physicalPath);
                         folder.Parameters.AddWithValue("$name", definition.Name);
                         folder.Parameters.AddWithValue("$kind", (int)definition.Kind);
+                        folder.Parameters.AddWithValue("$snoozed", (int)SpecialFolderKind.Snoozed);
                         folder.Parameters.AddWithValue("$exclude", excluded ? 1 : 0);
                         await folder.ExecuteNonQueryAsync();
                     }
@@ -2489,6 +2505,10 @@ public partial class LocalStoreService : ILocalStoreService, ILocalMailboxStore
         }
 
         await transaction.CommitAsync();
+
+        // Older versions kept Snooze as a flag on a message still in In. Move those
+        // messages into the physical parking folder once its Folder row exists.
+        await MigrateLegacySnoozedMessagesAsync();
 
         async Task<Guid> FindOrCreateRootAsync(Guid rootId, string name)
         {

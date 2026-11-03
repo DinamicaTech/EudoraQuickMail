@@ -19,11 +19,32 @@ namespace QuickMail.ViewModels;
 public abstract partial class AccountEditorViewModel : ObservableObject
 {
     public event Action<string, bool>? ConnectionTestCompleted;
+    [ObservableProperty] private bool _isTestingConnection;
+    public string ConnectionTestStage { get; private set; } = "Preparing connection test…";
+    private CancellationTokenSource? _connectionTestCancellation;
+    public void CancelConnectionTest() => _connectionTestCancellation?.Cancel();
 
     private void CompleteConnectionTest(string message, bool successful)
     {
+        ConnectionTestTrace.Report(""); // Stop phase timing before the result dialog waits for the user.
+        IsTestingConnection = false;
         StatusText = message;
         ConnectionTestCompleted?.Invoke(message, successful);
+    }
+
+    private void RecordConnectionTest(string channel, string result)
+    {
+        // Probes have temporary IDs. Attribute only tests of the saved endpoint, not edited settings.
+        if (this is not AccountManagerViewModel { SelectedAccount: { } saved } ||
+            !string.Equals(saved.Username, Username, StringComparison.OrdinalIgnoreCase) ||
+            saved.AuthType != AuthType || saved.ImapHost != ImapHost || saved.ImapPort != ImapPort ||
+            saved.Pop3Host != Pop3Host || saved.Pop3Port != Pop3Port ||
+            saved.SmtpHost != SmtpHost || saved.SmtpPort != SmtpPort ||
+            _connectionTestCancellation?.IsCancellationRequested == true) return;
+        if (result == "OK.") AccountHealthJournal.Observe(saved.Id, channel);
+        else if (!result.StartsWith("SMTP not", StringComparison.OrdinalIgnoreCase) &&
+                 !result.StartsWith("cancelled", StringComparison.OrdinalIgnoreCase))
+            AccountHealthJournal.Observe(saved.Id, channel, new System.IO.IOException("Connection test failed"));
     }
 
     protected IMailService MailService { get; }
@@ -789,6 +810,17 @@ public abstract partial class AccountEditorViewModel : ObservableObject
     [RelayCommand]
     private async Task TestConnectionAsync()
     {
+        using var cancellation = new CancellationTokenSource();
+        _connectionTestCancellation = cancellation;
+        ConnectionTestStage = "Preparing connection test…";
+        IsTestingConnection = true;
+        using var trace = ConnectionTestTrace.Begin(stage => ConnectionTestStage = stage);
+        try { await TestConnectionCoreAsync(); }
+        finally { IsTestingConnection = false; _connectionTestCancellation = null; }
+    }
+
+    private async Task TestConnectionCoreAsync()
+    {
         // Graph has no host/port of its own: the backend's GET /me probe IS the connectivity check,
         // so run it rather than telling the user to go press a different button.
         if (IsGraphBackend)
@@ -804,7 +836,9 @@ public abstract partial class AccountEditorViewModel : ObservableObject
             var graphAccount = BuildProbeAccount();
             try
             {
-                using var graphCts = new CancellationTokenSource(ProbeTimeout);
+                using var graphCts = CancellationTokenSource.CreateLinkedTokenSource(_connectionTestCancellation!.Token);
+                graphCts.CancelAfter(ProbeTimeout);
+                ConnectionTestTrace.Report("Microsoft 365: authenticating and checking account access…");
                 await MailService.ConnectAsync(graphAccount, null, graphCts.Token);
                 CompleteConnectionTest("Microsoft 365 connection successful.", true);
             }
@@ -841,17 +875,24 @@ public abstract partial class AccountEditorViewModel : ObservableObject
                 var popResult = await ProbeAsync(async ct =>
                 {
                     await using var transport = new MailKitPop3TransportFactory().Create(popAccount);
+                    ConnectionTestTrace.Report($"POP3 {popAccount.Pop3Host}:{popAccount.Pop3Port}: connecting…");
                     await transport.ConnectAsync(popAccount, ct);
+                    ConnectionTestTrace.Report("POP3: authenticating…");
                     await transport.AuthenticateAsync(popAccount.AuthUsername, Password, ct);
+                    ConnectionTestTrace.Report("POP3: checking UIDL support…");
                     if (!transport.SupportsUidListing)
                         throw new NotSupportedException("The POP3 server does not support UIDL.");
+                    ConnectionTestTrace.Report("POP3: disconnecting…");
                     await transport.DisconnectAsync(commitDeletes: false, ct);
                 });
+                ConnectionTestTrace.Report($"SMTP {popAccount.SmtpHost}:{popAccount.SmtpPort} ({MailSecurity.ForSmtp(popAccount)}): testing…");
                 var smtpResult = string.IsNullOrWhiteSpace(SmtpHost)
                     ? "SMTP not configured."
                     : SendMailService is null
                         ? "SMTP not checked."
                         : await ProbeAsync(ct => SendMailService.VerifyAsync(popAccount, Password, ct));
+                RecordConnectionTest("Receive", popResult);
+                RecordConnectionTest("Send", smtpResult);
                 CompleteConnectionTest($"POP3: {popResult}\nSMTP: {smtpResult}",
                     popResult == "OK." && (smtpResult == "OK." || smtpResult == "SMTP not configured."));
             }
@@ -874,14 +915,18 @@ public abstract partial class AccountEditorViewModel : ObservableObject
             // Two independent legs, reported independently. Incoming can be perfect while outgoing
             // is wrong — that combination used to pass Test Connection and then fail on first send,
             // because only IMAP was ever probed.
+            ConnectionTestTrace.Report($"IMAP {account.ImapHost}:{account.ImapPort} ({MailSecurity.ForImap(account)}): connecting and authenticating…");
             var imapResult = await ProbeAsync(ct => MailService.ConnectAsync(account, pwd, ct));
 
+            ConnectionTestTrace.Report($"SMTP {account.SmtpHost}:{account.SmtpPort} ({MailSecurity.ForSmtp(account)}): testing…");
             var smtpResult = string.IsNullOrWhiteSpace(SmtpHost)
                 ? "SMTP not configured."
                 : SendMailService is null
                     ? "SMTP not checked."
                     : await ProbeAsync(ct => SendMailService.VerifyAsync(account, pwd, ct));
 
+            RecordConnectionTest("Receive", imapResult);
+            RecordConnectionTest("Send", smtpResult);
             CompleteConnectionTest($"IMAP: {imapResult}\nSMTP: {smtpResult}",
                 imapResult == "OK." && (smtpResult == "OK." || smtpResult == "SMTP not configured."));
         }
@@ -922,21 +967,27 @@ public abstract partial class AccountEditorViewModel : ObservableObject
     /// Runs one connectivity probe and turns it into a short report line. Failures are reported, not
     /// thrown, so a broken SMTP host still lets the IMAP result through.
     /// </summary>
-    private static async Task<string> ProbeAsync(Func<CancellationToken, Task> probe)
+    private async Task<string> ProbeAsync(Func<CancellationToken, Task> probe)
     {
+        var started = System.Diagnostics.Stopwatch.StartNew();
         try
         {
-            using var cts = new CancellationTokenSource(ProbeTimeout);
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(_connectionTestCancellation!.Token);
+            cts.CancelAfter(ProbeTimeout);
+            cts.Token.ThrowIfCancellationRequested();
             await probe(cts.Token);
             return "OK.";
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException ex)
         {
-            return "timed out.";
+            return (_connectionTestCancellation?.IsCancellationRequested == true ? "cancelled. " : "timed out. ") +
+                ConnectionTestTrace.Describe(ex, ConnectionTestStage, started.Elapsed, Password);
         }
         catch (Exception ex)
         {
-            return $"failed — {ex.Message}";
+            var report = ConnectionTestTrace.Describe(ex, ConnectionTestStage, started.Elapsed, Password);
+            LogService.Log("Connection test: " + report);
+            return report;
         }
     }
 }

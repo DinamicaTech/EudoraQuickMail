@@ -3,7 +3,7 @@ using System.Diagnostics;
 
 namespace QuickMail.Services;
 
-/// <summary>Serial background POP3 sweep. Accounts opt in individually.</summary>
+/// <summary>Bounded background POP3 sweep. Accounts opt in individually.</summary>
 public sealed class PeriodicPop3Receiver : IDisposable
 {
     private readonly IAccountService _accounts;
@@ -59,9 +59,11 @@ public sealed class PeriodicPop3Receiver : IDisposable
             var accounts = _accounts.LoadAccounts()
                 .Where(a => a.IsActive && a.BackendKind == BackendKind.Pop3Smtp
                     && (includeAccountsWithAutomaticCheckDisabled || a.CheckIncomingMail)).ToList();
-            for (var index = 0; index < accounts.Count; index++)
+            using var receiveSlots = new SemaphoreSlim(2);
+            var checks = accounts.Select(async (account, index) =>
             {
-                var account = accounts[index];
+                try { await receiveSlots.WaitAsync(_stop.Token); }
+                catch (OperationCanceledException) when (_stop.IsCancellationRequested) { return; }
                 try
                 {
                     var accountStarted = Stopwatch.GetTimestamp();
@@ -86,6 +88,7 @@ public sealed class PeriodicPop3Receiver : IDisposable
                             $"account={account.AccountLabel}; messages={result.NewMessages.Count}");
                     }
                     var dispatchStarted = Stopwatch.GetTimestamp();
+                    AccountHealthJournal.Observe(account.Id, "Receive");
                     Completed?.Invoke(account, result);
                     PerformanceLogService.Record("POP3 sweep: completion dispatch",
                         Stopwatch.GetElapsedTime(dispatchStarted), $"account={account.AccountLabel}");
@@ -97,9 +100,12 @@ public sealed class PeriodicPop3Receiver : IDisposable
                 catch (Exception ex)
                 {
                     LogService.Log($"POP3 receive failed for {account.AccountLabel}", ex);
+                    AccountHealthJournal.Observe(account.Id, "Receive", ex);
                     Failed?.Invoke(account, ex, includeAccountsWithAutomaticCheckDisabled);
                 }
-            }
+                finally { receiveSlots.Release(); }
+            });
+            await Task.WhenAll(checks);
         }
         finally { Volatile.Write(ref _running, 0); }
     }

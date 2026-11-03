@@ -503,6 +503,38 @@ public class SavedViewsMainViewModelTests
         Assert.Same(view, vm.ActiveView);
     }
 
+    [Fact]
+    public async Task SelectScopedSavedSearch_FromHome_DoesNotRestorePreviousListFolder()
+    {
+        var view = MakeVirtualView("AllInboxes");
+        view.SearchQuery = "N;t:ronald@dinamica.tech";
+        view.SearchEverywhere = false;
+        var vm = MakeVm([view]);
+        vm.EnableHomeTab();
+        var listTab = Assert.Single(vm.OpenTabs.OfType<MessageListTabViewModel>());
+        listTab.Folder = new MailFolderModel { FullName = "INBOX", DisplayName = "In" };
+        vm.ActiveTab = Assert.Single(vm.OpenTabs.OfType<HomeTabViewModel>());
+
+        var protectedAtTabActivation = false;
+        vm.PropertyChanged += (_, args) =>
+        {
+            if (args.PropertyName == nameof(MainViewModel.ActiveTab) &&
+                vm.ActiveTab is MessageListTabViewModel)
+                protectedAtTabActivation = vm.IsFolderSelectionInProgress;
+        };
+
+        await SelectFolder(vm, new MailFolderModel
+        {
+            FullName = "\0View:" + view.Id,
+            DisplayName = view.Name,
+        });
+
+        Assert.True(protectedAtTabActivation);
+        Assert.False(vm.IsFolderSelectionInProgress);
+        Assert.Same(view, vm.ActiveView);
+        Assert.Equal("N;t:ronald@dinamica.tech", vm.SearchText);
+    }
+
     // -- Apply view restores mode / filter / sort ----------------------------
 
     [Fact]

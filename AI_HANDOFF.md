@@ -1132,3 +1132,315 @@ Tests: AttachmentInvestigationTests plus existing rules, activity and accessibil
 Verification: 102 selected regression tests passed, including recovery through the view model and
 candidate modification after hash verification. UI probes completed 4/4 in parchment/dark; final
 captures in .codex-artifacts/attachment-investigation-ui-20261015-02. Production data was not used.
+
+## 40. Indexed quick-search hang and wildcard choice (2026-10-15)
+
+Captured the live v0.8.85 main thread stuck in SearchLocalMessagesAsync/ExecuteScalar
+after a global Mitsubishi search. The original LEFT JOIN compared unindexed FTS identity
+columns for each summary. Indexed quick predicates now select matching identity tuples
+directly from FTS (including Notes), without that join. Wildcard scans use the existing
+LocalMessageFtsKey lookup plus FTS rowid. No schema migration or index rebuild required.
+Read-only SQL verification on the real database counted 411 Mitsubishi matches in 0.07s;
+this measured the count query, not the entire UI operation. Production EQM was not stopped.
+
+All quick searches now run on a worker; native sqlite3_interrupt is registered for cancellation.
+The delayed search indicator exposes Cancel search, bound to the originating cancellation
+source so an older indicator cannot cancel a subsequent search. Quoted terms disable wildcard
+expansion. F3 asks Yes (wildcards), No/default (quoted literal word-index lookup), Cancel when
+an unquoted wildcard is present. Quotes persist in history/saved views. The prompt explicitly
+states that FTS ignores punctuation and filename searches use literal matching instead.
+
+## 41. Review stabilization, without responsibility refactoring (2026-10-16)
+
+ScheduledSendService retains accepted messages and their Scheduled copy until Sent archival
+succeeds. TransportAccepted prevents SMTP replay, SentCopySaved checkpoints archival before
+cleanup, and retry backoff also applies to accepted items. Cleanup failures retain the checkpoint.
+Accepted items cannot be edited/replaced/undone; UI reports "Sent — archival pending", not an
+SMTP error. Offline is rechecked after acquiring the dispatcher gate, between items and immediately
+before transport. An already running SMTP send is allowed to finish.
+
+Advanced search uses indexed FTS identity subqueries, including OR, rather than joining UNINDEXED
+FTS columns. Date predicates are individually parenthesized. It runs on a worker with native SQLite
+interrupt cancellation, stale-result guards, and a delayed cancellable indicator. No schema change.
+
+Accounts/rules/saved views use ProtectedJsonFile: missing files are distinct from invalid/unreadable
+files. Loading invalid data throws a visible diagnostic rather than returning an empty list; saving
+validates the existing file before replacing it and retains its prior valid version as .previous.
+Recovery is explicit, not silent (restoring obsolete accounts/rules could be unsafe).
+
+quickmail.log and performance.log each rotate at 10 MiB with three numbered archives; individual
+entries are capped at 64 Ki characters. Writes remain serialized and synchronous to preserve existing
+crash diagnostic behavior. Manual Check for updates displays a dialog for no-update/disabled/error
+results; background checks stay quiet. Existing update-available dialog is unchanged.
+
+CI build/release now depends on protocol integration success. Test host nonzero exit and missing
+discovered classes are fatal; discovery uses the same intentional exclusions as execution and fails
+if empty. Do not restore the old blanket tolerance for WPF host crashes.
+
+StabilizationRegressionTests exercises archival failure/restart, cleanup failure after archival,
+offline in-flight/gate races, accepted-message edit prevention, configuration corruption/recovery,
+advanced OR/date/scope/cancellation and indexed paging against 100,000 synthetic messages. These
+tests use temporary profiles and mock transport, never live accounts or production data.
+
+Verification: strict application rebuild (-warnaserror) passed with 0 warnings/errors; final
+QuickMail suite 3,383 passed, backup core 75 passed, backup UI 15 passed. The test project still
+reports its two pre-existing obsolete MimeKit constructor warnings in EmbeddedImageTests.
+Workflow YAML and PowerShell blocks parsed locally; discovered-class coverage check found
+278 classes with no missing classes. GitHub Actions itself was not triggered/published.
+Results: .codex-artifacts/stabilization-20261016/stabilization-verified.trx, backup.trx, backup-ui.trx.
+
+## 42. Attachment explorer display and query tuning (2026-10-16)
+
+Size columns show MB (bytes / 1,048,576), N2 regional formatting and right alignment, while
+SortMemberPath remains raw Size. Window Language follows CurrentCulture. Title binds to Items.Count
+(displayed attachment references, not unique disk paths or uncapped total). Presentation tests verify
+Spanish/English separators, numeric sort path, alignment and count updates.
+
+BrowseAttachmentsAsync now filters s.has_attachments=1 before reading details and expanding JSON,
+using the existing idx_summary_attachments_date index. SaveLocalMessageAsync and UpsertDetailAsync
+maintain this bit; header-only UpsertSummariesAsync preserves it. Read-only audit of the real database
+found all 296,757 non-inline attachment references flagged correctly (no unflagged references).
+No schema/index changes or production data writes. Search still matches substrings in filename,
+subject or sender, and reads only cached database metadata; directory recovery is separate.
+Native SQLite cancellation and an "Attachment explorer: metadata search" timing entry were added.
+
+Initial and manual attachment searches show SlowOperationWindow after two seconds, with scope,
+live status, elapsed time and cancellation captured for that operation. Fast searches do not flash
+a window. SQLite exposes no useful progress percentage here, so the bar is indeterminate.
+The owned indicator closes on completion; a closed explorer cannot open a delayed indicator.
+
+Read-only Python sqlite3 comparison on the 23.2 GB database: alternating three trials for "chistes"
+gave medians 5.759s original vs 4.002s optimized (8 rows). Empty search: 5.407s vs 0.218s (10001 rows,
+the extra row detects the UI cap); absent term: 5.349s vs 4.010s (0 rows). Full result fingerprints,
+including order, matched in every comparison. These are SQL timings, not full UI timings or a cold-
+cache guarantee. Alternative join orders/splitting OR did not justify extra complexity. Benchmark
+script: .codex-artifacts/attachment-query-compare.py. Verification: 56 selected attachment/local-mail
+tests passed, including refresh preservation, detail replacement and cancellation followed by reuse.
+
+## 43. Attachment hover preview (2026-10-17)
+
+AttachmentHoverPreview is shared by MainWindow's reading pane and MessageWindow. A non-activating
+WPF Popup opens after 750 ms over a ListBoxItem, leaves the item accessible, and allows 400 ms to
+cross from the attachment into the preview. Mouse-down/context menus/Escape, deactivation, hidden
+attachment list, message changes and owner closure dismiss and cancel it. Rendering completions
+check cancellation so closed previews cannot be repopulated. Existing open/save/drag handlers are
+unchanged; hover never marks mouse clicks handled. The size tooltip is suppressed while previewing.
+
+Allowlist: JPG/JPEG/PNG/GIF/BMP, PDF, TXT. Images decode off-thread to frozen bounded bitmaps (GIF
+first frame). PDF uses Windows.Data.Pdf rasterization with page buttons; no WebView or active links.
+TXT uses BOM-aware StreamReader, preserves newlines and truncates at 64K characters. Actual input
+is limited to 25 MiB, images to 100M source pixels; rendered dimensions are bounded. Missing local
+paths remain visible, never silently re-downloaded. Remote attachments require explicit download
+and are cached in the existing AttachmentModel.Content; no preview temp files are written.
+ConfigModel/SettingsViewModel/SettingsDialog expose AttachmentHoverPreview, enabled by default.
+No new dependencies, database schema changes, production data writes or packaged EXE in this turn.
+Validation: 44 selected preview/settings/attachment path and drag tests passed, including native
+two-page PDF rendering, image downsampling, text BOM/newlines/truncation, cancellation during load,
+unhandled mouse clicks, file release, missing paths and explicit remote-download policy.
+
+2026-10-18 layout correction: the stretched ListBoxItem was causing WPF's Right placement to
+flip the popup to the left of the entire row. Both attachment templates now name the filename
+label AttachmentPreviewAnchor; the preview locates this visual and positions beside its natural
+width. Custom placement prefers the right, with a 900 x 1000 DIP maximum and vertical clamping to
+the anchor monitor's working area (device coordinates converted to DIPs). Smaller screens adapt;
+left placement is a fallback only when the right has insufficient space. PDF/text/image viewports
+use the calculated size instead of the original 380px content height and 440px PDF width.
+
+## 44. Multiple client-rule actions and flags (2026-10-18)
+
+MailRule retains legacy Action/TargetFolder/ForwardTo/ReplyTemplateId fields and adds FlagId and
+AdditionalActions (RuleActionStep). No database schema change. GetActionSteps exposes execution
+order with the sole destination last; SetActionSteps keeps that destination in the legacy fields
+so canonical folder rewrites, destination tabs and source-removal logic continue working. Legacy
+single-action JSON remains valid. Do not downgrade to an old EXE after creating multi-action rules:
+old binaries do not understand AdditionalActions. Semantic/dedup keys include the complete actions.
+
+RulesManager exposes an action list, add/remove and a selected-action parameter editor with
+conditional Move/Forward/Reply/Flag panels. AlsoMarkAsRead remains independent/default true.
+Quick-move creation never overwrites an existing multi-action rule, and Cleanup excludes them.
+The unified Microsoft manager routes client editing to this editor; the server editor rejects
+unsupported client actions rather than silently discarding them. Server rules are unchanged.
+
+Execution validates destination count/action parameters first, checks flag definitions, then uses
+existing per-action code (same rule Id retained for forward/reply deduplication). Queued forward
+completion precedes moving; SMTP delivery is not awaited. Mark-read is applied before a terminal
+action or after nonterminal actions. Multi-action read/unread/delete failures propagate and stop
+later steps, reporting completed actions and possible partial batch progress. No transaction/rollback
+across remote actions is claimed. Flag uses IFlagService for server mirroring and explicitly checks
+local persistence (the interactive flag service otherwise tolerates unavailable local storage).
+At most one destination and one reply template; multi-action MarkUnread + AlsoMarkRead is rejected.
+SPAM stays specialized. Rule previews, diagnostics and the unified summary include all actions;
+per-step FilterOperationTrace reports progress. No production rules/database modified in this turn.
+Verification: main project Release build with -warnaserror passed (0 warnings/errors); 235 selected
+rule/flag tests passed, including JSON compatibility, folder rewrites, queue-before-move ordering,
+forward/read/move failures, cancellation, missing flags, persistent flag set/clear, quick-rule
+non-overwrite, previews and WPF conditional parameter panels. Test compilation retains the two
+pre-existing obsolete MimeKit constructor warnings in EmbeddedImageTests. No autonomous EXE built.
+
+### 45. Attachment preview layout and menu (2026-10-18)
+
+Preview now uses a Grid with a flexible viewport and an auto-sized bottom navigation row;
+single-page PDFs have no navigation controls. Raster images fit the available width and
+reduce the popup height to their rendered height plus header/padding, capped at the monitor
+limit (tall images scroll). Custom placement uses the resulting popup height.
+Right-click on the preview opens the original attachment menu, selecting the hovered attachment
+and retaining the ListBox as PlacementTarget for existing commands and click handlers.
+The preview stays open while this menu is open, unless the message changes or the owner deactivates.
+Focused tests cover bottom placement, one-page PDF, short/tall images and menu targeting;
+358 preview/rule/flag tests passed (including 34 focused preview/multi-action tests).
+Local OAuth-enabled standalone version 0.8.86.4,
+including the multi-action filters above; no GitHub release or production database changes.
+
+### 46. Inline rule actions and Execute (2026-10-18)
+
+RulesManagerWindow now shows the read checkbox first, then separated inline action editors.
+Add action sits beside the Actions heading. Each dropdown ends with a UI-only -1 Remove action
+option, intercepted before persistence; removing all blocks leaves a read-only rule, or validation
+fails if the read checkbox is off. Move/Delete blocks automatically sort last (still at most one
+destination). Folder/template/flag/recipient controls bind to their own step; Escape respects any
+open combo. Forward warns live for multiple addresses and recommends separate Forward steps.
+
+RuleAction.Execute is appended to the enum, retaining old persisted numeric values. CommandLine
+and AddSubjectToCommandLine are copied through legacy primary fields, extra steps, cloning,
+semantic deduplication, previews and server-editor guards. RuleExecuteService parses Windows
+arguments and uses ProcessStartInfo.ArgumentList, UseShellExecute=false, a hidden process and
+a 60-second timeout. Runs once per matched message, waits before later actions; nonzero exit or
+timeout fails the action, cancellation kills the process tree. No rollback or exactly-once guarantee.
+Requires an .exe; scripts use an explicit interpreter. Subject is appended as one data argument;
+cmd.exe is rejected with subject enabled, and PowerShell requires -File rather than -Command.
+Trust/security boundary: user-configured code runs as the current Windows user, not sandboxed;
+scripts must not evaluate subject text, and sender matching is not authentication. No actual mail
+commands or production rules/data were executed/modified during development.
+
+Verification: Release main build with analyzers disabled and warnings-as-errors passed, zero
+warnings/errors. 359 selected rule/flag/type-ahead tests passed, plus the added inline-dropdown
+binding/removal test passed separately (360 distinct tests). Includes real benign process exit
+code checks, argument safety, JSON compatibility, Execute-before-move/failure, parameter panels,
+sorting/removal and recipient warnings. Test compilation has two existing obsolete MimeKit
+constructor warnings. User guide updated. No new standalone EXE or GitHub release in this turn.
+
+### 47. Connection-test progress and diagnostics (2026-10-18)
+
+AccountEditorViewModel exposes operation-specific IsTestingConnection/ConnectionTestStage and
+cancellation. AddAccountDialog and AccountManagerDialog attach a shared ConnectionTestIndicator
+using SlowOperationWindow, immediate indeterminate progress, elapsed seconds and Cancel test.
+Result closes the indicator before showing the report. No email is sent. POP3 reports connect,
+authenticate, UIDL and disconnect; SMTP/IMAP report connect (MailKit combines DNS/TCP/greeting/TLS),
+OAuth retrieval and authentication, SMTP disconnect. AsyncLocal ConnectionTestTrace isolates
+progress from normal background activity and records per-phase elapsed times in performance.log.
+Failure reports include endpoint/transport mode, current phase, elapsed duration, exception chain,
+socket/native error, SMTP response code where available and actionable non-speculative advice.
+Known password is redacted; no protocol transcript/tokens are collected. Reports also enter
+quickmail.log; final dialog dwell time is excluded from connection-phase timing.
+
+Read-only diagnosis of reported ronald@dinamica.tech failure: existing log verifies
+email.dinamica.tech:587, StartTlsWhenAvailable. During this turn DNS resolved to 37.187.72.55;
+TCP connected in ~0.1 seconds, SMTP greeting/EHLO succeeded, STARTTLS negotiated TLS 1.2 with
+default certificate validation. No authentication, message sending or account setting changes.
+This does NOT establish credentials are valid or explain the earlier intermittent timeout.
+100 selected connection/provider/SMTP/POP3 tests passed on the final code;
+added tests cover cancellation, indicator state, nested scope isolation, endpoint/native errors
+and password redaction. No new standalone EXE published for this change yet.
+
+### 48. Scheduled Send immediately and taller dialogs (2026-10-18)
+
+MessageContextMenu exposes Send immediately only for a nonempty all-Scheduled selection and
+the real ScheduledSendService. It queues selected messages for immediate background dispatch;
+reports per-message failures without claiming SMTP success. SendNowAsync takes the queue gate,
+validates account/local identity, blocks in-flight and already accepted messages, and respects
+offline/maintenance. Durable SendNowRequested bypasses the original due time while retaining
+retry backoff and the original SendAtUtc recurrence anchor. Replacing/editing a schedule clears
+the flag; repeated successors use their normal calendar schedule with no force-send flag.
+No mails were sent or production queue modified during development.
+
+Rules Manager default height: 1000 DIPs (was 874); Manage Accounts: 960 (was 660).
+Both cap initial height at 95% of SystemParameters.WorkArea.Height and retain scrolling for
+small screens/expanded settings. Release build passed with warnings-as-errors/analyzers disabled;
+18 selected scheduled-send/repetition/account/editor tests passed, including selective early send,
+unchanged other schedules, preserved recurrence and offline refusal. A further 91 local-first,
+repeated-send and stabilization regression tests passed. No new standalone build yet.
+
+### 49. Home dashboard and per-application inactivity (2026-10-18)
+
+App initializes a permanent Home tab explicitly (headless MainViewModel tests retain their old
+tab set). MainWindow.Home.cs builds a scrollable dashboard: independent receive/send evidence,
+error-first account rows, local backup receipts only, queue summary, summary-column statistics
+for today/yesterday/week/month with account selector, and all-account quick-search links.
+AccountHealthJournal persists last attempts/success/error types in account-health.json, without
+exception bodies or secrets. Actual outgoing sends, POP3 sweeps, full Inbox sync and connection
+failures feed it; saved-account IMAP/POP3/SMTP tests also update the corresponding channel.
+Unknown or old observations are explicitly not described as proof of current health. Evidence
+starts with this build. No periodic SMTP probe is introduced.
+
+Backup uses Catalog.ReadRecentReceipts(includeDestination:false), never opens a NAS connection.
+External windows do not count as successful backups. Statistics run in Task.Run, touch summary
+columns only, group Message-ID within each account, omit drafts/scheduled from counts, exclude
+Trash/Junk/RecoveryDeleted from unread pending. SQLite interrupt gives statistics a 20-second
+budget; cache lasts five minutes. Counts reflect locally cached mail and known message direction,
+not the complete remote mailbox. Quick-search buttons explicitly say all accounts/all folders.
+
+ShowHomeAfterInactivity defaults on and is exposed in General settings. Input in this WPF app
+resets a monotonic 15-minute clock; one switch per idle episode. Editors (including docked tabs),
+visible other windows, busy operations, maintenance/update and pressed mouse buttons defer it.
+It does not activate/foreground the window. Home uses existing list-state snapshots; returning
+restores rows, search and selection. Hidden-message keyboard actions/selection are guarded.
+Health/statistics failures are displayed, not allowed to block opening mail. No standalone EXE
+or release published for this change; latest local standalone remains 0.8.86.6.
+
+Validation: 157 selected Home/search-tab/connection/tab/sync/local-first tests passed, including
+100,000 synthetic summary rows, account scoping, Gmail label deduplication, date boundaries,
+unread exclusions, cancellation, durable independent health channels, configuration roundtrip,
+idle deferral and preserved rows/selection. Production DB and mail queues were not modified.
+The test project still emits its two pre-existing CS0618 MimeKit constructor warnings.
+
+### Home dashboard mockup redesign (2026-10-18)
+
+Implemented the supplied Home-html.zip reference as native WPF in HomeDashboardView, not by
+running its bundled React/JavaScript. Responsive cards, actionable attention rows, per-account
+receiving/sending table, cached account-specific activity with daily averages, backup/restore
+cards, colored Today events and folder-review links. Production values come from local summaries,
+health observations, scheduled queue and local backup receipts; screenshot fixtures are synthetic.
+Home does not contact NAS or servers on display. Explicit account checks support progress/cancel;
+SMTP tests authenticate without sending; Graph cannot prove sending permissions with an SMTP test.
+Targeted incoming checks reuse existing sync/POP pipelines and do not explicitly dispatch Scheduled.
+Backup agent accepts /tab for Native Backup, Restore test and History navigation.
+Unread Home searches exclude Trash/Junk/RecoveryDeleted and retain this scope in tab snapshots.
+Statistics read all accounts together, then selector changes use memory, not another DB query.
+
+Validation: 155 selected Home/search-tab/connection/main-tab/local-first/sync tests passed, including
+100,000 synthetic summaries. Native view rendered at wide and narrow sizes without opening a window.
+Preview images: Artifacts/home-redesign-preview (test data only). Backup agent build: zero warnings
+and errors. No production DB changes, live mail tests, executable publication or GitHub release
+performed for this redesign.
+
+Home refresh hotfix: 0.8.86.8 displayed Home once then cleared it on its second Render.
+Production log confirmed InvalidOperationException (logical child already has a parent).
+The persistent status TextBlock remained attached to the detached header's WrapPanel.
+Render now removes it from its old parent before constructing the replacement header.
+Added a regression covering loading-to-statistics refresh, account selection and later refresh;
+it failed before the fix. No database or account changes involved.
+
+### Home Google Calendar integration (2026-10-24)
+
+Home now shows Google calendar account status (including explicit CalendarProvider=google),
+enabled/disabled, last successful sync, unknown/stale/error and individual Sync now / Configure.
+GraphCalendarSyncService records an independent Calendar health channel after successful full,
+single-account or day sync and on errors; cancellations leave prior evidence unchanged. No raw
+provider exception payload is persisted in health JSON. Opening Home only reloads local calendar
+rows via ReloadFromStoreAsync, not provider APIs. Explicit retries use the existing single-account
+sync with progress, cancellation and a two-minute bound, respecting Offline/Focus/maintenance.
+Today uses the existing global recurrence-aware TodayEvents across sources, all-day/time range,
+account/calendar labels and colors. Double-click routes through ActivateSelectedCalendarEvent;
+existing invite and read-only behavior remains. Cached events are retained with a stale/unverified
+warning, and empty unverified agendas are not presented as confirmed empty days.
+Validation: 125 selected Home/Google/Graph/per-account/calendar-VM tests passed with stub HTTP and
+temporary databases; no live account sync or executable publication performed for this change.
+
+Local standalone 0.8.86.10 was subsequently published with OAuth, Assets, BackupAgent and Updater
+to Artifacts/local-0.8.86.10-win-x64-bfbe5abb02dc48c2b1571f9edbe4e39f (not GitHub).
+
+Ctrl+Enter search fix (2026-10-26): search input now consumes Enter before starting/awaiting
+the asynchronous query, captures the Control modifier once and ignores autorepeat. The window
+handler leaves search-editor Enter to that handler rather than dispatching a global mail command.
+Escape is also consumed before awaiting clear. Added input-timing/modifier and cross-folder,
+cross-account scope tests. This fix is newer than the 0.8.86.10 standalone.

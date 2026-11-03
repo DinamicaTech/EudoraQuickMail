@@ -9,6 +9,26 @@ namespace QuickMail.Tests;
 
 public class QuickSearchParserTests
 {
+    [Theory]
+    [InlineData("Mitsubishi?", "\"Mitsubishi?\"")]
+    [InlineData("S:Annual?;N", "S:\"Annual?\";N")]
+    [InlineData("S:(Annual?;Monthly*);D:today", "S:(\"Annual?\";\"Monthly*\");D=\"today\"")]
+    public void LiteralChoicePersistsWithoutWildcardExpansion(string input, string expected)
+    {
+        Assert.True(QuickSearchParser.HasWildcard(input));
+        var literal = QuickSearchParser.AsLiteralWildcardSearch(input);
+        Assert.Equal(expected, literal);
+        Assert.False(QuickSearchParser.HasWildcard(literal));
+        Assert.False(QuickSearchParser.HasSlowWildcard(literal));
+    }
+
+    [Fact]
+    public void PrefixWildcardStillRequiresChoiceButUsesIndex()
+    {
+        Assert.True(QuickSearchParser.HasWildcard("Mitsu*"));
+        Assert.False(QuickSearchParser.HasSlowWildcard("Mitsu*"));
+    }
+
     [Fact]
     public void CombinesOrdinaryTextWithUnreadAndDateCriteria()
     {
@@ -281,6 +301,10 @@ public class QuickSearchStoreTests
             Assert.Equal(0, (await store.SearchLocalMessagesAsync(new("I"), TestContext.Current.CancellationToken)).TotalMatches);
             Assert.Equal(1, await store.RebuildMessageSearchIndexAsync(TestContext.Current.CancellationToken));
             Assert.Equal(1, (await store.SearchLocalMessagesAsync(new("S:Annual"), TestContext.Current.CancellationToken)).TotalMatches);
+            Assert.Equal(1, (await store.SearchLocalMessagesAsync(new("S:\"Annual report?\""), TestContext.Current.CancellationToken)).TotalMatches);
+            Assert.Equal(0, (await store.SearchLocalMessagesAsync(new("B:\"cho?olate\""), TestContext.Current.CancellationToken)).TotalMatches);
+            Assert.Equal(0, (await store.SearchLocalMessagesAsync(new("AN:\"rep*\""), TestContext.Current.CancellationToken)).TotalMatches);
+            Assert.Equal(0, (await store.SearchLocalMessagesAsync(new("AC:\"Choco*\""), TestContext.Current.CancellationToken)).TotalMatches);
         }
         finally
         {

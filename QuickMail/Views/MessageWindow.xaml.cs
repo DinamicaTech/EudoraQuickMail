@@ -66,6 +66,13 @@ public partial class MessageWindow : Window
         _configService = configService;
 
         InitializeComponent();
+        // Dismiss a hover preview with Escape before the window's normal Escape action.
+        PreviewKeyDown -= OnPreviewKeyDown;
+        _ = new AttachmentHoverPreview(this, AttachmentList, () => _vm.MessageDetail,
+            _imap, () => _configService?.Load().AttachmentHoverPreview ?? true,
+            async (message, ct) => await _localStore.GetSnoozedOriginalFolderAsync(
+                message.AccountId, message.FolderName, message.MessageId, ct) ?? message.FolderName);
+        PreviewKeyDown += OnPreviewKeyDown;
         DataContext = vm;
 
         if (_themeService != null)

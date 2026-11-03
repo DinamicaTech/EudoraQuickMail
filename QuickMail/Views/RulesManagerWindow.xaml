@@ -6,7 +6,7 @@
         xmlns:controls="clr-namespace:QuickMail.Controls"
         Title="{Binding WindowTitle}"
         AutomationProperties.Name="{Binding WindowTitle}"
-        Width="750" Height="874"
+        Width="750" Height="1000"
         MinWidth="600" MinHeight="440"
         WindowStartupLocation="CenterScreen"
         ResizeMode="CanResizeWithGrip"
@@ -286,25 +286,29 @@
                         </TextBlock.Style>
                     </TextBlock>
 
-                    <!-- Action -->
-                    <TextBlock Text="Action" FontWeight="SemiBold" Margin="0,12,0,4"/>
+                    <!-- All actions are directly editable; destination actions sort last. -->
+                    <DockPanel Margin="0,12,0,4">
+                        <Button Content="Add action" Command="{Binding AddActionCommand}" DockPanel.Dock="Right"/>
+                        <TextBlock Text="Actions" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                    </DockPanel>
                     <Separator Margin="0,0,0,6"/>
-
+                    <CheckBox Content="Mark as read" IsChecked="{Binding SelectedRule.AlsoMarkAsRead}"
+                              Style="{StaticResource RuleCheckBox}" AutomationProperties.Name="Also mark matching messages as read"/>
+                    <ItemsControl x:Name="ActionEditors" ItemsSource="{Binding Actions}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="{x:Type models:RuleActionStep}">
+                                <StackPanel>
+                                    <Separator Margin="0,6,0,8"/>
                     <ComboBox x:Name="ActionCombo"
-                              ItemsSource="{Binding ActionOptions}"
-                              SelectedValue="{Binding SelectedRule.Action}"
+                              ItemsSource="{Binding DataContext.ActionOptions, RelativeSource={RelativeSource AncestorType=Window}}"
+                              SelectedValue="{Binding Action}"
                               SelectedValuePath="Action"
                               DisplayMemberPath="DisplayName"
                               Style="{StaticResource RuleComboBox}"
                               AutomationProperties.Name="Rule action"/>
 
-                    <CheckBox Content="Also mark as read"
-                              IsChecked="{Binding SelectedRule.AlsoMarkAsRead}"
-                              Style="{StaticResource RuleCheckBox}"
-                              AutomationProperties.Name="Also mark matching messages as read"/>
-
                     <!-- Target folder -->
-                    <StackPanel>
+                    <StackPanel x:Name="ReplyActionPanel">
                         <StackPanel.Style>
                             <Style TargetType="StackPanel">
                                 <Setter Property="Visibility" Value="Collapsed"/>
@@ -316,13 +320,34 @@
                             </Style>
                         </StackPanel.Style>
                         <TextBlock Text="Reply template"/>
-                        <ComboBox x:Name="ReplyTemplateCombo" ItemsSource="{Binding ReplyTemplates}" SelectedValue="{Binding SelectedRule.ReplyTemplateId}"
+                        <ComboBox x:Name="ReplyTemplateCombo" ItemsSource="{Binding DataContext.ReplyTemplates, RelativeSource={RelativeSource AncestorType=Window}}" SelectedValue="{Binding ReplyTemplateId}"
                                   SelectedValuePath="Id" TextSearch.TextPath="Title" DisplayMemberPath="Title"
                                   AutomationProperties.Name="Reply template"/>
-                        <TextBlock Text="One reply per sender and expiration period. Bulk mail, automatic replies and own accounts are skipped. Originals are retained."
+                        <TextBlock Text="One reply per sender and expiration period. Bulk mail, automatic replies and own accounts are skipped."
                                    TextWrapping="Wrap"/>
                     </StackPanel>
-                    <StackPanel>
+                    <StackPanel x:Name="AutoresponseActionPanel">
+                        <StackPanel.Style>
+                            <Style TargetType="StackPanel">
+                                <Setter Property="Visibility" Value="Collapsed"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding Action}" Value="{x:Static models:RuleAction.Autoresponse}">
+                                        <Setter Property="Visibility" Value="Visible"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </StackPanel.Style>
+                        <Label Content="Response _subject:" Target="{Binding ElementName=AutoResponseSubjectBox}"/>
+                        <TextBox x:Name="AutoResponseSubjectBox" Text="{Binding AutoResponseSubject, UpdateSourceTrigger=PropertyChanged}"
+                                 AutomationProperties.Name="Autoresponse subject"/>
+                        <Label Content="Response _body:" Target="{Binding ElementName=AutoResponseBodyBox}"/>
+                        <TextBox x:Name="AutoResponseBodyBox" Text="{Binding AutoResponseBody, UpdateSourceTrigger=PropertyChanged}"
+                                 AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" MinHeight="105"
+                                 AutomationProperties.Name="Autoresponse body"/>
+                        <TextBlock Text="[SUBJECT] and [BODY] insert the original message's subject and full body. Automatic and bulk mail are skipped."
+                                   TextWrapping="Wrap"/>
+                    </StackPanel>
+                    <StackPanel x:Name="ForwardActionPanel">
                         <StackPanel.Style>
                             <Style TargetType="StackPanel">
                                 <Setter Property="Visibility" Value="Collapsed"/>
@@ -334,19 +359,70 @@
                             </Style>
                         </StackPanel.Style>
                         <Label Content="Forward _to:" Target="{Binding ElementName=ForwardToBox}"/>
-                        <TextBox x:Name="ForwardToBox" Text="{Binding SelectedRule.ForwardTo, UpdateSourceTrigger=PropertyChanged}"
+                        <TextBox x:Name="ForwardToBox" Text="{Binding ForwardTo, UpdateSourceTrigger=PropertyChanged}"
                                  AutomationProperties.Name="Forward destination email"
-                                 ToolTip="One email address. Sends using the original account, with attachments; keeps the original. Own accounts and already forwarded messages are protected against loops."/>
+                                 ToolTip="One email address. Queues forwarding using the original account, with attachments. Own accounts and already forwarded messages are protected against loops."/>
+                        <TextBlock Text="{Binding ForwardRecipientWarning}" TextWrapping="Wrap"
+                                   Foreground="{DynamicResource Theme.Error}" AutomationProperties.LiveSetting="Polite">
+                            <TextBlock.Style><Style TargetType="TextBlock"><Style.Triggers>
+                                <DataTrigger Binding="{Binding ForwardRecipientWarning}" Value=""><Setter Property="Visibility" Value="Collapsed"/></DataTrigger>
+                            </Style.Triggers></Style></TextBlock.Style>
+                        </TextBlock>
                     </StackPanel>
+                    <StackPanel x:Name="FlagActionPanel">
+                        <StackPanel.Style>
+                            <Style TargetType="StackPanel">
+                                <Setter Property="Visibility" Value="Collapsed"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding SelectedValue, ElementName=ActionCombo}" Value="{x:Static models:RuleAction.SetFlag}">
+                                        <Setter Property="Visibility" Value="Visible"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </StackPanel.Style>
+                        <TextBlock Text="Flag"/>
+                        <ComboBox ItemsSource="{Binding DataContext.FlagOptions, RelativeSource={RelativeSource AncestorType=Window}}" SelectedValue="{Binding FlagId}"
+                                  SelectedValuePath="Id" DisplayMemberPath="Name" AutomationProperties.Name="Flag to assign or remove"/>
+                    </StackPanel>
+                    <StackPanel x:Name="MoveActionPanel">
+                        <StackPanel.Style>
+                            <Style TargetType="StackPanel">
+                                <Setter Property="Visibility" Value="Collapsed"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding SelectedValue, ElementName=ActionCombo}" Value="{x:Static models:RuleAction.MoveToFolder}">
+                                        <Setter Property="Visibility" Value="Visible"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </StackPanel.Style>
                     <TextBlock Text="Target folder"/>
                     <!-- Accessible name tracks the chosen folder (issue #344): a static name made
                          a screen reader always say "Choose target folder" even after a folder was
                          picked. PickFolder raises PropertyChanged(SelectedRule), refreshing both. -->
-                    <Button Content="{Binding SelectedRule.TargetFolder, TargetNullValue=Choose Folder…, FallbackValue=Choose Folder…}"
-                            Command="{Binding PickFolderCommand}"
+                    <Button Content="{Binding TargetFolder, TargetNullValue=Choose Folder…, FallbackValue=Choose Folder…}"
+                            Command="{Binding DataContext.PickActionFolderCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}"
                             MinWidth="140" Margin="0,2,0,8"
                             HorizontalAlignment="Left"
-                            AutomationProperties.Name="{Binding SelectedRule.TargetFolder, TargetNullValue=Choose target folder, FallbackValue=Choose target folder}"/>
+                            AutomationProperties.Name="{Binding TargetFolder, TargetNullValue=Choose target folder, FallbackValue=Choose target folder}"/>
+                    </StackPanel>
+                    <StackPanel x:Name="ExecuteActionPanel">
+                        <StackPanel.Style><Style TargetType="StackPanel">
+                            <Setter Property="Visibility" Value="Collapsed"/>
+                            <Style.Triggers><DataTrigger Binding="{Binding Action}" Value="{x:Static models:RuleAction.Execute}">
+                                <Setter Property="Visibility" Value="Visible"/>
+                            </DataTrigger></Style.Triggers>
+                        </Style></StackPanel.Style>
+                        <Label Content="_Command line:" Target="{Binding ElementName=CommandLineBox}"/>
+                        <TextBox x:Name="CommandLineBox" Text="{Binding CommandLine, UpdateSourceTrigger=PropertyChanged}"
+                                 AutomationProperties.Name="Execute command line"
+                                 ToolTip="Runs once per matching message, using your Windows identity, with a 60-second timeout. Example: powershell.exe -NoProfile -File &quot;C:\Scripts\lights.ps1&quot;. Only use trusted scripts and narrowly scoped rules; sender addresses can be forged."/>
+                        <CheckBox Content="Add subject to command line" IsChecked="{Binding AddSubjectToCommandLine}"
+                                  ToolTip="Appends the complete subject as one literal argument. The script must treat it as data, never evaluate it as code."/>
+                    </StackPanel>
+                                </StackPanel>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
                     <TextBlock Text="{Binding FolderError}" Foreground="{DynamicResource Theme.Error}"
                                KeyboardNavigation.IsTabStop="False"
                                AutomationProperties.LiveSetting="Assertive">

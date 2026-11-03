@@ -44,6 +44,21 @@ public sealed class LogServiceTests : IDisposable
 
     private string LogFile => Path.Combine(_tempDir, "quickmail.log");
 
+    [Fact]
+    public void OversizedLogRotatesAndRetainsOnlyThreeArchives()
+    {
+        for (var i = 0; i < 5; i++)
+        {
+            using (var stream = new FileStream(LogFile, FileMode.OpenOrCreate, FileAccess.Write, FileShare.ReadWrite))
+                stream.SetLength(10 * 1024 * 1024);
+            LogService.Log(_marker);
+        }
+        Assert.True(LogContainsMarker());
+        Assert.True(new FileInfo(LogFile).Length < 10 * 1024 * 1024);
+        Assert.True(File.Exists(LogFile + ".3"));
+        Assert.False(File.Exists(LogFile + ".4"));
+    }
+
     /// <summary>
     /// A marker unique to this test instance. LogService's target directory is static, so while
     /// these tests point it at their own temp dir, any other test running in parallel that happens

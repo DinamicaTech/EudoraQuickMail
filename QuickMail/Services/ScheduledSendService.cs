@@ -8,7 +8,8 @@ namespace QuickMail.Services;
 public sealed record ScheduledMail(Guid Id, DateTimeOffset SendAtUtc, ComposeModel Message, int Attempts = 0,
     string? LastError = null, string? LocalMessageId = null, bool IsImmediate = false,
     DateTimeOffset? NextAttemptUtc = null, bool AutomaticRetry = true,
-    bool TransportAccepted = false, DateTimeOffset? AcceptedAtUtc = null);
+    bool TransportAccepted = false, DateTimeOffset? AcceptedAtUtc = null, bool SentCopySaved = false,
+    bool SendNowRequested = false);
 
 /// <summary>Durable local outbox with a short periodic dispatcher.</summary>
 public sealed partial class ScheduledSendService : IOutgoingMailQueue, IDisposable
@@ -85,6 +86,8 @@ public sealed partial class ScheduledSendService : IOutgoingMailQueue, IDisposab
                 throw new InvalidOperationException("Scheduled message no longer exists.");
             if (replaceScheduledId is { } sendingId && _inFlight.ContainsKey(sendingId))
                 throw new InvalidOperationException("This message is already being sent.");
+            if (existingIndex >= 0 && queue[existingIndex].TransportAccepted)
+                throw new InvalidOperationException("This message has already been sent and is awaiting archival. Create a new message to send again.");
 
             var id = existingIndex >= 0 ? queue[existingIndex].Id : Guid.NewGuid();
             var localId = existingIndex >= 0
@@ -102,6 +105,28 @@ public sealed partial class ScheduledSendService : IOutgoingMailQueue, IDisposab
             return id;
         }
         finally { _gate.Release(); }
+    }
+
+    /// <summary>Advance this occurrence without changing the recurrence's original calendar anchor.</summary>
+    public async Task SendNowAsync(Guid accountId, string localMessageId, CancellationToken ct = default)
+    {
+        if (_activity is { CanSend: false })
+            throw new InvalidOperationException("Sending is paused by offline mode or backup maintenance. Resume normal operation first.");
+        await _gate.WaitAsync(ct);
+        try
+        {
+            var queue = await LoadAsync();
+            var index = queue.FindIndex(x => x.Message.AccountId == accountId && x.LocalMessageId == localMessageId);
+            if (index < 0) throw new InvalidOperationException("Scheduled message no longer exists.");
+            var item = queue[index];
+            if (_inFlight.ContainsKey(item.Id)) throw new InvalidOperationException("This message is already being sent.");
+            if (item.TransportAccepted) throw new InvalidOperationException("This message has already been sent and is awaiting archival.");
+            queue[index] = item with { SendNowRequested = true, NextAttemptUtc = DateTimeOffset.UtcNow,
+                AutomaticRetry = true, LastError = null };
+            await SaveAsync(queue);
+        }
+        finally { _gate.Release(); }
+        RequestDispatch();
     }
 
     public async Task<ScheduledMail?> FindByLocalMessageIdAsync(string localMessageId)
@@ -132,13 +157,15 @@ public sealed partial class ScheduledSendService : IOutgoingMailQueue, IDisposab
             var index = queue.FindIndex(x => x.Id == id);
             if (index < 0) throw new InvalidOperationException("Scheduled message no longer exists.");
             var old = queue[index];
+            if (old.TransportAccepted)
+                throw new InvalidOperationException("This message has already been sent and cannot be edited. Create a new message to send again.");
             var localMessageId = old.LocalMessageId ?? "scheduled-" + old.Id.ToString("N");
             var account = _accounts.LoadAccounts().First(a => a.Id == message.AccountId);
             await _store.EnsureLocalSystemFoldersAsync([account]);
             await SaveScheduledLocalCopyAsync(account, message, localMessageId, sendAtUtc);
             queue[index] = old with { SendAtUtc = sendAtUtc.ToUniversalTime(), Message = message,
                 Attempts = 0, LastError = null, LocalMessageId = localMessageId, IsImmediate = false,
-                NextAttemptUtc = null, AutomaticRetry = true };
+                NextAttemptUtc = null, AutomaticRetry = true, SendNowRequested = false };
             await SaveAsync(queue);
         }
         finally { _gate.Release(); }
@@ -169,6 +196,7 @@ public sealed partial class ScheduledSendService : IOutgoingMailQueue, IDisposab
         await _dispatchGate.WaitAsync(_stop.Token);
         try
         {
+            if (_activity is { CanSend: false }) return failures;
             if (DateTimeOffset.UtcNow - _lastFollowUpCheck > TimeSpan.FromMinutes(5))
             {
                 _lastFollowUpCheck = DateTimeOffset.UtcNow;
@@ -179,6 +207,7 @@ public sealed partial class ScheduledSendService : IOutgoingMailQueue, IDisposab
             var attempted = new HashSet<Guid>();
             while (!_stop.IsCancellationRequested)
             {
+                if (_activity is { CanSend: false }) break;
                 ScheduledMail? item;
                 await _gate.WaitAsync(_stop.Token);
                 try
@@ -186,7 +215,9 @@ public sealed partial class ScheduledSendService : IOutgoingMailQueue, IDisposab
                     var now = DateTimeOffset.UtcNow;
                     item = (await LoadAsync()).OrderBy(candidate => candidate.Message.FollowUp != null).FirstOrDefault(candidate =>
                         !attempted.Contains(candidate.Id)
-                        && (candidate.TransportAccepted || (candidate.SendAtUtc <= now
+                        && ((candidate.TransportAccepted && (manual ||
+                            ((candidate.LastError == null || candidate.AutomaticRetry)
+                                && (candidate.NextAttemptUtc == null || candidate.NextAttemptUtc <= now)))) || (!candidate.TransportAccepted && (candidate.SendNowRequested || candidate.SendAtUtc <= now)
                             && (manual || (candidate.AutomaticRetry
                                 && (candidate.NextAttemptUtc ?? candidate.SendAtUtc) <= now)))));
                     if (item is not null)
@@ -199,8 +230,17 @@ public sealed partial class ScheduledSendService : IOutgoingMailQueue, IDisposab
 
                 if (item is null) break;
 
-                var account = _accounts.LoadAccounts().FirstOrDefault(a =>
-                    a.Id == item.Message.AccountId && (a.IsActive || item.TransportAccepted));
+                AccountModel? account;
+                try
+                {
+                    account = _accounts.LoadAccounts().FirstOrDefault(a =>
+                        a.Id == item.Message.AccountId && (a.IsActive || item.TransportAccepted));
+                }
+                catch
+                {
+                    _inFlight.TryRemove(item.Id, out _);
+                    throw; // damaged configuration is not a missing/deleted account
+                }
                 if (account is null)
                 {
                     await UpdateQueuedItemAsync(item.Id, current => current with
@@ -246,6 +286,7 @@ public sealed partial class ScheduledSendService : IOutgoingMailQueue, IDisposab
                         ProgressChanged?.Invoke($"Sending queued message from {account.AccountLabel}…");
                         var password = account.BackendKind == BackendKind.Pop3Smtp
                             ? null : _credentials.GetPassword(account.Id);
+                        if (_activity is { CanSend: false }) break;
                         await _sender.SendAsync(item.Message, account, password, _stop.Token);
 
                         // Persist SMTP acceptance before any best-effort housekeeping. If the app
@@ -273,21 +314,24 @@ public sealed partial class ScheduledSendService : IOutgoingMailQueue, IDisposab
                         ProgressChanged?.Invoke($"Completing sent message from {account.AccountLabel}…");
                         PerformanceLogService.Marker("Outgoing queue: resume accepted item", details);
                     }
-                    var sentCopySaved = false;
+                    var sentCopySaved = item.SentCopySaved;
                     await ScheduleFollowUpAfterSentAsync(item.Message, account, item.AcceptedAtUtc ?? DateTimeOffset.UtcNow);
                     try
                     {
-                        // SMTP acceptance is authoritative. Saving/synchronizing the Sent copy is
-                        // best effort: if it fails we must still dequeue the item, otherwise the
-                        // next timer pass sends a duplicate to the recipient.
+                        // Accepted items retry archival only, never SMTP. Keep the Scheduled copy
+                        // until archival succeeds, and persist this checkpoint before cleanup.
                         if (_store is LocalStoreService noteStore)
                             await noteStore.SavePrivateNotesAsync(account.Id, item.Message.OutgoingMessageId, item.Message.Notes);
-                        await _mail.AppendToSentAsync(account.Id, item.Message, CancellationToken.None);
+                        if (!sentCopySaved)
+                            await _mail.AppendToSentAsync(account.Id, item.Message, CancellationToken.None);
                         sentCopySaved = true;
+                        item = item with { SentCopySaved = true };
+                        await UpdateQueuedItemAsync(item.Id, _ => item);
                     }
                     catch (Exception ex)
                     {
                         LogService.Log($"Scheduled send {item.Id}: failed to save Sent copy", ex);
+                        throw;
                     }
                     if (item.Message.ReplySourceAccountId is { } sourceAccountId
                         && !string.IsNullOrWhiteSpace(item.Message.ReplySourceFolderName)
@@ -319,6 +363,7 @@ public sealed partial class ScheduledSendService : IOutgoingMailQueue, IDisposab
                         catch (Exception ex)
                         {
                             LogService.Log($"Scheduled send {item.Id}: failed to remove Scheduled copy", ex);
+                            throw; // retry cleanup using the persisted SentCopySaved checkpoint
                         }
                     }
                     if (sentCopySaved
@@ -352,12 +397,18 @@ public sealed partial class ScheduledSendService : IOutgoingMailQueue, IDisposab
                 }
                 catch (Exception ex)
                 {
-                    var failure = new MailOperationFailure(account, "Send scheduled email (SMTP)", ex);
+                    var failure = new MailOperationFailure(account,
+                        item.TransportAccepted ? "Message sent; saving Sent copy/cleanup pending (will not resend)" : "Send scheduled email (SMTP)", ex);
                     failures.Add(failure);
                     var attempts = item.Attempts + 1;
                     var automaticRetry = ShouldRetryAutomatically(ex);
                     await UpdateQueuedItemAsync(item.Id, current => current with
                     {
+                        // Preserve checkpoints learned in this attempt even if the first
+                        // persistence write failed transiently after SMTP/archival succeeded.
+                        TransportAccepted = current.TransportAccepted || item.TransportAccepted,
+                        AcceptedAtUtc = current.AcceptedAtUtc ?? item.AcceptedAtUtc,
+                        SentCopySaved = current.SentCopySaved || item.SentCopySaved,
                         Attempts = attempts,
                         LastError = ex.Message,
                         AutomaticRetry = automaticRetry,

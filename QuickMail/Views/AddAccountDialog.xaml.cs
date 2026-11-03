@@ -22,6 +22,7 @@ public partial class AddAccountDialog : Window
         _vm = vm;
         InitializeComponent();
         DataContext = vm;
+        _ = new ConnectionTestIndicator(this, vm);
         if (editMode)
         {
             Title = "Edit Account";

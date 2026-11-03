@@ -236,6 +236,36 @@ public sealed class RepeatedSendingAndForwardTests : IDisposable
         Assert.NotNull(await _store.LoadDetailAsync(_account.Id, "In", original.MessageId));
     }
 
+    [Fact]
+    public async Task AutoresponseExpandsOriginalFieldsOncePerMessageAndSkipsAutomaticMail()
+    {
+        using var activity = new MailActivityPolicyService(_profile); activity.SetOffline();
+        using var queue = Queue(new Sender(), activity);
+        using var mail = new LocalMailService(_store, _accounts);
+        using var templates = new TemplateService(_profile);
+        var response = new RuleReplyTemplateService(mail, _accounts, templates, queue);
+        var rule = new MailRule { Action = RuleAction.Autoresponse,
+            AutoResponseSubject = "Re: [SUBJECT]", AutoResponseBody = "Received:\n[BODY]\n[SUBJECT]" };
+        var first = await Original();
+        await response.AutoresponseAsync(rule, first, TestContext.Current.CancellationToken);
+        await response.AutoresponseAsync(rule, first, TestContext.Current.CancellationToken);
+        var second = await Original();
+        await response.AutoresponseAsync(rule, second, TestContext.Current.CancellationToken);
+        await response.AutoresponseAsync(rule, await Original("Auto-Submitted: auto-replied"), TestContext.Current.CancellationToken);
+
+        var pending = await queue.GetSnapshotAsync();
+        Assert.Equal(2, pending.Count);
+        Assert.All(pending, item =>
+        {
+            Assert.Equal("sender@example.com", item.Message.To);
+            Assert.Equal("Re: Invoice", item.Message.Subject);
+            Assert.Equal("Received:\nInvoice body\nInvoice", item.Message.Body);
+            Assert.Empty(item.Message.Attachments);
+        });
+        Assert.Contains(pending, item => item.Message.InReplyToMessageId == first.InternetMessageId);
+        Assert.Contains(pending, item => item.Message.InReplyToMessageId == second.InternetMessageId);
+    }
+
     [Theory]
     [InlineData("")] [InlineData("not-an-email")] [InlineData("a@example.com,b@example.com")] [InlineData("a@example.com\r\nBcc: hidden@example.com")]
     public void InvalidForwardAddressesAreRejected(string address) => Assert.Throws<ArgumentException>(() => RuleForwardService.ValidateDestination(address));

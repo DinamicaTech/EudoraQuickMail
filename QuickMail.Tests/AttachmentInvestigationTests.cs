@@ -46,6 +46,36 @@ public sealed class AttachmentInvestigationTests : IDisposable
         await Assert.ThrowsAsync<InvalidOperationException>(() => _store.RelinkAttachmentAsync(first,replacement,_ct));
         Assert.Single(await _store.LoadMessageActivityAsync(first.Message,_ct),a => a.Action == "Attachment repaired");
     }
+
+    [Fact]
+    public async Task IndexedCataloguePreservesMatchesAfterSummaryRefreshAndDetailReplacement()
+    {
+        var item = await SeedAsync("recopilacion de chistes.pdf");
+        // A header-only synchronization does not know the cached attachment list.
+        await _store.UpsertSummariesAsync([new MailMessageSummary
+        {
+            AccountId = item.Message.AccountId, MessageId = item.Message.MessageId, FolderName = "In",
+            Subject = "Holiday newsletter", From = "sender@example.invalid", Date = item.Date,
+            HasAttachments = false
+        }]);
+        Assert.Single(await _store.BrowseAttachmentsAsync("chistes", null, _ct));
+        Assert.Single(await _store.BrowseAttachmentsAsync("HOLIDAY", null, _ct));
+        Assert.Single(await _store.BrowseAttachmentsAsync("sender@", [item.Message], _ct));
+        Assert.Empty(await _store.BrowseAttachmentsAsync("absent", null, _ct));
+        var detail = (MailMessageDetail)item.Message;
+        detail.Attachments = [new() { FileName = "chistes.png", IsInline = true }];
+        await _store.UpsertDetailAsync(detail);
+        Assert.Empty(await _store.BrowseAttachmentsAsync("", null, _ct));
+    }
+
+    [Fact]
+    public async Task CancelledCatalogueSearchDoesNotPoisonNextQuery()
+    {
+        await SeedAsync();
+        using var cancelled = new CancellationTokenSource(); cancelled.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => _store.BrowseAttachmentsAsync("invoice", null, cancelled.Token));
+        Assert.Single(await _store.BrowseAttachmentsAsync("invoice", null, _ct));
+    }
     [Fact]
     public async Task SearchReportsHashMismatchAndVerificationRejectsIt()
     {

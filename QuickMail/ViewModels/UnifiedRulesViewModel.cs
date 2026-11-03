@@ -109,6 +109,7 @@ public partial class UnifiedRulesViewModel : ObservableObject
 
     /// <summary>Ask the View to show the "saved as a QuickMail rule" dialog (spec §20.3).</summary>
     public event Action<string>? ClientRuleNoticeRequested;
+    public event Action<MailRule>? ClientEditorRequested;
 
     public event Action<string, AnnouncementCategory>? AnnouncementRequested;
     public event Action<string>? WriteBlockedByPermission;
@@ -202,6 +203,17 @@ public partial class UnifiedRulesViewModel : ObservableObject
     private void EditRule()
     {
         if (SelectedAccount?.Id is not Guid accountId || SelectedRule is not { } row) return;
+
+        if (row.Client is { } client && row.RunsWhere != RuleRunsWhere.Server)
+        {
+            if (ClientEditorRequested != null) { ClientEditorRequested.Invoke(client); return; }
+            if (client.AdditionalActions.Count > 0 || client.Action is RuleAction.SetFlag or RuleAction.Forward or RuleAction.ReplyTemplate or RuleAction.Autoresponse or RuleAction.Execute)
+            {
+                StatusText = "This rule requires the client Rules Manager; it cannot be simplified in the server editor.";
+                ClientRuleNoticeRequested?.Invoke(StatusText);
+                return;
+            }
+        }
 
         var editor = row.RunsWhere == RuleRunsWhere.Server
             ? ServerRuleEditorViewModel.ForEdit(row.Server!)

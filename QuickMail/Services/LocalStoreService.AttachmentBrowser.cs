@@ -9,7 +9,11 @@ public partial class LocalStoreService
     public async Task<List<AttachmentBrowserItem>> BrowseAttachmentsAsync(string search,
         IReadOnlyList<MailMessageSummary>? scope, CancellationToken ct = default)
     {
+        using var timing = PerformanceLogService.Measure("Attachment explorer: metadata search",
+            $"queryLength={search.Trim().Length}; scope={(scope == null ? "everywhere" : scope.Count.ToString())}");
         await using var connection = await OpenAsync();
+        using var interrupt = ct.Register(() => SQLitePCL.raw.sqlite3_interrupt(connection.Handle));
+        ct.ThrowIfCancellationRequested();
         if (scope != null)
         {
             await using var create = connection.CreateCommand();
@@ -36,7 +40,9 @@ public partial class LocalStoreService
             FROM MessageDetail d JOIN MessageSummary s
               ON s.account_id=d.account_id AND s.unique_id=d.unique_id AND s.folder_name=d.folder_name
             JOIN json_each(CASE WHEN json_valid(d.attachments_json) THEN d.attachments_json ELSE '[]' END) j
-            WHERE COALESCE(json_extract(j.value,'$.IsInline'),0)=0
+            -- Cached detail writes maintain has_attachments, and summary refreshes preserve it.
+            -- Use its existing index before reading large MessageDetail rows / expanding JSON.
+            WHERE s.has_attachments=1 AND COALESCE(json_extract(j.value,'$.IsInline'),0)=0
               AND ($q='' OR instr(lower(COALESCE(json_extract(j.value,'$.FileName'),'')),lower($q))>0
                   OR instr(lower(s.subject),lower($q))>0 OR instr(lower(s.from_disp),lower($q))>0)
             """ + (scope == null ? "" : " AND EXISTS(SELECT 1 FROM AttachmentScope t WHERE t.a=s.account_id AND t.u=s.unique_id AND t.f=s.folder_name)") +

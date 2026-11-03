@@ -48,6 +48,8 @@ internal static class SpamPolicy
     internal static void Validate(MailRule rule)
     {
         if (!rule.IsSpamFilter) return;
+        if (rule.AdditionalActions.Count > 0)
+            throw new InvalidOperationException("SPAM filters cannot contain additional actions.");
         var value = rule.FromContains?.Trim().ToLowerInvariant() ?? "";
         if (rule.SpamBlockDomain ? !CanBlockDomain(value) : Address(value) != value || value.Length == 0)
             throw new InvalidOperationException("Invalid SPAM block. Shared mail providers cannot be blocked by domain.");

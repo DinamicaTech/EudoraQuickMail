@@ -79,10 +79,11 @@ public partial class App : Application
     private Views.SplashWindow? _startupSplash;
     public ScheduledSendService? ScheduledSender { get; private set; }
 
-    public async Task<IReadOnlyList<MailOperationFailure>> CheckMailNowAsync(Action<string>? progress = null)
+    public async Task<IReadOnlyList<MailOperationFailure>> CheckMailNowAsync(Action<string>? progress = null,
+        bool dispatchQueued = true)
     {
         MailActivityPolicy?.GoOnline();
-        var failures = new List<MailOperationFailure>();
+        var failures = new System.Collections.Concurrent.ConcurrentBag<MailOperationFailure>();
         progress?.Invoke("Checking incoming mail…");
         if (_pop3Receiver != null)
         {
@@ -95,10 +96,29 @@ public partial class App : Application
             try { await _pop3Receiver.SweepAsync(includeAccountsWithAutomaticCheckDisabled: false); }
             finally { _pop3Receiver.Failed -= OnFailed; }
         }
-        progress?.Invoke("Sending queued messages…");
-        if (ScheduledSender != null)
-            failures.AddRange(await ScheduledSender.DispatchDueAsync(manual: true));
-        progress?.Invoke("Mail check complete.");
+        if (dispatchQueued && ScheduledSender != null)
+        {
+            progress?.Invoke("Sending queued messages…");
+            foreach (var failure in await ScheduledSender.DispatchDueAsync(manual: true))
+                failures.Add(failure);
+        }
+        progress?.Invoke(dispatchQueued ? "Mail check complete." : "POP3 checks complete.");
+        return failures.ToList();
+    }
+
+    internal async Task<IReadOnlyList<string>> CheckHomePop3AccountsAsync(IReadOnlyCollection<Guid> ids,
+        Action<string> progress, CancellationToken ct)
+    {
+        var failures = new List<string>();
+        if (_pop3Receiver == null) return failures;
+        foreach (var account in new AccountService(Profile!).LoadAccounts().Where(a => ids.Contains(a.Id) &&
+                     a.IsActive && a.CheckIncomingMail && a.BackendKind == BackendKind.Pop3Smtp))
+        {
+            ct.ThrowIfCancellationRequested(); progress(account.AccountLabel + ": checking incoming mail…");
+            try { await _pop3Receiver.CheckForFollowUpAsync(account, ct); AccountHealthJournal.Observe(account.Id,"Receive"); }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+            catch (Exception ex) { AccountHealthJournal.Observe(account.Id,"Receive",ex); failures.Add(MailOperationError.Describe("Receive email",account,ex)); }
+        }
         return failures;
     }
 
@@ -303,6 +323,7 @@ public partial class App : Application
             return;
         }
         Profile = profile;
+        AccountHealthJournal.Current = new AccountHealthJournal(profile.ProfileDir);
 
         try { _backupProfileLease = DinamicaBackup.ProfileLease.OpenApplication(profile.ProfileDir); }
         catch (IOException)
@@ -646,7 +667,9 @@ public partial class App : Application
             if (ScheduledSender != null)
             {
                 ruleService.ForwardMessageAsync = new RuleForwardService(effectiveMail, accountService, ScheduledSender).ForwardAsync;
-                ruleService.ReplyTemplateAsync = new RuleReplyTemplateService(effectiveMail, accountService, templateService, ScheduledSender).ReplyAsync;
+                var ruleReplies = new RuleReplyTemplateService(effectiveMail, accountService, templateService, ScheduledSender);
+                ruleService.ReplyTemplateAsync = ruleReplies.ReplyAsync;
+                ruleService.AutoresponseAsync = ruleReplies.AutoresponseAsync;
             }
             if (!probeMode)
                 _pop3Receiver = new PeriodicPop3Receiver(accountService,
@@ -801,6 +824,7 @@ public partial class App : Application
             var watchService = new WatchService(profile);
             var rowLayoutService = new RowLayoutService(profile, configService);
             var flagService = new FlagService(profile, configService, localStore, effectiveMail);
+            ruleService.FlagService = flagService;
             var customDictionary = new CustomDictionaryService(profile);
 
             // Calendar service: harvests events from the local message cache.
@@ -891,6 +915,7 @@ public partial class App : Application
             var mainWindow = new MainWindow(mainVm, effectiveSmtp, accountService, credentialService, effectiveMail, effectiveOAuth, commandRegistry, contactService, configService, localStore, viewService, ruleService, templateService, featureGate, flagService, customDictionary, themeService, _bugReportService, _notificationService, contactSyncService, graphCalendarSync, serverRuleService, providerCatalog, _autoDiscoverService, _truthProbe, rowLayoutService, watchService, profile, ScheduledSender, recipientValidationService);
             RecordStartupStage("construct main window");
             mainWindow.InitializeBackupCoordination();
+            mainWindow.InitializeHome();
             if (_backupRestoredProfile)
                 mainWindow.Loaded += (_, _) => mainWindow.Dispatcher.BeginInvoke(() => MessageBox.Show(mainWindow,
                     "This profile was restored from a backup and is starting OFFLINE.\n\nReview accounts and Scheduled messages before going online: an old backup can contain messages already sent since that backup.",

@@ -99,6 +99,6 @@ public sealed class UnifiedRuleRow
         };
 
         var lhs = conditions.Count == 0 ? "All messages" : "If " + string.Join(" and ", conditions);
-        return $"{lhs} → {action}";
+        return $"{lhs} → {(r.AdditionalActions.Count > 0 || r.Action is RuleAction.SetFlag or RuleAction.Execute ? string.Join(" → ", r.GetActionSteps().Select(a => a.Description)) : action)}";
     }
 }

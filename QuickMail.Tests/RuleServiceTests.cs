@@ -62,7 +62,7 @@ public class RuleServiceTests
     }
 
     [Fact]
-    public void LoadRules_CorruptedFile_ReturnsEmptyList()
+    public void LoadRules_CorruptedFile_ReportsErrorAndPreservesFile()
     {
         var dir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
         try
@@ -71,9 +71,9 @@ public class RuleServiceTests
             File.WriteAllText(Path.Combine(dir, "rules.json"), "this is not json {{{");
 
             var svc = CreateService(dir);
-            var rules = svc.LoadRules();
-            Assert.NotNull(rules);
-            Assert.Empty(rules);
+            Assert.Throws<IOException>(() => svc.LoadRules());
+            Assert.Throws<IOException>(() => svc.SaveRules([]));
+            Assert.Equal("this is not json {{{", File.ReadAllText(Path.Combine(dir, "rules.json")));
         }
         finally { if (Directory.Exists(dir)) Directory.Delete(dir, true); }
     }

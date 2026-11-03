@@ -199,6 +199,62 @@ public sealed class ProductivityFollowUpTests : IDisposable
         Assert.False(receiver.IsRunning);
     }
 
+    [Fact]
+    public async Task Pop3SweepChecksIndependentAccountsConcurrentlyAndIsolatesFailures()
+    {
+        var second = new AccountModel { Id = Guid.NewGuid(), Username = "other@example.com",
+            IsActive = true, BackendKind = BackendKind.Pop3Smtp };
+        _accounts.SaveAccounts([_account, second]);
+        var transport = new ParallelProbeReceiver(_account.Id);
+        using var receiver = new PeriodicPop3Receiver(_accounts, transport, interval: TimeSpan.FromHours(1));
+        var failures = new List<Guid>();
+        var completions = new List<Guid>();
+        receiver.Failed += (account, _, _) => failures.Add(account.Id);
+        receiver.Completed += (account, _) => completions.Add(account.Id);
+
+        var sweep = receiver.SweepAsync();
+        await transport.BothStarted.WaitAsync(TimeSpan.FromSeconds(3));
+        transport.Release();
+        await sweep.WaitAsync(TimeSpan.FromSeconds(3));
+
+        Assert.Equal(2, transport.MaxConcurrent);
+        Assert.Equal([_account.Id], failures);
+        Assert.Equal([second.Id], completions);
+        Assert.False(receiver.IsRunning);
+    }
+
+    private sealed class ParallelProbeReceiver(Guid failingAccount) : IPop3ReceiveService
+    {
+        private readonly TaskCompletionSource _bothStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _active;
+        private int _maxConcurrent;
+        public Task BothStarted => _bothStarted.Task;
+        public int MaxConcurrent => Volatile.Read(ref _maxConcurrent);
+        public void Release() => _release.TrySetResult();
+        public Task<Pop3ReceiveResult> CheckNowAsync(AccountModel account, CancellationToken ct = default)
+            => CheckAutomaticallyAsync(account, ct);
+        public async Task<Pop3ReceiveResult> CheckAutomaticallyAsync(AccountModel account, CancellationToken ct = default)
+        {
+            var active = Interlocked.Increment(ref _active);
+            var observed = Volatile.Read(ref _maxConcurrent);
+            while (active > observed)
+            {
+                var previous = Interlocked.CompareExchange(ref _maxConcurrent, active, observed);
+                if (previous == observed) break;
+                observed = previous;
+            }
+            if (active == 2) _bothStarted.TrySetResult();
+            try
+            {
+                await _release.Task.WaitAsync(ct);
+                if (account.Id == failingAccount) throw new IOException("Simulated account failure");
+                return new Pop3ReceiveResult(0, 0, 0, false);
+            }
+            finally { Interlocked.Decrement(ref _active); }
+        }
+    }
+
     private sealed class FollowUpReceiver : IPop3ReceiveService
     {
         public int ManualChecks { get; private set; }

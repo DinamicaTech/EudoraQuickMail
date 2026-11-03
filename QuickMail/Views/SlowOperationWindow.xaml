@@ -15,6 +15,8 @@
                          AutomationProperties.Name="Operation progress"/>
             <TextBlock x:Name="OperationStatus" Text="Working…"
                        Foreground="{DynamicResource Theme.TextSecondary}" TextWrapping="Wrap"/>
+            <Button x:Name="CancelOperation" Content="Cancel search" Visibility="Collapsed"
+                    Margin="0,12,0,0" HorizontalAlignment="Right" Padding="12,4" Click="CancelOperation_Click"/>
         </StackPanel>
     </Border>
 </Window>

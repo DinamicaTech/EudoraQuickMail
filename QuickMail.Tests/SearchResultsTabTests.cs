@@ -30,11 +30,44 @@ public sealed class SearchResultsTabTests : IDisposable
         _vm.ActiveTab = _vm.OpenTabs.OfType<MessageListTabViewModel>().Single();
     }
 
+    [Fact]
+    public void HomePreservesRowsSelectionAndCannotClose()
+    {
+        _vm.EnableHomeTab();
+        var home = _vm.OpenTabs.OfType<HomeTabViewModel>().Single();
+        var origin = _vm.ActiveTab;
+        var row = Message("home");
+        var rows = new BatchObservableCollection<MailMessageSummary>([row]);
+        _vm.Messages = rows; _vm.SelectedMessage = row;
+        _vm.ActiveTab = home;
+        _vm.CloseTab(home);
+        Assert.Contains(home,_vm.OpenTabs);
+        _vm.ActiveTab = origin;
+        Assert.Same(rows,_vm.Messages);
+        Assert.Same(row,_vm.SelectedMessage);
+    }
+
     private MailMessageSummary Message(string id, string folder = "In") => new()
     {
         MessageId = id, AccountId = _account.Id, FolderName = folder,
         Subject = "needle " + id, Date = DateTimeOffset.Now, InternetMessageId = $"<{id}@example.com>"
     };
+
+    [Fact]
+    public async Task GlobalSearchIncludesOtherFoldersAndAccountsWhileEnterScopeStaysLocal()
+    {
+        var other=new AccountModel {Id=Guid.NewGuid(),IsActive=true,BackendKind=BackendKind.LocalArchive};
+        _vm.LoadAccountList([_account,other]);
+        var otherMessage=Message("other","Archive");otherMessage.AccountId=other.Id;
+        await _store.UpsertSummariesAsync([Message("in"),Message("out","Out"),otherMessage]);
+        await _vm.RunQuickSearchInTabAsync("needle",false);
+        Assert.Single(_vm.Messages);Assert.False(_vm.SearchEverywhere);
+        await _vm.RunQuickSearchInTabAsync("needle",true);
+        Assert.Equal(3,_vm.Messages.Count);Assert.True(_vm.SearchEverywhere);
+        Assert.Contains(_vm.Messages,m=>m.AccountId==other.Id);
+        await _vm.RunQuickSearchInTabAsync("needle",false);
+        Assert.Single(_vm.Messages);Assert.False(_vm.SearchEverywhere);
+    }
 
     [Fact]
     public async Task SearchRestoresOriginalRowsSelectionAndScopeAndReusesResultsTab()

@@ -60,7 +60,7 @@ public sealed class MailProductivityFeatureTests : IDisposable
     }
 
     [Fact]
-    public async Task Snooze_HidesFromFolderButNotSearch_ThenReturnsUnread()
+    public async Task Snooze_ParksInFolderAndRemainsSearchable_ThenReturnsUnread()
     {
         Directory.CreateDirectory(_directory);
         var store = new LocalStoreService(new ProfileContext(_directory));
@@ -93,16 +93,98 @@ public sealed class MailProductivityFeatureTests : IDisposable
 
         Assert.Empty((await store.LoadLocalPageAsync(account.Id, "Inbox", 100, 0)).Messages);
         Assert.Empty(await store.LoadFolderSummariesAsync(account.Id, "Inbox"));
-        Assert.Single((await store.SearchLocalMessagesAsync(
+        Assert.Empty((await store.SearchLocalMessagesAsync(
             new LocalSearchQuery("needle", account.Id, "Inbox"))).Messages);
+        Assert.Single((await store.SearchLocalMessagesAsync(
+            new LocalSearchQuery("needle", account.Id))).Messages);
         var snoozed = Assert.Single(await store.LoadSnoozedMessagesAsync([account.Id]));
         Assert.Equal(wakeAt, snoozed.Date);
+        Assert.Equal("__QuickMail/Snooze", snoozed.FolderName);
+        Assert.Equal("Inbox", await store.GetSnoozedOriginalFolderAsync(
+            account.Id, snoozed.FolderName, snoozed.MessageId));
+        Assert.Empty(await store.LoadFolderMessageIdDatesUnfilteredAsync(account.Id, "Inbox"));
+        Assert.NotNull(await store.LoadDetailAsync(account.Id, snoozed.FolderName, snoozed.MessageId));
+
+        // A remote refresh still lists the original ID. It must not recreate an Inbox copy
+        // while that ID is parked in Snooze.
+        await store.UpsertSummariesAsync([new MailMessageSummary
+        {
+            AccountId = account.Id, FolderName = "Inbox", MessageId = message.MessageId,
+            Subject = message.Subject, Date = message.Date,
+        }]);
+        Assert.Empty(await store.LoadFolderSummariesAsync(account.Id, "Inbox"));
 
         var awakened = await store.WakeDueSnoozedMessagesAsync(DateTimeOffset.UtcNow.AddHours(2));
         Assert.Single(awakened);
         Assert.False(awakened[0].IsRead);
         var returned = Assert.Single((await store.LoadLocalPageAsync(account.Id, "Inbox", 100, 0)).Messages);
         Assert.False(returned.IsRead);
+        Assert.NotNull(await store.LoadDetailAsync(account.Id, "Inbox", returned.MessageId));
+        Assert.Null(await store.GetSnoozedOriginalFolderAsync(
+            account.Id, snoozed.FolderName, snoozed.MessageId));
+    }
+
+    [Fact]
+    public async Task Snooze_ExistingHiddenMessageMigratesIntoTheRealFolder()
+    {
+        Directory.CreateDirectory(_directory);
+        var store = new LocalStoreService(new ProfileContext(_directory));
+        store.Initialize();
+        var account = new AccountModel
+        {
+            Id = Guid.NewGuid(), BackendKind = BackendKind.Pop3Smtp,
+            AccountName = "POP", IsActive = true,
+        };
+        await store.EnsureLocalSystemFoldersAsync([account]);
+        var message = Detail(account.Id, "In", "legacy-snooze", "legacy body");
+        await store.SaveLocalMessageAsync(message);
+        var wakeAt = DateTimeOffset.UtcNow.AddDays(7);
+        await using (var connection = new SqliteConnection($"Data Source={Path.Combine(_directory, "mail.db")}"))
+        {
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = """
+                INSERT INTO SnoozedMessage(account_id,folder_name,unique_id,wake_ticks)
+                VALUES($account,'In','legacy-snooze',$wake);
+                """;
+            command.Parameters.AddWithValue("$account", account.Id.ToString());
+            command.Parameters.AddWithValue("$wake", wakeAt.UtcTicks);
+            await command.ExecuteNonQueryAsync();
+        }
+
+        await store.EnsureLocalSystemFoldersAsync([account]);
+
+        Assert.Empty(await store.LoadFolderSummariesAsync(account.Id, "In"));
+        var parked = Assert.Single(await store.LoadSnoozedMessagesAsync([account.Id]));
+        Assert.Equal("Snooze", parked.FolderName);
+        Assert.Equal("In", await store.GetSnoozedOriginalFolderAsync(
+            account.Id, parked.FolderName, parked.MessageId));
+        Assert.Single(await store.WakeDueSnoozedMessagesAsync(wakeAt));
+        Assert.Single(await store.LoadFolderSummariesAsync(account.Id, "In"));
+    }
+
+    [Fact]
+    public async Task Snooze_CanBeCancelledBeforeMovingOrDeletingTheOriginal()
+    {
+        Directory.CreateDirectory(_directory);
+        var store = new LocalStoreService(new ProfileContext(_directory));
+        store.Initialize();
+        var account = new AccountModel
+        {
+            Id = Guid.NewGuid(), BackendKind = BackendKind.Pop3Smtp,
+            AccountName = "POP", IsActive = true,
+        };
+        await store.EnsureLocalSystemFoldersAsync([account]);
+        var message = Detail(account.Id, "In", "cancel-snooze", "body");
+        message.IsRead = true;
+        await store.SaveLocalMessageAsync(message);
+        await store.SnoozeMessagesAsync([new SnoozedMessageKey(account.Id, "In", message.MessageId)],
+            DateTimeOffset.UtcNow.AddDays(7));
+
+        Assert.Equal("In", await store.CancelSnoozeAsync(account.Id, "Snooze", message.MessageId));
+        Assert.Empty(await store.LoadSnoozedMessagesAsync([account.Id]));
+        Assert.True(Assert.Single(await store.LoadFolderSummariesAsync(account.Id, "In")).IsRead);
+        Assert.NotNull(await store.LoadDetailAsync(account.Id, "In", message.MessageId));
     }
 
     [Fact]
@@ -148,6 +230,10 @@ public sealed class MailProductivityFeatureTests : IDisposable
             original.InternetMessageId);
 
         await store.MoveLocalMessagesAsync(accountId, "Inbox", "Archive", [original.MessageId]);
+        var sentCopy = Detail(accountId, "Inbox", "sent-copy", "sent preview");
+        sentCopy.InternetMessageId = original.InternetMessageId;
+        sentCopy.Date = original.Date.AddDays(1);
+        await store.SaveLocalMessageAsync(sentCopy);
         var resolved = await store.ResolveSnoozeReminderTargetAsync(target);
 
         Assert.NotNull(resolved);

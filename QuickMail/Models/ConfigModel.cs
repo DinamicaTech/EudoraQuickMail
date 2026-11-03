@@ -49,6 +49,8 @@ public class ConfigModel
 
     /// <summary>Show today's compact appointment list above the folder tree.</summary>
     public bool ShowTodayAgenda { get; set; } = true;
+    public bool AttachmentHoverPreview { get; set; } = true;
+    public bool ShowHomeAfterInactivity { get; set; } = true;
 
     /// <summary>
     /// Keep one background navigation tab pointing at the destination of the latest successful

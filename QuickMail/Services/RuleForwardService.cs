@@ -12,6 +12,8 @@ public sealed class RuleForwardService(IMailService mail, IAccountService accoun
 
     public static string ValidateDestination(string? value)
     {
+        if (value != null && InternetAddressList.TryParse(value.Replace(';', ','), out var destinations) && destinations.Mailboxes.Count() > 1)
+            throw new ArgumentException("Each Forward action accepts one email address. Create two Forward actions, each with a different recipient, to forward to two addresses.");
         if (string.IsNullOrWhiteSpace(value) || value.Contains('\r') || value.Contains('\n') ||
             !MailboxAddress.TryParse(value, out var address) || !address.Address.Contains('@'))
             throw new ArgumentException("Forward requires one valid destination email address.");

@@ -104,6 +104,47 @@ public class MailRule
     public string? TargetFolder { get; set; }
     public string? ForwardTo { get; set; }
     public int? ReplyTemplateId { get; set; }
+    public string? AutoResponseSubject { get; set; }
+    public string? AutoResponseBody { get; set; }
+    public string? FlagId { get; set; }
+    public string? CommandLine { get; set; }
+    public bool AddSubjectToCommandLine { get; set; }
+    /// <summary>Optional extra actions. Legacy rules keep their original single-action fields.</summary>
+    public List<RuleActionStep> AdditionalActions { get; set; } = [];
+
+    public List<RuleActionStep> GetActionSteps() =>
+        new[] { new RuleActionStep { Action = Action, TargetFolder = TargetFolder, ForwardTo = ForwardTo,
+            ReplyTemplateId = ReplyTemplateId,
+            AutoResponseSubject = AutoResponseSubject ?? (Action == RuleAction.Autoresponse ? "[SUBJECT]" : null),
+            AutoResponseBody = AutoResponseBody ?? (Action == RuleAction.Autoresponse ? "[BODY]" : null),
+            FlagId = FlagId, CommandLine = CommandLine,
+            AddSubjectToCommandLine = AddSubjectToCommandLine } }
+        .Concat(AdditionalActions).OrderBy(a => a.IsDestination).ToList();
+
+    public void SetActionSteps(IEnumerable<RuleActionStep> steps)
+    {
+        var all = steps.ToList();
+        if (all.Count == 0) throw new ArgumentException("At least one action is required.");
+        // Keep the single destination in the legacy fields: folder rename/cleanup and destination
+        // tabs can continue using the same stable folder reference.
+        var primary = all.FirstOrDefault(a => a.IsDestination) ?? all[0];
+        Action = primary.Action; TargetFolder = primary.TargetFolder; ForwardTo = primary.ForwardTo;
+        ReplyTemplateId = primary.ReplyTemplateId; FlagId = primary.FlagId;
+        AutoResponseSubject = primary.AutoResponseSubject; AutoResponseBody = primary.AutoResponseBody;
+        CommandLine = primary.CommandLine; AddSubjectToCommandLine = primary.AddSubjectToCommandLine;
+        AdditionalActions = all.Where(a => !ReferenceEquals(a, primary)).Select(a => a.Copy()).ToList();
+    }
+
+    public MailRule ForAction(RuleActionStep step)
+    {
+        var copy = (MailRule)MemberwiseClone();
+        copy.AdditionalActions = [];
+        copy.Action = step.Action; copy.TargetFolder = step.TargetFolder; copy.ForwardTo = step.ForwardTo;
+        copy.ReplyTemplateId = step.ReplyTemplateId; copy.FlagId = step.FlagId; copy.AlsoMarkAsRead = false;
+        copy.AutoResponseSubject = step.AutoResponseSubject; copy.AutoResponseBody = step.AutoResponseBody;
+        copy.CommandLine = step.CommandLine; copy.AddSubjectToCommandLine = step.AddSubjectToCommandLine;
+        return copy;
+    }
     /// <summary>Inclusive local date. Null means no expiration.</summary>
     public DateTime? ActiveUntil { get; set; }
     [JsonIgnore]
@@ -125,4 +166,49 @@ public enum RuleAction
     Delete,
     Forward,
     ReplyTemplate,
+    SetFlag,
+    Execute,
+    Autoresponse,
+}
+
+public partial class RuleActionStep : CommunityToolkit.Mvvm.ComponentModel.ObservableObject
+{
+    [CommunityToolkit.Mvvm.ComponentModel.ObservableProperty]
+    private RuleAction _action = RuleAction.MoveToFolder;
+    [CommunityToolkit.Mvvm.ComponentModel.ObservableProperty] private string? _targetFolder;
+    [CommunityToolkit.Mvvm.ComponentModel.ObservableProperty] private string? _forwardTo;
+    [CommunityToolkit.Mvvm.ComponentModel.ObservableProperty] private int? _replyTemplateId;
+    [CommunityToolkit.Mvvm.ComponentModel.ObservableProperty] private string? _autoResponseSubject;
+    [CommunityToolkit.Mvvm.ComponentModel.ObservableProperty] private string? _autoResponseBody;
+    [CommunityToolkit.Mvvm.ComponentModel.ObservableProperty] private string? _flagId;
+    [CommunityToolkit.Mvvm.ComponentModel.ObservableProperty] private string? _commandLine;
+    [CommunityToolkit.Mvvm.ComponentModel.ObservableProperty] private bool _addSubjectToCommandLine;
+    [JsonIgnore] public bool IsDestination => Action is RuleAction.MoveToFolder or RuleAction.Delete;
+    [JsonIgnore] public string ForwardRecipientWarning => ForwardTo != null &&
+        MimeKit.InternetAddressList.TryParse(ForwardTo.Replace(';', ','), out var addresses) && addresses.Mailboxes.Count() > 1
+        ? "Each Forward action accepts one email address. Create two Forward actions, each with a different recipient, to forward to two addresses." : "";
+    [JsonIgnore] public string Description => Action switch
+    {
+        RuleAction.MoveToFolder => $"Move to {TargetFolder ?? "(choose folder)"}",
+        RuleAction.Delete => "Move to Trash",
+        RuleAction.Forward => $"Forward to {ForwardTo ?? "(recipient)"}",
+        RuleAction.ReplyTemplate => $"Reply template {ReplyTemplateId}",
+        RuleAction.Autoresponse => "Autoresponse",
+        RuleAction.SetFlag => FlagId == null ? "Remove flag" : "Set flag",
+        RuleAction.MarkAsRead => "Mark as read",
+        RuleAction.MarkAsUnread => "Mark as unread",
+        RuleAction.Execute => "Execute command",
+        _ => Action.ToString()
+    };
+    protected override void OnPropertyChanged(System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        base.OnPropertyChanged(e);
+        if (e.PropertyName == nameof(ForwardTo)) base.OnPropertyChanged(new System.ComponentModel.PropertyChangedEventArgs(nameof(ForwardRecipientWarning)));
+        if (e.PropertyName != nameof(Description)) base.OnPropertyChanged(new System.ComponentModel.PropertyChangedEventArgs(nameof(Description)));
+    }
+    public RuleActionStep Copy() => new() { Action = Action, TargetFolder = TargetFolder,
+        ForwardTo = ForwardTo, ReplyTemplateId = ReplyTemplateId, FlagId = FlagId,
+        AutoResponseSubject = AutoResponseSubject ?? (Action == RuleAction.Autoresponse ? "[SUBJECT]" : null),
+        AutoResponseBody = AutoResponseBody ?? (Action == RuleAction.Autoresponse ? "[BODY]" : null),
+        CommandLine = CommandLine, AddSubjectToCommandLine = AddSubjectToCommandLine };
 }

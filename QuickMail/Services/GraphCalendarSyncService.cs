@@ -170,6 +170,7 @@ public sealed class GraphCalendarSyncService : IGraphCalendarSyncService
                 var events = await FetchAccountRangeAsync(account, startUtc, endUtc, ct);
                 await _store.DeleteGraphCalendarEventsInRangeAsync(account.Id, startUtc, endUtc);
                 foreach (var evt in events) await _store.UpsertCalendarEventAsync(evt);
+                AccountHealthJournal.Observe(account.Id, "Calendar");
                 accountsSynced++;
                 eventsFetched += events.Count;
             }
@@ -177,6 +178,7 @@ public sealed class GraphCalendarSyncService : IGraphCalendarSyncService
             catch (Exception ex)
             {
                 LogService.Log($"Calendar day sync failed for {account.AccountLabel}", ex);
+                AccountHealthJournal.Observe(account.Id, "Calendar", ex);
                 error = ex.Message;
             }
         }
@@ -242,10 +244,21 @@ public sealed class GraphCalendarSyncService : IGraphCalendarSyncService
     /// <summary>Dispatches one account to its provider (Microsoft / Google / iCloud CalDAV). May throw.</summary>
     private async Task<int> SyncOneAccountAsync(AccountModel account, CancellationToken ct)
     {
-        if (IsGraphEligible(account))  return await SyncAccountAsync(account, ct);
-        if (IsGoogleEligible(account)) return await SyncGoogleAccountAsync(account, ct);
-        if (IsICloudCalendarEligible(account)) return await SyncICloudCalendarAsync(account, ct);
-        return 0;
+        try
+        {
+            int count;
+            if (IsGraphEligible(account)) count = await SyncAccountAsync(account, ct);
+            else if (IsGoogleEligible(account)) count = await SyncGoogleAccountAsync(account, ct);
+            else if (IsICloudCalendarEligible(account)) count = await SyncICloudCalendarAsync(account, ct);
+            else return 0;
+            AccountHealthJournal.Observe(account.Id, "Calendar");
+            return count;
+        }
+        catch (Exception ex)
+        {
+            AccountHealthJournal.Observe(account.Id, "Calendar", ex);
+            throw;
+        }
     }
 
     /// <summary>

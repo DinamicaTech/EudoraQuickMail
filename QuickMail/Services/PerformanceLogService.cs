@@ -72,7 +72,7 @@ public static class PerformanceLogService
             Directory.CreateDirectory(Path.GetDirectoryName(_logFile)!);
             var suffix = string.IsNullOrWhiteSpace(details) ? string.Empty : $" | {details}";
             var line = $"{operation} | {elapsedMilliseconds.ToString("0.0", CultureInfo.InvariantCulture)} ms{suffix} | {DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}{Environment.NewLine}";
-            lock (WriteGate) File.AppendAllText(_logFile, line);
+            lock (WriteGate) Helpers.BoundedLogFile.Append(_logFile, line);
         }
         catch { }
     }

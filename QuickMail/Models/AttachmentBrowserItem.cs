@@ -7,6 +7,7 @@ public sealed record AttachmentBrowserItem(MailMessageSummary Message, Attachmen
     public string Name => Attachment.FileName;
     public string Extension => Path.GetExtension(Name);
     public long Size => Attachment.FileSize;
+    public double SizeMb => Size / 1_048_576.0;
     public DateTimeOffset Date => Message.Date;
     public string Sender => Message.From;
     public string Subject => Message.Subject;
@@ -17,5 +18,6 @@ public sealed record AttachmentBrowserItem(MailMessageSummary Message, Attachmen
 
 public sealed record AttachmentRecoveryCandidate(string Path, long Size, string Evidence)
 {
+    public double SizeMb => Size / 1_048_576.0;
     public override string ToString() => $"{Path}, {Evidence}";
 }

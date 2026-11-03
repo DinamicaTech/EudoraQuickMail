@@ -19,6 +19,7 @@ public partial class AccountManagerDialog : Window
         _vm = vm;
         InitializeComponent();
         DataContext = vm;
+        _ = new ConnectionTestIndicator(this, vm);
         vm.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName == nameof(vm.StatusText) && !string.IsNullOrEmpty(vm.StatusText))
@@ -167,6 +168,7 @@ public partial class AccountManagerDialog : Window
 
     private void Window_Loaded(object sender, RoutedEventArgs e)
     {
+        Height = Math.Min(Height, SystemParameters.WorkArea.Height * 0.95);
         if (_vm.Accounts.Count == 0)
         {
             // First-run "new account" experience: there's no account row to land on, so put keyboard

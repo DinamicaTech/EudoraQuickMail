@@ -282,6 +282,52 @@ public class ClientRulesOnGraphTests : IDisposable
     }
 
     [Fact]
+    public async Task RunOnExisting_DoesNotProcessMessagesParkedBySnooze()
+    {
+        var h = Build(MoveRule(_graphAccountId));
+        await _store.EnsureLocalSystemFoldersAsync([new AccountModel
+        {
+            Id = _graphAccountId, BackendKind = BackendKind.MicrosoftGraph, IsActive = true,
+        }]);
+        await _store.UpsertSummariesAsync([Cached("active", "INBOX"), Cached("parked", "INBOX")]);
+        await _store.SnoozeMessagesAsync(
+            [new SnoozedMessageKey(_graphAccountId, "INBOX", "parked")],
+            DateTimeOffset.UtcNow.AddDays(7));
+
+        var removed = await h.Rules.ApplyRulesToExistingAsync(_store,
+            new Dictionary<Guid, string> { [_graphAccountId] = "INBOX" }, CancellationToken.None);
+
+        Assert.Equal(["active"], Assert.Single(h.Graph.Actions).Ids);
+        Assert.Equal(["active"], removed.Select(message => message.MessageId).ToList());
+        Assert.Equal("parked", Assert.Single(await _store.LoadSnoozedMessagesAsync()).MessageId);
+    }
+
+    [Fact]
+    public async Task AutomaticRule_DoesNotProcessSnoozedMessageFetchedAgain()
+    {
+        var rule = MoveRule(_graphAccountId);
+        rule.ApplyAutomatically = true;
+        var h = Build(rule);
+        await _store.EnsureLocalSystemFoldersAsync([new AccountModel
+        {
+            Id = _graphAccountId, BackendKind = BackendKind.MicrosoftGraph, IsActive = true,
+        }]);
+        var parked = Cached("parked", "INBOX");
+        await _store.UpsertSummariesAsync([parked]);
+        await _store.SnoozeMessagesAsync(
+            [new SnoozedMessageKey(_graphAccountId, "INBOX", "parked")],
+            DateTimeOffset.UtcNow.AddDays(7));
+
+        var (matched, removed) = await h.Rules.ApplyAutomaticRulesAsync(
+            [parked], _graphAccountId, CancellationToken.None);
+
+        Assert.Equal(0, matched);
+        Assert.Empty(removed);
+        Assert.Empty(h.Graph.Actions);
+        Assert.Single(await _store.LoadSnoozedMessagesAsync());
+    }
+
+    [Fact]
     public async Task RunOnExisting_WithAlsoFilterOut_IncludesOnlyPhysicalSentMailbox()
     {
         var rule = MoveRule(_graphAccountId);

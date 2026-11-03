@@ -39,20 +39,26 @@ public sealed class UpdateHelpTests : IDisposable
     [Fact]
     public async Task DisabledCheckExplainsMarkerAndCanBeRetriedWithoutRestart()
     {
+        string? visibleResult = null;
+        _vm.ManualUpdateResultRequested += (_, text) => visibleResult = text;
         _updates.DisabledReason = "Blocked by quickmail-standalone-install";
         await _vm.CheckForUpdatesNowCommand.ExecuteAsync(null);
         Assert.Equal(0, _updates.Calls);
         Assert.Contains("disabled", _vm.UpdateAvailableText);
         Assert.Contains("quickmail-standalone-install", _vm.UpdateCheckDetails);
+        Assert.Contains("quickmail-standalone-install", visibleResult);
         _updates.DisabledReason = null;
         await _vm.CheckForUpdatesNowCommand.ExecuteAsync(null);
         Assert.Equal(1, _updates.Calls);
         Assert.Contains("No updates", _vm.UpdateAvailableText);
+        Assert.Contains("No updates", visibleResult);
     }
 
     [Fact]
     public async Task FailureDoesNotReportUpToDateOrOpenStaleUpdate()
     {
+        string? visibleResult = null;
+        _vm.ManualUpdateResultRequested += (_, text) => visibleResult = text;
         _updates.Result = new UpdateInfo("9.0.0", "https://github.com/DinamicaTech/EudoraQuickMail/releases/tag/v9.0.0");
         await _vm.CheckForUpdateInBackgroundAsync();
         _updates.Error = new IOException("Network unavailable");
@@ -61,6 +67,7 @@ public sealed class UpdateHelpTests : IDisposable
         await _vm.CheckForUpdatesNowCommand.ExecuteAsync(null);
         Assert.Contains("Could not check", _vm.UpdateAvailableText);
         Assert.Contains("Network unavailable", _vm.UpdateCheckDetails);
+        Assert.Contains("Network unavailable", visibleResult);
         Assert.Empty(_vm.UpdateReleaseUrl);
         Assert.False(opened);
         Assert.True(_vm.CheckForUpdatesNowCommand.CanExecute(null));

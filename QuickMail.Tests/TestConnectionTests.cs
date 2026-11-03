@@ -225,6 +225,73 @@ public class TestConnectionTests
 
     // ── Doubles ──────────────────────────────────────────────────────────────────
 
+    [Fact]
+    public async Task SmtpSocketFailureIncludesEndpointModeAndActionableCause()
+    {
+        var vm = WithGmailSettings(NewVm(smtp: new StubSmtpService
+        { VerifyFailure = new System.Net.Sockets.SocketException((int)System.Net.Sockets.SocketError.TimedOut) }));
+        await vm.TestConnectionCommand.ExecuteAsync(null);
+        Assert.Contains("SMTP smtp.gmail.com:", vm.StatusText);
+        Assert.Contains("Elapsed:", vm.StatusText);
+        Assert.Contains("TimedOut", vm.StatusText);
+        Assert.Contains("does not establish that the password is wrong", vm.StatusText);
+        Assert.False(vm.IsTestingConnection);
+    }
+
+    [Fact]
+    public async Task TestCanBeCancelledAndIndicatorEndsBeforeResultIsShown()
+    {
+        var mail = new PendingConnection();
+        var smtp = new StubSmtpService();
+        var vm = WithGmailSettings(NewVm(mail, smtp));
+        vm.ConnectionTestCompleted += (_, _) => Assert.False(vm.IsTestingConnection);
+        var task = vm.TestConnectionCommand.ExecuteAsync(null);
+        await mail.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.True(vm.IsTestingConnection);
+        Assert.Contains("IMAP", vm.ConnectionTestStage);
+        vm.CancelConnectionTest();
+        await task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Contains("cancelled", vm.StatusText);
+        Assert.False(vm.IsBusy);
+        Assert.Equal(0, smtp.VerifyCalls);
+    }
+
+    [Fact]
+    public void DiagnosticsIncludeInnerSocketCodeAndRedactKnownPassword()
+    {
+        var error = new InvalidOperationException("secret-password", new System.Net.Sockets.SocketException((int)System.Net.Sockets.SocketError.ConnectionRefused));
+        var report = ConnectionTestTrace.Describe(error, "SMTP host:587 connecting", TimeSpan.FromSeconds(24), "secret-password");
+        Assert.Contains("ConnectionRefused", report);
+        Assert.Contains("SMTP host:587 connecting", report);
+        Assert.Contains("[redacted]", report);
+        Assert.DoesNotContain("secret-password", report);
+    }
+
+    [Fact]
+    public void ProgressScopesDoNotLeakToOtherOperations()
+    {
+        var first = new List<string>(); var second = new List<string>();
+        using (ConnectionTestTrace.Begin(first.Add))
+        {
+            ConnectionTestTrace.Report("connect");
+            using (ConnectionTestTrace.Begin(second.Add)) ConnectionTestTrace.Report("auth");
+            ConnectionTestTrace.Report("disconnect");
+        }
+        ConnectionTestTrace.Report("unrelated");
+        Assert.Equal(new[] { "connect", "disconnect" }, first);
+        Assert.Equal(new[] { "auth" }, second);
+    }
+
+    private sealed class PendingConnection : StubImapMailServiceBase
+    {
+        public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public override async Task ConnectAsync(AccountModel account, string? password = null, CancellationToken ct = default)
+        {
+            Started.SetResult();
+            await Task.Delay(Timeout.Infinite, ct);
+        }
+    }
+
     private sealed class RecordingConnectMailService : StubImapMailServiceBase
     {
         public int ConnectCalls { get; private set; }

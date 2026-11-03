@@ -5,7 +5,7 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         mc:Ignorable="d"
         Title="Manage Accounts"
-        Height="660" Width="720"
+        Height="960" Width="720"
         MinHeight="500" MinWidth="580"
         WindowStartupLocation="CenterOwner"
         ResizeMode="CanResize"

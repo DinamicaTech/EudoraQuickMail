@@ -134,6 +134,8 @@ public partial class ServerRuleEditorViewModel : ObservableObject
     /// </summary>
     public static ServerRuleEditorViewModel ForEditClient(MailRule rule)
     {
+        if (rule.AdditionalActions.Count > 0 || rule.Action is RuleAction.SetFlag or RuleAction.Forward or RuleAction.ReplyTemplate or RuleAction.Autoresponse or RuleAction.Execute)
+            throw new InvalidOperationException("Use the client Rules Manager to edit this rule without losing actions.");
         var vm = new ServerRuleEditorViewModel
         {
             IsNew = false,

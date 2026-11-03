@@ -32,6 +32,23 @@ public class RuleEnhancementTests
     }
 
     [Fact]
+    public void AutoresponseFieldsSurvivePersistenceAndMultipleActions()
+    {
+        var rule = new MailRule { Name = "Answer and file", Action = RuleAction.Autoresponse,
+            AutoResponseSubject = "Re: [SUBJECT]", AutoResponseBody = "Original:\n[BODY]" };
+        rule.SetActionSteps([.. rule.GetActionSteps(), new RuleActionStep
+        { Action = RuleAction.MoveToFolder, TargetFolder = "Archive" }]);
+
+        var restored = System.Text.Json.JsonSerializer.Deserialize<MailRule>(
+            System.Text.Json.JsonSerializer.Serialize(rule))!;
+        RuleService.ValidateActionSteps(restored);
+        Assert.Equal(RuleAction.MoveToFolder, restored.GetActionSteps()[^1].Action);
+        var reply = Assert.Single(restored.GetActionSteps().Where(step => step.Action == RuleAction.Autoresponse));
+        Assert.Equal("Re: [SUBJECT]", reply.AutoResponseSubject);
+        Assert.Equal("Original:\n[BODY]", reply.AutoResponseBody);
+    }
+
+    [Fact]
     public void ExpirationIsInclusiveAndDoesNotDeleteRule()
     {
         var rule = new MailRule { ActiveUntil = DateTime.Today };

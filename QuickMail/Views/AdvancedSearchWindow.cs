@@ -32,8 +32,10 @@ public sealed class AdvancedSearchWindow : Window
             if (criteria.Count > 0 && SearchRequested is not null)
             {
                 _sessionCriteria = criteria;
-                await SearchRequested(criteria);
+                // Release the modal dialog before starting the worker/indicator so the
+                // main window and Cancel search remain usable during a long query.
                 Close();
+                await SearchRequested(criteria);
             }
         };
         close.Click += (_, _) => Close();

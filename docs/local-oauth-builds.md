@@ -10,6 +10,20 @@ Run PowerShell as the Windows user who will compile:
 ./scripts/Local-OAuthBuild.ps1 -Action Publish -Version 0.8.78.1
 ```
 
+For day-to-day local EXE builds, use the short command from any working directory:
+
+```powershell
+& 'C:\Docs\Codigo\QuickMail\scripts\Build-LocalExe.ps1'
+```
+
+Without `-Version`, it asks for the version and offers the most recently completed local build
+for the selected runtime as the default. Press Enter to use it or type another version. If there
+is no completed local build, it offers the version in `QuickMail.csproj`. It checks the encrypted
+OAuth credential, publishes EQM with Assets, BackupAgent and Updater, and prints the new EXE and
+folder paths. Copy the **entire folder** for a local installation. You can specify
+`-Version 0.8.86.11` to skip the prompt or `-Runtime win-arm64`; `-CheckOnly` validates
+prerequisites and shows the chosen version without compiling. It never uploads to GitHub.
+
 The version is an example; choose the intended test version explicitly. It appears in the application caption. `-Runtime win-arm64` is also supported.
 
 Credentials are stored outside Git, by default at `C:\Docs\QuickMail.BuildSecrets\google-oauth.dpapi`, encrypted with Windows DPAPI CurrentUser. A different machine/user must import again; retain the original JSON securely. Never paste credentials into chat, commit them, or include them in diagnostic logs. Import does not delete the original JSON. `-Replace` explicitly permits replacing an existing store.

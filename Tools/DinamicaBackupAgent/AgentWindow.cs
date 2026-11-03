@@ -24,7 +24,7 @@ public sealed partial class AgentWindow : Window
     private readonly DataGrid _history = new() { IsReadOnly = true, AutoGenerateColumns = false, MinHeight = 180 };
     private CancellationTokenSource? _operation;
 
-    public AgentWindow(BackupJob job, string jobPath)
+    public AgentWindow(BackupJob job, string jobPath, string? initialTab = null)
     {
         _job = job; _jobPath = Path.GetFullPath(jobPath);
         Icon = System.Windows.Media.Imaging.BitmapFrame.Create(new Uri("pack://application:,,,/DinamicaBackupAgent;component/Assets/DinamicaBackup.ico"));
@@ -38,6 +38,13 @@ public sealed partial class AgentWindow : Window
         Closing += (_, e) => { if (_operation != null) { e.Cancel = true; _status.Text = "Use Cancel and wait for the operation to finish before closing."; } };
         var originalConfiguration = System.Text.Json.JsonSerializer.Serialize(job, JsonFiles.Options);
         BuildConfiguration();
+        if (!string.IsNullOrWhiteSpace(initialTab))
+        {
+            _tabs.SelectedItem = _tabs.Items.OfType<TabItem>().FirstOrDefault(t =>
+                string.Equals(t.Header?.ToString(), initialTab, StringComparison.OrdinalIgnoreCase)) ?? _tabs.Items[0];
+            if (string.Equals(initialTab, "History", StringComparison.OrdinalIgnoreCase))
+                Loaded += (_, _) => RefreshHistory();
+        }
         _needsInitialSave = !File.Exists(_jobPath) || originalConfiguration != System.Text.Json.JsonSerializer.Serialize(job, JsonFiles.Options);
         _savedConfiguration = ConfigurationSnapshot();
         UpdateSaveState();

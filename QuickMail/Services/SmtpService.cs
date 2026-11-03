@@ -177,20 +177,26 @@ public class SmtpService : ISendMailService
         var ssl = MailSecurity.ForSmtp(account);
 
         LogService.Log($"SmtpService: verifying {account.SmtpHost}:{account.SmtpPort} ssl={ssl}");
+        var endpoint = $"SMTP {account.SmtpHost}:{account.SmtpPort} ({ssl})";
+        ConnectionTestTrace.Report(endpoint + ": connecting (DNS, TCP, server greeting and TLS)…");
         await client.ConnectAsync(account.SmtpHost, account.SmtpPort, ssl, ct);
 
         if (account.AuthType is AuthType.OAuth2Microsoft or AuthType.OAuth2Google)
         {
+            ConnectionTestTrace.Report(endpoint + ": obtaining OAuth access token…");
             var token = await _oauth.GetAccessTokenAsync(account, ct);
+            ConnectionTestTrace.Report(endpoint + ": authenticating with OAuth…");
             await client.AuthenticateAsync(new SaslMechanismOAuth2(account.Username, token), ct);
         }
         else
         {
+            ConnectionTestTrace.Report(endpoint + ": authenticating with username/password…");
             await client.AuthenticateAsync(account.AuthUsername, password!, ct);
         }
 
         // Nothing is sent — authenticating is the whole proof, so a failing QUIT must not turn a
         // successful verification into "Test Connection failed".
+        ConnectionTestTrace.Report(endpoint + ": authentication OK; disconnecting…");
         await DisconnectQuietlyAsync(client, ct);
         LogService.Log("SmtpService: verify succeeded");
     }

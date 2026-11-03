@@ -22,27 +22,15 @@ public class AccountService : IAccountService
 
     public List<AccountModel> LoadAccounts()
     {
-        if (!File.Exists(_accountsFile))
-            return [];
-
-        try
-        {
-            var json = File.ReadAllText(_accountsFile);
-            var accounts = JsonSerializer.Deserialize<List<AccountModel?>>(json, JsonOptions) ?? [];
-            return accounts.Where(a => a is not null).Cast<AccountModel>().ToList();
-        }
-        catch
-        {
-            return [];
-        }
+        var accounts = Helpers.ProtectedJsonFile.Read<List<AccountModel?>>(_accountsFile, () => [], JsonOptions);
+        return accounts.Where(a => a is not null).Cast<AccountModel>().ToList();
     }
 
     public void SaveAccounts(List<AccountModel> accounts)
     {
         Directory.CreateDirectory(_dataFolder);
-        var json = JsonSerializer.Serialize(accounts, JsonOptions);
         // Atomic: a crash mid-write must not truncate accounts.json (all account config).
-        Helpers.AtomicFile.WriteAllText(_accountsFile, json);
+        Helpers.ProtectedJsonFile.Write(_accountsFile, accounts, JsonOptions);
     }
 
     public void SetDefaultAccount(Guid accountId)

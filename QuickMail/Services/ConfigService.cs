@@ -220,6 +220,7 @@ public class ConfigService : IConfigService
                     case "showcalendar":      config.ShowCalendar      = ParseBool(value); break;
                     case "showaccountspanel": config.ShowAccountsPanel = ParseBool(value); break;
                     case "showtodayagenda":   config.ShowTodayAgenda   = ParseBool(value); break;
+                    case "showhomeafterinactivity": config.ShowHomeAfterInactivity = ParseBool(value); break;
                     case "showfiltereddestinationtab": config.ShowFilteredDestinationTab = ParseBool(value); break;
                     case "opensearchesinresultstab": config.OpenSearchesInResultsTab = ParseBool(value); break;
                     case "favoritefolderkeys":
@@ -509,6 +510,7 @@ public class ConfigService : IConfigService
         sb.AppendLine();
 
         sb.AppendLine($"ShowTodayAgenda = {(config.ShowTodayAgenda ? "on" : "off")}");
+        sb.AppendLine($"ShowHomeAfterInactivity = {(config.ShowHomeAfterInactivity ? "on" : "off")}");
         sb.AppendLine("# Show today's compact appointment list above the folder tree.");
         sb.AppendLine();
 

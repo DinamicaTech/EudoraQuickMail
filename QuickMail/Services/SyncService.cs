@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -47,7 +48,7 @@ public class SyncService : ISyncService
     /// <summary>Fine-grained progress consumed while the user explicitly runs Check Mail.</summary>
     public event Action<Guid, string>? FolderSyncStageChanged;
 
-    private readonly Dictionary<Guid, DateTimeOffset> _lastSyncedUtc = new();
+    private readonly ConcurrentDictionary<Guid, DateTimeOffset> _lastSyncedUtc = new();
 
     // Store-less (online) dedupe only. Message keys (account, folder, id) already run through client
     // rules this session, so a re-fetched last-50 batch doesn't re-run a rule. Persisted paths use
@@ -274,6 +275,12 @@ public class SyncService : ISyncService
         AccountModel account, MailFolderModel folder,
         List<MailMessageSummary> fetched, bool persisted, bool consumeRebuildBaseline, CancellationToken ct)
     {
+        if (persisted && fetched.Count > 0)
+        {
+            var parkedSources = await _store.LoadActiveSnoozedKeysAsync(ct);
+            fetched.RemoveAll(message => parkedSources.Contains(new SnoozedMessageKey(
+                message.AccountId, message.FolderName, message.MessageId)));
+        }
         // Only infer direction from folders whose semantics are unambiguous. A custom folder can
         // contain both received mail and sent mail that the user filed there; treating every
         // non-Sent folder as incoming would erase the persisted Outgoing marker on the next sync.
@@ -496,11 +503,30 @@ public class SyncService : ISyncService
 
     private async Task<List<MailMessageSummary>> SyncFolderAsync(AccountModel account, MailFolderModel folder, CancellationToken ct)
     {
+        try
+        {
+            var result = await SyncFolderCoreAsync(account, folder, ct);
+            if (folder.Kind == SpecialFolderKind.Inbox) AccountHealthJournal.Observe(account.Id, "Receive");
+            return result;
+        }
+        catch (Exception ex)
+        {
+            if (folder.Kind == SpecialFolderKind.Inbox) AccountHealthJournal.Observe(account.Id, "Receive", ex);
+            throw;
+        }
+    }
+
+    private async Task<List<MailMessageSummary>> SyncFolderCoreAsync(AccountModel account, MailFolderModel folder, CancellationToken ct)
+    {
         using var backupOperation = BackupOperationTracker.Enter();
+        var phase = Stopwatch.GetTimestamp();
+        var timingDetails = $"account={account.Id}; folder={folder.FullName}";
         FolderSyncStageChanged?.Invoke(account.Id, "reading the local synchronization marker…");
         // ── New messages ─────────────────────────────────────────────────────────
         var maxKey   = await _store.GetMaxMessageKeyAsync(account.Id, folder.FullName);
         var cfg      = _config.Load();
+        if (folder.Kind == SpecialFolderKind.Inbox)
+            PerformanceLogService.Record("IMAP Inbox sync: local marker", Stopwatch.GetElapsedTime(phase), timingDetails);
 
         // maxKey is "0" for a genuinely-fresh folder AND for every Graph folder (Graph message ids are
         // non-numeric, so GetMaxMessageKeyAsync's CAST-to-integer high-water mark is always 0). Without
@@ -512,11 +538,16 @@ public class SyncService : ISyncService
             return await SyncFolderByIdDiffAsync(account, folder, cfg, ct);
 
         FolderSyncStageChanged?.Invoke(account.Id, "asking the server for newer messages and downloading them…");
+        phase = Stopwatch.GetTimestamp();
         var incoming = await _imap.GetMessagesSinceAsync(
             account.Id, folder.FullName, maxKey, cfg.InitialSyncCount, ct);
+        if (folder.Kind == SpecialFolderKind.Inbox)
+            PerformanceLogService.Record("IMAP Inbox sync: fetch newer", Stopwatch.GetElapsedTime(phase),
+                timingDetails + $"; fetched={incoming.Count}");
 
         if (incoming.Count > 0)
         {
+            phase = Stopwatch.GetTimestamp();
             FolderSyncStageChanged?.Invoke(account.Id,
                 $"{incoming.Count:N0} message{(incoming.Count == 1 ? "" : "s")} downloaded; storing and applying automatic rules…");
             // Upsert + client rules run inside the shared chokepoint (the same path the live IDLE
@@ -524,12 +555,17 @@ public class SyncService : ISyncService
             // RulesApplied / MessagesRemoved; here we just surface the survivors to the UI —
             // immediately, without waiting for body preview fetches.
             incoming = await ApplyRulesToArrivalsAsync(account, folder, incoming, persisted: true, consumeRebuildBaseline: true, ct);
+            if (folder.Kind == SpecialFolderKind.Inbox)
+                PerformanceLogService.Record("IMAP Inbox sync: store and rules", Stopwatch.GetElapsedTime(phase), timingDetails);
             _ui.Post(() => FolderSynced?.Invoke(incoming));
         }
 
         // ── Remote deletions ─────────────────────────────────────────────────────
         FolderSyncStageChanged?.Invoke(account.Id, "reconciling the local cache with the server…");
+        phase = Stopwatch.GetTimestamp();
         await ReconcileFolderAsync(account, folder, ct);
+        if (folder.Kind == SpecialFolderKind.Inbox)
+            PerformanceLogService.Record("IMAP Inbox sync: reconcile", Stopwatch.GetElapsedTime(phase), timingDetails);
 
         return incoming;
     }

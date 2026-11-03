@@ -1376,6 +1376,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
             ApplyFiltersAndSearch();
     }
 
+    public Action? CaptureSearchCancellation()
+    {
+        var current = _localSearchCts;
+        return current is null ? null : () => { try { current.Cancel(); } catch (ObjectDisposedException) { } };
+    }
+
     private async Task ApplyLocalSearchAsync(string value)
     {
         if (Volatile.Read(ref _disposeState) != 0) return;
@@ -1384,6 +1390,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         var previous = Interlocked.Exchange(ref _localSearchCts, new CancellationTokenSource());
         try { previous?.Cancel(); } catch { /* superseded search */ }
         var cts = _localSearchCts!;
+        var searchTab = ActiveTab;
         if (string.IsNullOrWhiteSpace(value))
         {
             _hasMaterializedSearch = false;
@@ -1418,11 +1425,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 LocalMailConstants.MaxRenderedMessages, LocalPageOffset, sort,
                 !_searchEverywhere && SelectedFolder?.IsContainer == true, rootAccountIds, folderScopes, excludedFolderScopes);
             var store = (ILocalMailboxStore)_localStore;
-            // Microsoft.Data.Sqlite executes much of its async API synchronously. Keep a
-            // leading-wildcard scan off the UI thread so the indicator can render.
-            var found = slowWildcard
-                ? await Task.Run(() => store.SearchLocalMessagesAsync(query, cts.Token), cts.Token)
-                : await store.SearchLocalMessagesAsync(query, cts.Token);
+            // Microsoft.Data.Sqlite executes its async API synchronously. All searches
+            // must leave the UI thread, including indexed searches and their counts.
+            var found = await Task.Run(() => store.SearchLocalMessagesAsync(query, cts.Token), cts.Token);
             if (cts.IsCancellationRequested) return;
             var aggregateScope = rootAccountIds != null || folderScopes != null;
             var logicalMessages = CollapseAggregateSearchPage(found, aggregateScope,
@@ -1442,10 +1447,17 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 : $"{logicalTotal:N0} matches";
             SearchAnnouncement = StatusText;
         }
-        catch (OperationCanceledException) { }
+        catch (OperationCanceledException)
+        {
+            if (ReferenceEquals(_localSearchCts, cts) && ReferenceEquals(ActiveTab, searchTab)) StatusText = "Search cancelled.";
+        }
         catch (Exception ex)
         {
-            if (cts.IsCancellationRequested) return;
+            if (cts.IsCancellationRequested)
+            {
+                if (ReferenceEquals(_localSearchCts, cts) && ReferenceEquals(ActiveTab, searchTab)) StatusText = "Search cancelled.";
+                return;
+            }
             StatusText = $"Search failed: {ex.Message}";
         }
         finally
@@ -1467,23 +1479,46 @@ public partial class MainViewModel : ObservableObject, IDisposable
             ? selected.FullName : null;
         var rootAccountIds = RootAccountIdsFor(SelectedFolder);
         var folderScopes = SearchFolderScopesFor(SelectedFolder);
-        var found = await store.SearchLocalMessagesAdvancedAsync(new AdvancedSearchQuery(
+        var query = new AdvancedSearchQuery(
             criteria, accountScope, folderScope, LocalMailConstants.MaxRenderedMessages, 0,
             LocalSortFor(ActiveSort), SelectedFolder?.IsContainer == true,
             rootAccountIds, folderScopes,
-            RootExcludedFolderScopesFor(SelectedFolder)));
-        if (searchTab != ActiveTab || folderVersion != _folderLoadVersion) return;
-        var logicalMessages = CollapseAggregateSearchPage(found,
-            rootAccountIds != null || folderScopes != null, 0, LocalMailConstants.MaxRenderedMessages,
-            out var logicalTotal);
-        Messages = new BatchObservableCollection<MailMessageSummary>(logicalMessages);
-        _rawMessages = Messages.ToList();
-        _hasMaterializedSearch = true;
-        _advancedSearchCriteria = criteria.ToList();
-        LocalPageOffset = 0;
-        LocalTotalMessages = logicalTotal;
-        IsSearchActive = true;
-        StatusText = $"Advanced search: showing {Messages.Count:N0} of {logicalTotal:N0} matches";
+            RootExcludedFolderScopesFor(SelectedFolder));
+        var cts = new CancellationTokenSource();
+        var previous = Interlocked.Exchange(ref _localSearchCts, cts);
+        try { previous?.Cancel(); } catch (ObjectDisposedException) { }
+        IsBusy = true;
+        StatusText = "Searching…";
+        try
+        {
+            var found = await Task.Run(() => store.SearchLocalMessagesAdvancedAsync(query, cts.Token), cts.Token);
+            if (cts.IsCancellationRequested || !ReferenceEquals(_localSearchCts, cts)
+                || searchTab != ActiveTab || folderVersion != _folderLoadVersion) return;
+            var logicalMessages = CollapseAggregateSearchPage(found,
+                rootAccountIds != null || folderScopes != null, 0, LocalMailConstants.MaxRenderedMessages,
+                out var logicalTotal);
+            Messages = new BatchObservableCollection<MailMessageSummary>(logicalMessages);
+            _rawMessages = Messages.ToList();
+            _hasMaterializedSearch = true;
+            _advancedSearchCriteria = criteria.ToList();
+            LocalPageOffset = 0;
+            LocalTotalMessages = logicalTotal;
+            IsSearchActive = true;
+            StatusText = $"Advanced search: showing {Messages.Count:N0} of {logicalTotal:N0} matches";
+        }
+        catch (Exception) when (cts.IsCancellationRequested)
+        {
+            if (ReferenceEquals(_localSearchCts, cts) && searchTab == ActiveTab) StatusText = "Search cancelled.";
+        }
+        catch (Exception ex)
+        {
+            LogService.Log("Advanced search failed", ex);
+            if (ReferenceEquals(_localSearchCts, cts) && searchTab == ActiveTab) StatusText = $"Search failed: {ex.Message}";
+        }
+        finally
+        {
+            if (ReferenceEquals(_localSearchCts, cts)) IsBusy = false;
+        }
     }
 
     private IReadOnlyList<MailMessageSummary> CollapseAggregateSearchPage(
@@ -1643,7 +1678,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private IReadOnlyCollection<LocalFolderScope> EverywhereExcludedFolderScopes() =>
         _cachedFolders.SelectMany(pair => pair.Value
-            .Where(folder => folder.Kind is SpecialFolderKind.Drafts or SpecialFolderKind.Scheduled)
+            .Where(folder => folder.Kind is SpecialFolderKind.Drafts or SpecialFolderKind.Scheduled ||
+                _homePendingUnread && (folder.Kind is SpecialFolderKind.Trash or SpecialFolderKind.Junk or SpecialFolderKind.RecoveryDeleted ||
+                    folder.FullName.ToLowerInvariant() is "trash" or "junk" or "recoverydeleted" or "[gmail]/spam" or "[gmail]/trash"))
             .Select(folder => new LocalFolderScope(pair.Key, folder.FullName)))
             .Distinct().ToArray();
 
@@ -1713,7 +1750,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private ObservableCollection<SenderGroup> _toGroups = [];
 
-    public bool IsMessagesView      => ViewMode == ViewMode.Messages;
+    public bool IsMessagesView      => ActiveTab is not HomeTabViewModel && ViewMode == ViewMode.Messages;
     public bool IsConversationsView => ViewMode == ViewMode.Conversations;
     public bool IsFromView          => ViewMode == ViewMode.From;
     public bool IsToView            => ViewMode == ViewMode.To;
@@ -1964,7 +2001,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
         await CheckForUpdateInBackgroundAsync();
         Announce(UpdateAvailableText + ". " + UpdateCheckDetails, AnnouncementCategory.Result);
         if (!string.IsNullOrEmpty(_updateVersion)) OpenUpdatePage();
+        else ManualUpdateResultRequested?.Invoke(this, UpdateAvailableText + "\n\n" + UpdateCheckDetails);
     }
+
+    public event EventHandler<string>? ManualUpdateResultRequested;
 
     [ObservableProperty]
     private string _updateReleaseUrl = string.Empty;
@@ -2119,7 +2159,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     public void CloseTab(TabSessionViewModel tab)
     {
-        if (tab is MessageListTabViewModel or CalendarTabViewModel) return;
+        if (tab is MessageListTabViewModel or CalendarTabViewModel or HomeTabViewModel) return;
 
         if (tab is ComposeTabViewModel compose)
         {
@@ -2288,16 +2328,25 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         if (CalendarVm != null && _configService.Load().ShowCalendar &&
             !OpenTabs.OfType<CalendarTabViewModel>().Any())
-            OpenTabs.Insert(0, new CalendarTabViewModel());
+            OpenTabs.Insert(OpenTabs.OfType<HomeTabViewModel>().Any() ? 1 : 0, new CalendarTabViewModel());
 
         var tab = OpenTabs.OfType<MessageListTabViewModel>().FirstOrDefault();
         if (tab == null)
         {
             tab = new MessageListTabViewModel();
-            OpenTabs.Insert(OpenTabs.OfType<CalendarTabViewModel>().Any() ? 1 : 0, tab);
+            OpenTabs.Insert(OpenTabs.Count(t => t is CalendarTabViewModel or HomeTabViewModel), tab);
         }
         if (ActiveTab == null) ActiveTab = tab;
+        if (_homeTabEnabled && !OpenTabs.OfType<HomeTabViewModel>().Any())
+            OpenTabs.Insert(0, new HomeTabViewModel());
         OnPropertyChanged(nameof(ShowTabStrip));
+    }
+
+    private bool _homeTabEnabled;
+    public void EnableHomeTab()
+    {
+        _homeTabEnabled = true;
+        EnsureMessageListTab();
     }
 
     public void RememberMainMessageListFolder(MailFolderModel? folder)
@@ -3097,6 +3146,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             // is not visible in the new mode with blank, unrenderable tabs.
             OpenTabs.Clear();
             ActiveTab = null;
+            if (_homeTabEnabled) EnsureMessageListTab();
             OnPropertyChanged(nameof(ShowTabStrip));
         }
         else
@@ -4665,7 +4715,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     internal async Task RefreshAfterPop3ReceiveAsync(AccountModel account, Pop3ReceiveResult result)
     {
         LastSyncText = DateTime.Now.ToString("T", CultureInfo.CurrentCulture);
-        IsBusy = false;
+        if (!IsManualCheckMailRunning) IsBusy = false;
         IsStatusHighlighted = true;
 
         if (result.Downloaded <= 0)
@@ -5330,7 +5380,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
     }
 
-    private async Task<(Guid Id, List<MailFolderModel>? Folders)> ConnectOneAccountAsync(AccountModel account)
+    private async Task<(Guid Id, List<MailFolderModel>? Folders)> ConnectOneAccountAsync(AccountModel account, CancellationToken cancellationToken = default)
     {
         string? password = null;
         // A LocalArchive is an on-disk mailbox and never needs a server password. Requiring a
@@ -5349,7 +5399,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
             {
                 // Timeouts increase per attempt: 30s, 45s, 60s
                 int connectTimeout = attempt switch { 1 => 30, 2 => 45, _ => 60 };
-                using var connectCts = new CancellationTokenSource(TimeSpan.FromSeconds(connectTimeout));
+                using var connectCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                connectCts.CancelAfter(TimeSpan.FromSeconds(connectTimeout));
 
                 // Background connect must never open an interactive sign-in window: under this short
                 // per-attempt timeout it would be torn down while the user is mid-sign-in (#206). For
@@ -5364,24 +5415,27 @@ public partial class MainViewModel : ObservableObject, IDisposable
                     await _oauthService.EnsureSilentTokenAsync(account, connectCts.Token);
 
                 await _imap.ConnectAsync(account, password, connectCts.Token);
-                using var folderCts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
+                using var folderCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                folderCts.CancelAfter(TimeSpan.FromSeconds(120));
                 var folderList = await _imap.GetFoldersAsync(account.Id, folderCts.Token);
                 return (account.Id, folderList);
             }
-            catch (InteractiveSignInRequiredException)
+            catch (InteractiveSignInRequiredException ex)
             {
                 // No usable cached token: the account needs an interactive sign-in, which must not run
                 // here. Leave it disconnected (not retried — the state won't change on its own); the
                 // user starts sign-in by activating the account.
                 LogService.Log($"ConnectAll/{account.AccountLabel}: interactive sign-in required — leaving disconnected until the user signs in.");
+                AccountHealthJournal.Observe(account.Id, "Receive", ex);
                 return (account.Id, null);
             }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
             catch (OperationCanceledException) when (attempt < 3)
             {
                 // Per-attempt timeout — retry with jittered backoff
                 var delaySeconds = JitteredBackoffSeconds(attempt == 1 ? 15 : 30);
                 LogService.Log($"ConnectAll/{account.AccountLabel}: attempt {attempt} timed out — retrying in {delaySeconds:F0}s");
-                try { await Task.Delay(TimeSpan.FromSeconds(delaySeconds), CancellationToken.None); }
+                try { await Task.Delay(TimeSpan.FromSeconds(delaySeconds), cancellationToken); }
                 catch { /* best effort */ }
                 continue;
             }
@@ -5404,6 +5458,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             {
                 // Final attempt failed
                 LogService.Log($"ConnectAll/{account.AccountLabel}: final attempt failed", ex);
+                AccountHealthJournal.Observe(account.Id, "Receive", ex);
                 return (account.Id, null);
             }
         }
@@ -6005,18 +6060,29 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private async Task SelectFolderAsync(MailFolderModel? folder)
     {
         if (folder == null || folder.IsHeader) return;
-        if (_searchTabStates.Count > 0 && ActiveTab is not MessageListTabViewModel &&
-            !IsCalendarFolderName(folder.FullName) &&
-            !(ActiveTab is FilteredFolderTabViewModel destination && ReferenceEquals(folder, destination.Folder)))
-            ActiveTab = OpenTabs.OfType<MessageListTabViewModel>().FirstOrDefault();
-        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        // Switching from Home/search to the list raises ActiveTab before the requested folder
+        // has loaded. The window must not restore the list tab's previous folder (often In)
+        // over this in-flight selection.
+        Interlocked.Increment(ref _folderSelectionsInProgress);
         try
         {
-            FolderSelectionStarted?.Invoke(folder, completion.Task);
-            await SelectFolderCoreAsync(folder);
+            if ((_searchTabStates.Count > 0 || ActiveTab is HomeTabViewModel) && ActiveTab is not MessageListTabViewModel &&
+                !IsCalendarFolderName(folder.FullName) &&
+                !(ActiveTab is FilteredFolderTabViewModel destination && ReferenceEquals(folder, destination.Folder)))
+                ActiveTab = OpenTabs.OfType<MessageListTabViewModel>().FirstOrDefault();
+            var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            try
+            {
+                FolderSelectionStarted?.Invoke(folder, completion.Task);
+                await SelectFolderCoreAsync(folder);
+            }
+            finally { completion.TrySetResult(); }
         }
-        finally { completion.TrySetResult(); }
+        finally { Interlocked.Decrement(ref _folderSelectionsInProgress); }
     }
+
+    private int _folderSelectionsInProgress;
+    public bool IsFolderSelectionInProgress => Volatile.Read(ref _folderSelectionsInProgress) > 0;
 
     private async Task SelectFolderCoreAsync(MailFolderModel folder)
     {
@@ -6053,6 +6119,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _advancedSearchCriteria = null;
         _hasMaterializedSearch = false;
         SearchText          = string.Empty;
+        _homePendingUnread = false;
         IsSearchActive      = false;
         ActiveView          = null;
         SelectedFolder      = folder;
@@ -6271,6 +6338,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
             if (!IsCurrentFolderLoad(version, folder))
                 return;
 
+            if (!OnlineMode)
+            {
+                var parkedSources = await _localStore.LoadActiveSnoozedKeysAsync(ct);
+                list.RemoveAll(message => parkedSources.Contains(new SnoozedMessageKey(
+                    message.AccountId, message.FolderName, message.MessageId)));
+            }
+
             SetMessages(list);
             StatusText = list.Count == 0 ? "No messages" : $"{list.Count} messages loaded.";
             if (!OnlineMode)
@@ -6325,10 +6399,14 @@ public partial class MainViewModel : ObservableObject, IDisposable
             else
             {
                 // Serve from cache when available; fall back to IMAP and cache the result.
+                var snoozedSource = await _localStore.GetSnoozedOriginalFolderAsync(
+                    summary.AccountId, summary.FolderName, summary.MessageId, token);
                 detail = await _localStore.LoadDetailAsync(
                     summary.AccountId, summary.FolderName, summary.MessageId)
                     ?? await _imap.GetMessageDetailAsync(
-                        summary.AccountId, summary.FolderName, summary.MessageId, token);
+                        summary.AccountId, snoozedSource ?? summary.FolderName, summary.MessageId, token);
+                if (snoozedSource is not null)
+                    detail.FolderName = summary.FolderName;
                 // Await (not fire-and-forget) so the detail is definitely in the cache
                 // before the user acts on the message (e.g. accepts a calendar invite).
                 // The calendar harvest reads calendar_ics from this row; if the store
@@ -6385,8 +6463,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 // AddFlags(\Seen) is idempotent, so re-flagging on the cache-miss path is harmless.
                 // Online mode already flagged it during the GetMessageDetailAsync fetch above.
                 if (!OnlineMode)
-                    _imap.MarkReadAsync(summary.AccountId, summary.FolderName, summary.MessageId)
+                {
+                    var serverFolder = await _localStore.GetSnoozedOriginalFolderAsync(
+                        summary.AccountId, summary.FolderName, summary.MessageId, token)
+                        ?? summary.FolderName;
+                    _imap.MarkReadAsync(summary.AccountId, serverFolder, summary.MessageId)
                         .LogFaults("mark read on open");
+                }
             }
             if (!OnlineMode)
             {
@@ -6467,7 +6550,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
         // racing shutdown after a local-folder refresh. Snapshot account state on the UI thread.
         var localAccounts = Accounts.Where(account => account.BackendKind is BackendKind.Pop3Smtp or BackendKind.LocalArchive)
             .Select(account => account.Id).ToHashSet();
-        targets = targets.Where(message => !localAccounts.Contains(message.AccountId)).ToList();
+        targets = targets.Where(message => !localAccounts.Contains(message.AccountId)
+            && !message.FolderName.EndsWith("/Snooze", StringComparison.OrdinalIgnoreCase)
+            && !message.FolderName.Equals("Snooze", StringComparison.OrdinalIgnoreCase)).ToList();
         if (targets.Count == 0)
         {
             DrainCts(ref _prefetchCts);
@@ -8161,27 +8246,33 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// not handled here: App.CheckMailNowAsync owns its download-and-delete pipeline. This restores
     /// the original QuickMail meaning of Check Mail without coupling IMAP to the local-first receiver.
     /// </summary>
-    public async Task<IReadOnlyList<MailOperationFailure>> CheckRemoteMailNowAsync(Action<string>? progress = null)
+    public async Task<IReadOnlyList<MailOperationFailure>> CheckRemoteMailNowAsync(Action<string>? progress = null,
+        IReadOnlyCollection<Guid>? accountIds = null, CancellationToken cancellationToken = default)
     {
-        var failures = new List<MailOperationFailure>();
+        var failures = new System.Collections.Concurrent.ConcurrentBag<MailOperationFailure>();
         var remoteAccounts = Accounts
+            .Where(a => accountIds == null || accountIds.Contains(a.Id))
             .Where(a => a.IsActive && a.CheckIncomingMail &&
                 a.BackendKind is BackendKind.ImapSmtp or BackendKind.MicrosoftGraph)
             .ToList();
-        if (remoteAccounts.Count == 0) return failures;
+        if (remoteAccounts.Count == 0) return [];
 
-        var completed = 0;
-        foreach (var account in remoteAccounts)
+        // Each account has its own server connection. Limit concurrent synchronizations so
+        // SQLite writes and rule actions are not flooded when many accounts are configured.
+        using var checkSlots = new SemaphoreSlim(2);
+        var checks = remoteAccounts.Select(async (account, index) =>
         {
-            var position = $"account {completed + 1} of {remoteAccounts.Count}";
+            await checkSlots.WaitAsync(cancellationToken);
+            var position = $"account {index + 1} of {remoteAccounts.Count}";
             var accountStarted = Stopwatch.GetTimestamp();
             try
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 if (!_connectedAccountIds.Contains(account.Id))
                 {
                     progress?.Invoke($"{account.AccountLabel} ({position}): connecting, authenticating and loading folders…");
                     var connectStarted = Stopwatch.GetTimestamp();
-                    var (_, folders) = await ConnectOneAccountAsync(account);
+                    var (_, folders) = await ConnectOneAccountAsync(account, cancellationToken);
                     PerformanceLogService.Record("Check Mail IMAP: connect, authenticate and list folders",
                         Stopwatch.GetElapsedTime(connectStarted),
                         $"account={account.AccountLabel}; backend={account.BackendKind}; folders={folders?.Count ?? 0}");
@@ -8189,7 +8280,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
                     if (folders == null)
                     {
                         progress?.Invoke($"{account.AccountLabel} ({position}): connection did not return a folder list.");
-                        continue;
+                        failures.Add(new MailOperationFailure(account,"Receive email",new System.IO.IOException("Connection failed or sign-in is required. Open the account and use Test Connection for diagnostics.")));
+                        return;
                     }
                     SetCachedFolders(account.Id, folders);
                 }
@@ -8216,7 +8308,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                         IReadOnlyList<MailMessageSummary> arrivals;
                         try
                         {
-                            arrivals = await _syncService.SyncFolderFullAsync(account, inbox, CancellationToken.None);
+                            arrivals = await _syncService.SyncFolderFullAsync(account, inbox, cancellationToken);
                         }
                         finally
                         {
@@ -8244,6 +8336,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             }
             catch (Exception ex)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 // One unavailable account must not prevent the remaining IMAP accounts, POP3
                 // downloads, or the scheduled-send queue from being checked.
                 LogService.Log($"Manual Check Mail/{account.AccountLabel}", ex);
@@ -8251,13 +8344,29 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 failures.Add(new MailOperationFailure(account,
                     account.BackendKind == BackendKind.ImapSmtp ? "Receive email (IMAP)" : "Receive email", ex));
             }
-            finally { completed++; }
-        }
+            finally { checkSlots.Release(); }
+        });
+        await Task.WhenAll(checks);
 
         RebuildFolderListFromCache();
         WireUpWatchers();
-        return failures;
+        return failures.ToList();
     }
+
+    /// <summary>Refreshes the visible mailbox after a manual check using the local cache.</summary>
+    public async Task RefreshAfterManualCheckAsync()
+    {
+        if (ActiveTab is SearchResultsTabViewModel || _hasMaterializedSearch)
+        {
+            if (_canonicalLocalTree != null)
+                await RefreshCanonicalFolderCountsAsync();
+            await ReloadCurrentLocalPageAsync();
+        }
+        else
+            await RefreshAfterLocalMutationAsync("manual-check-mail");
+    }
+
+    public bool IsManualCheckMailRunning { get; set; }
 
     /// <summary>Opens a result message's physical folder and selects that exact row.</summary>
     public async Task<MailMessageSummary?> GoToMessageAsync(MailMessageSummary message)
@@ -8286,7 +8395,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>Refreshes Snooze counts and the current page without dropping an active search.
-    /// Snoozed mail is intentionally searchable even while hidden from its original folder.</summary>
+    /// Parked mail remains searchable in its local Snooze folder.</summary>
     public async Task RefreshAfterSnoozeAsync()
     {
         if (_canonicalLocalTree != null)
@@ -8467,7 +8576,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                         message.DeliveryStatus = string.IsNullOrWhiteSpace(item.LastError)
                             ? item.TransportAccepted ? "Finalizing"
                                 : item.IsImmediate ? "Queued" : "Scheduled"
-                            : "SMTP error";
+                            : item.TransportAccepted ? "Sent — archival pending" : "SMTP error";
             }
             SetMessages(sorted);
             // Scheduled uses a total-message badge rather than unread count. Refresh it from the
@@ -8618,11 +8727,15 @@ public partial class MainViewModel : ObservableObject, IDisposable
         await _localStore.UpdateIsReadBatchAsync(
             unread.Select(m => (m.AccountId, m.FolderName, m.MessageId)), true);
 
-        foreach (var group in unread.GroupBy(m => (m.AccountId, m.FolderName)))
+        var backendReadTargets = new List<(MailMessageSummary Message, string Folder)>();
+        foreach (var message in unread)
+            backendReadTargets.Add((message, await BackendFolderForParkedMessageAsync(message)));
+        foreach (var group in backendReadTargets.GroupBy(target =>
+                     (target.Message.AccountId, target.Folder)))
         {
-            var uids = group.Select(m => m.MessageId).ToList();
-            _imap.MarkReadBatchAsync(group.Key.AccountId, group.Key.FolderName, uids)
-                .LogFaults($"mark read batch ({group.Key.FolderName}, {uids.Count} messages)");
+            var uids = group.Select(target => target.Message.MessageId).ToList();
+            _imap.MarkReadBatchAsync(group.Key.AccountId, group.Key.Folder, uids)
+                .LogFaults($"mark read batch ({group.Key.Folder}, {uids.Count} messages)");
         }
 
         // Refresh folder unread counts once the server has the reads (issue #227). Debounced and
@@ -9009,6 +9122,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
             using var actionCts = CancellationTokenSource.CreateLinkedTokenSource(_messageActionShutdownCts.Token);
             var ct = actionCts.Token;
 
+            var restoredFromSnooze = await RestoreParkedSourcesForActionAsync(toDelete, ct);
+
             var groups = toDelete.GroupBy(m => (m.AccountId, m.FolderName));
             var processed = 0;
             foreach (var group in groups)
@@ -9062,7 +9177,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             // unread message actually left a folder (deleting a read message changes no count).
             // Scheduled here, not before the await, so the debounced STATUS sweep can't read a
             // pre-delete count and clobber the optimistic decrement (#227 follow-up).
-            if (removedUnreadMessages)
+            if (removedUnreadMessages || restoredFromSnooze.Count > 0)
                 foreach (var acctId in toDelete.Select(m => m.AccountId).Distinct())
                     ScheduleFolderCountRefresh(acctId);
 
@@ -9161,6 +9276,45 @@ public partial class MainViewModel : ObservableObject, IDisposable
         SetCachedFolders(accountId, refreshed);
         BuildFolderTree();
         return recovery;
+    }
+
+    private async Task<HashSet<MailMessageSummary>> RestoreParkedSourcesForActionAsync(
+        IEnumerable<MailMessageSummary> messages, CancellationToken ct)
+    {
+        var restored = new HashSet<MailMessageSummary>();
+        if (_localStore is not ILocalMailboxStore mailboxStore) return restored;
+        foreach (var message in messages)
+        {
+            var isSnoozeFolder = message.FolderName.EndsWith("/Snooze", StringComparison.OrdinalIgnoreCase)
+                || message.FolderName.Equals("Snooze", StringComparison.OrdinalIgnoreCase)
+                || (_cachedFolders.TryGetValue(message.AccountId, out var folders)
+                    && folders.Any(folder => folder.Kind == SpecialFolderKind.Snoozed
+                        && folder.FullName == message.FolderName));
+            if (!isSnoozeFolder) continue;
+            var original = await mailboxStore.CancelSnoozeAsync(
+                message.AccountId, message.FolderName, message.MessageId, ct);
+            if (original is null) continue;
+            message.FolderName = original;
+            restored.Add(message);
+        }
+        return restored;
+    }
+
+    private async Task<string> BackendFolderForParkedMessageAsync(MailMessageSummary message,
+        CancellationToken ct = default) => await BackendFolderForParkedMessageAsync(
+            message.AccountId, message.FolderName, message.MessageId, ct);
+
+    private async Task<string> BackendFolderForParkedMessageAsync(Guid accountId,
+        string folderName, string messageId, CancellationToken ct = default)
+    {
+        if (!folderName.EndsWith("/Snooze", StringComparison.OrdinalIgnoreCase)
+            && !folderName.Equals("Snooze", StringComparison.OrdinalIgnoreCase))
+            return folderName;
+        var backend = Accounts.FirstOrDefault(account => account.Id == accountId)?.BackendKind;
+        if (backend is not (BackendKind.ImapSmtp or BackendKind.MicrosoftGraph))
+            return folderName;
+        return await _localStore.GetSnoozedOriginalFolderAsync(
+            accountId, folderName, messageId, ct) ?? folderName;
     }
 
     private async Task PurgeExpiredRecoveryDeletedAsync()
@@ -9648,7 +9802,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                         try
                         {
                             attachment.Content = await _imap.DownloadAttachmentAsync(detail.AccountId,
-                                detail.FolderName, detail.MessageId, attachment.PartSpecifier, cts.Token);
+                                await BackendFolderForParkedMessageAsync(detail.AccountId, detail.FolderName, detail.MessageId, cts.Token), detail.MessageId, attachment.PartSpecifier, cts.Token);
                         }
                         catch (Exception ex) when (ex is not OperationCanceledException)
                         {
@@ -9716,7 +9870,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                             try
                             {
                                 att.Content = await _imap.DownloadAttachmentAsync(
-                                    detail.AccountId, detail.FolderName, detail.MessageId,
+                                    detail.AccountId, await BackendFolderForParkedMessageAsync(detail.AccountId, detail.FolderName, detail.MessageId, cts.Token), detail.MessageId,
                                     att.PartSpecifier, cts.Token);
                                 downloaded++;
                             }
@@ -9999,7 +10153,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                     try
                     {
                         att.Content = await _imap.DownloadAttachmentAsync(
-                            summary.AccountId, summary.FolderName, summary.MessageId,
+                            summary.AccountId, await BackendFolderForParkedMessageAsync(summary, ct), summary.MessageId,
                             att.PartSpecifier, ct);
                     }
                     catch (Exception ex)
@@ -11104,15 +11258,21 @@ public partial class MainViewModel : ObservableObject, IDisposable
             using var actionCts = CancellationTokenSource.CreateLinkedTokenSource(_messageActionShutdownCts.Token);
             var ct = actionCts.Token;
 
+            var restoredFromSnooze = await RestoreParkedSourcesForActionAsync(messages, ct);
+
             var groups = messages.GroupBy(m => (m.AccountId, m.FolderName));
             foreach (var group in groups)
             {
                 var stageStarted = Stopwatch.GetTimestamp();
-                var uids = group.Select(m => m.MessageId).ToList();
                 var isCanonicalDestination = TryParseCanonicalFolder(destination.FullName, out var canonicalId);
                 var destinationName = isCanonicalDestination
                     ? await _localStore.EnsureCanonicalFolderBindingAsync(canonicalId, group.Key.AccountId)
                     : destination.FullName;
+                var actionable = group.Where(message =>
+                    !restoredFromSnooze.Contains(message) ||
+                    !string.Equals(group.Key.FolderName, destinationName, StringComparison.OrdinalIgnoreCase)).ToList();
+                if (actionable.Count == 0) continue;
+                var uids = actionable.Select(m => m.MessageId).ToList();
                 PerformanceLogService.Record("Message move: resolve destination",
                     Stopwatch.GetElapsedTime(stageStarted),
                     $"messages={uids.Count}; source={group.Key.FolderName}; destination={destinationName}");
@@ -11130,7 +11290,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                     $"messages={uids.Count}; source={group.Key.FolderName}; destination={destinationName}");
                 if (!OnlineMode)
                     await _localStore.DeleteSummariesAsync(group.Key.AccountId, group.Key.FolderName, uids);
-                ApplyOptimisticMoveCountDelta(group.ToList(), destinationName,
+                ApplyOptimisticMoveCountDelta(actionable, destinationName,
                     isCanonicalDestination ? canonicalId : null);
             }
             PerformanceLogService.Record("Message move: total",
@@ -11138,7 +11298,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
             // Moving an unread message changes both the source and destination folder counts; refresh
             // after the server move lands (only when an unread message actually moved) (#227 follow-up).
-            if (messages.Any(m => !m.IsRead))
+            if (messages.Any(m => !m.IsRead) || restoredFromSnooze.Count > 0)
                 foreach (var acctId in messages.Select(m => m.AccountId).Distinct())
                     ScheduleFolderCountRefresh(acctId);
 
@@ -11185,11 +11345,15 @@ public partial class MainViewModel : ObservableObject, IDisposable
         try
         {
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
-            var groups    = messages.GroupBy(m => (m.AccountId, m.FolderName));
+            var backendCopySources = new List<(MailMessageSummary Message, string Folder)>();
+            foreach (var message in messages)
+                backendCopySources.Add((message, await BackendFolderForParkedMessageAsync(message, cts.Token)));
+            var groups = backendCopySources.GroupBy(source =>
+                (source.Message.AccountId, source.Folder));
             foreach (var group in groups)
                 await _imap.CopyMessagesAsync(
-                    group.Key.AccountId, group.Key.FolderName,
-                    group.Select(m => m.MessageId).ToList(),
+                    group.Key.AccountId, group.Key.Folder,
+                    group.Select(source => source.Message.MessageId).ToList(),
                     destination.FullName, cts.Token);
 
             RememberMessageDestination(destination, copy: true);
@@ -11545,7 +11709,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             {
                 using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
                 att.Content = await _imap.DownloadAttachmentAsync(
-                    MessageDetail.AccountId, MessageDetail.FolderName,
+                    MessageDetail.AccountId, await BackendFolderForParkedMessageAsync(MessageDetail.AccountId, MessageDetail.FolderName, MessageDetail.MessageId, cts.Token),
                     MessageDetail.MessageId, att.PartSpecifier, cts.Token);
             }
             catch (Exception ex)
@@ -11582,7 +11746,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             {
                 if (!att.IsLoaded && att.PartSpecifier != null)
                     att.Content = await _imap.DownloadAttachmentAsync(
-                        MessageDetail.AccountId, MessageDetail.FolderName,
+                        MessageDetail.AccountId, await BackendFolderForParkedMessageAsync(MessageDetail.AccountId, MessageDetail.FolderName, MessageDetail.MessageId, cts.Token),
                         MessageDetail.MessageId, att.PartSpecifier, cts.Token);
 
                 if (att.Content != null)
@@ -11617,7 +11781,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             {
                 using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
                 att.Content = await _imap.DownloadAttachmentAsync(
-                    MessageDetail.AccountId, MessageDetail.FolderName,
+                    MessageDetail.AccountId, await BackendFolderForParkedMessageAsync(MessageDetail.AccountId, MessageDetail.FolderName, MessageDetail.MessageId, cts.Token),
                     MessageDetail.MessageId, att.PartSpecifier, cts.Token);
             }
             catch (Exception ex)

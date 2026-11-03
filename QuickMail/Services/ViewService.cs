@@ -22,22 +22,13 @@ public class ViewService : IViewService
 
     public List<SavedView> Load()
     {
-        if (!File.Exists(_viewsFile)) return [];
-        try
-        {
-            var json = File.ReadAllText(_viewsFile);
-            return JsonSerializer.Deserialize<List<SavedView>>(json) ?? [];
-        }
-        catch
-        {
-            return [];
-        }
+        return Helpers.ProtectedJsonFile.Read<List<SavedView>>(_viewsFile, () => []);
     }
 
     public void Save(List<SavedView> views)
     {
         Directory.CreateDirectory(_dataFolder);
         // Atomic: a crash mid-write must not truncate views.json (all saved views).
-        Helpers.AtomicFile.WriteAllText(_viewsFile, JsonSerializer.Serialize(views, JsonOptions));
+        Helpers.ProtectedJsonFile.Write(_viewsFile, views, JsonOptions);
     }
 }

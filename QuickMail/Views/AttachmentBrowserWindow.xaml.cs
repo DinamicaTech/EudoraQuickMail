@@ -15,6 +15,7 @@ public partial class AttachmentBrowserWindow : Window
     public event Func<MailMessageSummary,Task>? GoToMessageRequested;
     public AttachmentBrowserWindow(AttachmentBrowserViewModel vm)
     {
+        Language = System.Windows.Markup.XmlLanguage.GetLanguage(System.Globalization.CultureInfo.CurrentCulture.IetfLanguageTag);
         InitializeComponent(); DataContext = _vm = vm;
         _commands.Register(new CommandDefinition("attachments.close", "Mail", "Close attachment explorer", Close, Key.Escape));
         _commands.Register(new CommandDefinition("attachments.search", "Mail", "Search attachments", () => Search_Click(this,new RoutedEventArgs())));
@@ -25,11 +26,35 @@ public partial class AttachmentBrowserWindow : Window
         _commands.Register(new CommandDefinition("attachments.recover", "Mail", "Recover a copy", () => Recover_Click(this,new RoutedEventArgs())));
         _commands.Register(new CommandDefinition("attachments.relink", "Mail", "Use candidate location", () => Relink_Click(this,new RoutedEventArgs())));
         _commands.Register(new CommandDefinition("attachments.cancel", "Mail", "Cancel operation", _vm.Cancel));
-        Loaded += async (_,_) => { SearchBox.Focus(); await _vm.SearchAsync(); };
+        Loaded += async (_,_) => { SearchBox.Focus(); await SearchWithIndicatorAsync(); };
         Closing += (_,_) => _vm.Dispose();
         Closed += (_,_) => { if (_origin != null) Keyboard.Focus(_origin); };
     }
-    private async void Search_Click(object sender, RoutedEventArgs e) => await _vm.SearchAsync();
+    private async void Search_Click(object sender, RoutedEventArgs e) => await SearchWithIndicatorAsync();
+
+    private async Task SearchWithIndicatorAsync()
+    {
+        if (_vm.IsBusy) return;
+        var elapsed = System.Diagnostics.Stopwatch.StartNew();
+        var scope = _vm.Everywhere ? "Everywhere" : _vm.ScopeLabel;
+        var search = _vm.SearchAsync();
+        var cancel = _vm.CaptureCancellation();
+        if (await Task.WhenAny(search, Task.Delay(TimeSpan.FromSeconds(2))) == search)
+        {
+            await search;
+            return;
+        }
+        if (search.IsCompleted || !IsVisible) { await search; return; }
+        var cancelling = false;
+        var indicator = new SlowOperationWindow("Searching attachments…",
+            () => $"{(cancelling ? "Cancelling…" : _vm.Status)}\n" +
+                  $"Scope: {scope}\nElapsed: {elapsed.Elapsed:hh\\:mm\\:ss}\n" +
+                  "Searching the local database, not directories. Progress percentage is unavailable.",
+            () => { cancelling = true; cancel?.Invoke(); }) { Owner = this };
+        indicator.Show();
+        try { await search; }
+        finally { if (indicator.IsVisible) indicator.Close(); }
+    }
     private async void Save_Click(object sender, RoutedEventArgs e)
     {
         if (_vm.IsBusy) return;

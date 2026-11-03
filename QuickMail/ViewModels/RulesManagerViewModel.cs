@@ -17,6 +17,67 @@ namespace QuickMail.ViewModels;
 public partial class RulesManagerViewModel : ObservableObject
 {
     public ObservableCollection<MessageTemplate> ReplyTemplates { get; } = [];
+    public ObservableCollection<RuleActionStep> Actions { get; } = [];
+    public ObservableCollection<RuleFlagOption> FlagOptions { get; } =
+        [new(null, "Remove flag"), new(FlagDefinition.BuiltInFlagId.ToString(), "Flagged")];
+    [ObservableProperty] private RuleActionStep? _selectedAction;
+
+    private void ActionChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (SelectedRule == null || e.PropertyName == nameof(RuleActionStep.Description)) return;
+        if (sender is RuleActionStep changed && e.PropertyName == nameof(RuleActionStep.Action))
+        {
+            if ((int)changed.Action == -1)
+            {
+                changed.PropertyChanged -= ActionChanged;
+                Actions.Remove(changed);
+                SelectedAction = Actions.FirstOrDefault();
+                SynchronizeActions();
+                return;
+            }
+            if (changed.Action == RuleAction.Autoresponse)
+            {
+                changed.AutoResponseSubject ??= "[SUBJECT]";
+                changed.AutoResponseBody ??= "[BODY]";
+            }
+            var ordered = Actions.OrderBy(a => a.IsDestination).ToList();
+            for (var i = 0; i < ordered.Count; i++)
+                if (!ReferenceEquals(Actions[i], ordered[i])) Actions.Move(Actions.IndexOf(ordered[i]), i);
+        }
+        SynchronizeActions();
+        OnPropertyChanged(nameof(IsMoveToFolderSelected));
+    }
+
+    private void SynchronizeActions()
+    {
+        if (SelectedRule == null) return;
+        if (Actions.Count == 0)
+        {
+            SelectedRule.SetActionSteps([new RuleActionStep { Action = RuleAction.MarkAsRead }]);
+            return;
+        }
+        SelectedRule.SetActionSteps(Actions);
+    }
+
+    [RelayCommand]
+    private void AddAction()
+    {
+        if (SelectedRule == null || SelectedRule.IsSpamFilter) return;
+        var action = new RuleActionStep { Action = RuleAction.SetFlag, FlagId = FlagDefinition.BuiltInFlagId.ToString() };
+        action.PropertyChanged += ActionChanged;
+        var destination = Actions.FirstOrDefault(a => a.IsDestination);
+        Actions.Insert(destination == null ? Actions.Count : Actions.IndexOf(destination), action); SelectedAction = action;
+        SelectedRule.SetActionSteps(Actions);
+    }
+
+    [RelayCommand]
+    private void RemoveAction()
+    {
+        if (SelectedRule == null || SelectedAction == null || Actions.Count <= 1 || SelectedRule.IsSpamFilter) return;
+        var action = SelectedAction; action.PropertyChanged -= ActionChanged;
+        Actions.Remove(action); SelectedAction = Actions[0];
+        SelectedRule.SetActionSteps(Actions);
+    }
     public bool HasExpiration
     {
         get => SelectedRule?.ActiveUntil != null;
@@ -332,7 +393,7 @@ public partial class RulesManagerViewModel : ObservableObject
     private void Cleanup()
     {
         var movesToIn = Rules.Where(TargetIsIn).ToList();
-        var orphaned = Rules.Where(rule => !rule.IsSpamFilter && rule.Action == RuleAction.MoveToFolder
+        var orphaned = Rules.Where(rule => !rule.IsSpamFilter && rule.AdditionalActions.Count == 0 && rule.Action == RuleAction.MoveToFolder
             && !TargetIsIn(rule)
             && (string.IsNullOrWhiteSpace(rule.TargetFolder) || !TargetFolderExists(rule))).ToList();
 
@@ -382,7 +443,7 @@ public partial class RulesManagerViewModel : ObservableObject
 
     private static bool TargetIsIn(MailRule rule)
     {
-        if (rule.Action != RuleAction.MoveToFolder) return false;
+        if (rule.Action != RuleAction.MoveToFolder || rule.AdditionalActions.Count > 0) return false;
         var target = (rule.TargetFolder ?? string.Empty).Trim().Trim('\\', '/');
         return target.Equals("In", StringComparison.OrdinalIgnoreCase)
             || target.Equals("Inbox", StringComparison.OrdinalIgnoreCase);
@@ -451,6 +512,10 @@ public partial class RulesManagerViewModel : ObservableObject
         new() { Action = RuleAction.Delete, DisplayName = "Delete" },
         new() { Action = RuleAction.Forward, DisplayName = "Forward" },
         new() { Action = RuleAction.ReplyTemplate, DisplayName = "Reply template" },
+        new() { Action = RuleAction.Autoresponse, DisplayName = "Autoresponse" },
+        new() { Action = RuleAction.SetFlag, DisplayName = "Flag" },
+        new() { Action = RuleAction.Execute, DisplayName = "Execute" },
+        new() { Action = (RuleAction)(-1), DisplayName = "Remove action" },
     };
 
     public bool IsMoveToFolderSelected =>
@@ -476,6 +541,12 @@ public partial class RulesManagerViewModel : ObservableObject
 
     partial void OnSelectedRuleChanged(MailRule? value)
     {
+        foreach (var action in Actions) action.PropertyChanged -= ActionChanged;
+        Actions.Clear();
+        if (value != null)
+            foreach (var action in value.GetActionSteps().Where(a => !(value.AlsoMarkAsRead && a.Action == RuleAction.MarkAsRead)))
+            { var copy = action.Copy(); copy.PropertyChanged += ActionChanged; Actions.Add(copy); }
+        SelectedAction = Actions.FirstOrDefault();
         OnPropertyChanged(nameof(IsMoveToFolderSelected));
         OnPropertyChanged(nameof(IsFromEnabled));
         OnPropertyChanged(nameof(HasExpiration));
@@ -756,12 +827,20 @@ public partial class RulesManagerViewModel : ObservableObject
         // No rule, nothing to set a target on — and nothing to scope the picker to, so don't open it.
         if (SelectedRule == null) return;
 
-        var folder = PickFolderRequested?.Invoke(SelectedRule.AccountId, SelectedRule.TargetFolder);
+        var folder = PickFolderRequested?.Invoke(SelectedRule.AccountId, SelectedAction?.TargetFolder);
         if (folder != null)
         {
-            SelectedRule.TargetFolder = folder;
+            if (SelectedAction != null) SelectedAction.TargetFolder = folder;
             OnPropertyChanged(nameof(SelectedRule));
         }
+    }
+
+    [RelayCommand]
+    private void PickActionFolder(RuleActionStep? action)
+    {
+        if (SelectedRule == null || action == null) return;
+        var folder = PickFolderRequested?.Invoke(SelectedRule.AccountId, action.TargetFolder);
+        if (folder != null) action.TargetFolder = folder;
     }
 
     // ── Validation ──────────────────────────────────────────────────────────
@@ -770,6 +849,21 @@ public partial class RulesManagerViewModel : ObservableObject
     {
         ClearErrors();
         bool valid = true;
+        if (Actions.Count == 0 && !rule.AlsoMarkAsRead)
+        { FolderError = "Add an action or enable Mark as read."; return false; }
+        try
+        {
+            RuleService.ValidateActionSteps(rule);
+            foreach (var step in rule.GetActionSteps())
+            {
+                if (step.Action == RuleAction.ReplyTemplate && !ReplyTemplates.Any(t => t.Id == step.ReplyTemplateId))
+                    throw new InvalidOperationException("Select an existing reply template.");
+                if (step.Action == RuleAction.SetFlag && !FlagOptions.Any(f => f.Id == step.FlagId))
+                    throw new InvalidOperationException("The selected flag no longer exists.");
+            }
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
+        { FolderError = ex.Message; valid = false; }
 
         if (string.IsNullOrWhiteSpace(rule.Name))
         {
@@ -794,7 +888,7 @@ public partial class RulesManagerViewModel : ObservableObject
             FolderError = "Select an existing reply template.";
             return false;
         }
-        if (rule.Action is RuleAction.MoveToFolder or RuleAction.Delete or RuleAction.Forward)
+        if (rule.GetActionSteps().Any(a => a.Action is RuleAction.MoveToFolder or RuleAction.Delete or RuleAction.Forward or RuleAction.Execute or RuleAction.Autoresponse))
         {
             bool hasCondition =
                 (rule.UseFromCondition && !string.IsNullOrWhiteSpace(rule.FromContains)) ||
@@ -805,7 +899,7 @@ public partial class RulesManagerViewModel : ObservableObject
 
             if (!hasCondition)
             {
-                ConditionsError = "At least one condition is required for Move, Delete and Forward actions.";
+                ConditionsError = "At least one condition is required for Move, Delete, Forward, Autoresponse and Execute actions.";
                 valid = false;
             }
         }
@@ -848,3 +942,5 @@ public class ActionOption
     public string DisplayName { get; set; } = string.Empty;
     public override string ToString() => DisplayName;
 }
+
+public record RuleFlagOption(string? Id, string Name);

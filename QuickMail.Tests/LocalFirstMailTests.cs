@@ -617,6 +617,49 @@ public sealed class LocalFirstMailTests : IDisposable
         Assert.Equal(MessageDirection.Outgoing, Assert.Single(sent.Messages).Direction);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ScheduledSend_SendNowOnlyAdvancesSelectedOccurrence(bool repeating)
+    {
+        var account = new AccountModel { Id = Guid.NewGuid(), AccountName = "POP", Username = "sender@example.test",
+            BackendKind = BackendKind.Pop3Smtp, FolderTreeRootId = Guid.NewGuid(), FolderTreeRootName = "Local mail", IsActive = true };
+        var store = CreateStore(); var profile = new ProfileContext(_directory);
+        var accounts = new AccountService(profile); accounts.SaveAccounts([account]);
+        using var queue = new ScheduledSendService(profile, new StubSmtpService(), accounts,
+            new StubCredentialService(), store, new LocalMailService(store, accounts));
+        var planned = new DateTimeOffset(DateTime.UtcNow.Date.AddDays(2).AddHours(8), TimeSpan.Zero);
+        var message = new ComposeModel { AccountId = account.Id, To = "recipient@example.test", Subject = "selected", Body = "body" };
+        if (repeating) message.Repetition = new RepeatedSendSchedule(7, DateOnly.FromDateTime(planned.UtcDateTime.AddDays(30)), TimeZoneInfo.Utc.Id);
+        var selectedId = await queue.ScheduleAsync(message, planned);
+        var otherId = await queue.ScheduleAsync(new ComposeModel { AccountId = account.Id, To = "recipient@example.test", Subject = "other", Body = "body" }, planned);
+        var selected = (await queue.GetSnapshotAsync()).Single(x => x.Id == selectedId);
+        await queue.SendNowAsync(account.Id, selected.LocalMessageId!);
+        await queue.DispatchDueAsync();
+        var remaining = await queue.GetSnapshotAsync();
+        Assert.DoesNotContain(remaining, x => x.Id == selectedId);
+        Assert.Contains(remaining, x => x.Id == otherId && x.SendAtUtc == planned && !x.SendNowRequested);
+        Assert.Equal(repeating ? 2 : 1, remaining.Count);
+        if (repeating) Assert.Equal(planned.AddDays(7), remaining.Single(x => x.Id != otherId).SendAtUtc);
+        Assert.Equal(1, (await store.LoadLocalPageAsync(account.Id, "Sent", 10, 0)).TotalMatches);
+    }
+
+    [Fact]
+    public async Task ScheduledSend_SendNowRespectsOfflineMode()
+    {
+        var account = new AccountModel { Id = Guid.NewGuid(), AccountName = "POP", Username = "sender@example.test",
+            BackendKind = BackendKind.Pop3Smtp, FolderTreeRootId = Guid.NewGuid(), FolderTreeRootName = "Local mail", IsActive = true };
+        var store = CreateStore(); var profile = new ProfileContext(_directory);
+        var accounts = new AccountService(profile); accounts.SaveAccounts([account]);
+        using var activity = new MailActivityPolicyService(profile); activity.SetOffline();
+        using var queue = new ScheduledSendService(profile, new StubSmtpService(), accounts,
+            new StubCredentialService(), store, new LocalMailService(store, accounts), activity);
+        await queue.ScheduleAsync(new ComposeModel { AccountId = account.Id, To = "recipient@example.test", Subject = "later", Body = "body" }, DateTimeOffset.UtcNow.AddDays(2));
+        var item = Assert.Single(await queue.GetSnapshotAsync());
+        await Assert.ThrowsAsync<InvalidOperationException>(() => queue.SendNowAsync(account.Id, item.LocalMessageId!));
+        Assert.False(Assert.Single(await queue.GetSnapshotAsync()).SendNowRequested);
+    }
+
     [Fact]
     public async Task ScheduledSend_FromDraft_ConsumesDraftWithoutLeavingCopyInTrash()
     {

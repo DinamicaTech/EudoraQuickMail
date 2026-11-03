@@ -32,4 +32,6 @@ public interface ILocalMailboxStore
     Task<IReadOnlyList<MailMessageSummary>> WakeDueSnoozedMessagesAsync(
         DateTimeOffset nowUtc, CancellationToken ct = default) =>
         Task.FromResult<IReadOnlyList<MailMessageSummary>>([]);
+    Task<string?> CancelSnoozeAsync(Guid accountId, string parkedFolder,
+        string messageId, CancellationToken ct = default) => Task.FromResult<string?>(null);
 }

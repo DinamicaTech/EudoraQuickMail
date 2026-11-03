@@ -39,7 +39,7 @@ public partial class AttachmentBrowserViewModel : ObservableObject, IDisposable
         using var work = new CancellationTokenSource();
         _work = work; IsBusy = true;
         try { await action(work.Token); }
-        catch (OperationCanceledException) when (work.IsCancellationRequested) { Status = "Cancelled."; }
+        catch (Exception) when (work.IsCancellationRequested) { Status = "Cancelled."; }
         catch (Exception ex) { Status = ex.Message; LogService.Log("Attachment browser", ex); }
         finally { IsBusy = false; _work = null; }
     }
@@ -131,5 +131,10 @@ public partial class AttachmentBrowserViewModel : ObservableObject, IDisposable
     });
 
     public void Cancel() => _work?.Cancel();
+    public Action? CaptureCancellation()
+    {
+        var work = _work;
+        return work is null ? null : () => { try { work.Cancel(); } catch (ObjectDisposedException) { } };
+    }
     public void Dispose() { _disposed = true; Cancel(); GC.SuppressFinalize(this); }
 }

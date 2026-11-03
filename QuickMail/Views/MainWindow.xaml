@@ -205,6 +205,9 @@
             <MenuItem Header="Send _Again"
                       AutomationProperties.Name="Send again"
                       Command="{Binding SendAgainCommand}"/>
+            <MenuItem Header="Send _immediately" Tag="send-scheduled-now" Visibility="Collapsed"
+                      AutomationProperties.Name="Send scheduled message immediately"
+                      Click="MessageContextMenu_SendImmediately_Click"/>
             <MenuItem Header="_History" AutomationProperties.Name="Message history">
                 <MenuItem Header="Follow up…" Click="MessageContextMenu_FollowUp_Click"/>
                 <MenuItem Header="_Email history" Tag="email"
@@ -1152,6 +1155,8 @@
                      becomes false: the list row collapses to 0 and the body row takes all the space, so
                      the tab shows just the message rather than a copy of the list with a body sliver. -->
                 <Grid>
+                <ContentControl x:Name="HomeHost" Visibility="Collapsed"/>
+                <Grid x:Name="MailWorkspace">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="{Binding IsPrimaryContentAreaVisible, Converter={StaticResource BoolToGridLengthConverter}, ConverterParameter='*|0'}"/>
                         <RowDefinition Height="Auto"/>
@@ -1281,7 +1286,7 @@
                                                 BorderBrush="{DynamicResource Theme.Border}"
                                                 BorderThickness="1" CornerRadius="3"
                                                 Padding="7,3" Margin="2,1">
-                                            <TextBlock Text="{Binding FileName}" ToolTip="{Binding FileSizeDisplay}"
+                                            <TextBlock x:Name="AttachmentPreviewAnchor" Text="{Binding FileName}" ToolTip="{Binding FileSizeDisplay}"
                                                        TextTrimming="CharacterEllipsis"/>
                                         </Border>
                                     </DataTemplate>
@@ -2328,6 +2333,7 @@
                                 Background="{DynamicResource Theme.WindowBackground}"
                                 Visibility="{Binding IsComposeTabActive, Converter={StaticResource BoolToVisibilityConverter}}"
                                 AutomationProperties.Name="Docked message editor"/>
+                </Grid>
                 </Grid>
 
             </DockPanel>

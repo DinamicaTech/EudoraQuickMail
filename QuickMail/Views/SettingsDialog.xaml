@@ -131,6 +131,14 @@
                                 <CheckBox Content="Show _Today agenda"
                                           IsChecked="{Binding ShowTodayAgenda, Mode=TwoWay}"
                                           Margin="0,6,0,0"/>
+                                <CheckBox Content="Show Home after 15 minutes of inactivity"
+                                          IsChecked="{Binding ShowHomeAfterInactivity, Mode=TwoWay}"
+                                          ToolTip="Only activity inside QuickMail counts. Never interrupts a composer, dialog or operation, and never brings QuickMail to the foreground."
+                                          Margin="0,6,0,0"/>
+                                <CheckBox Content="Preview attachments on hover"
+                                          IsChecked="{Binding AttachmentHoverPreview, Mode=TwoWay}"
+                                          ToolTip="Show images, PDF pages and TXT after hovering for 750 ms. Remote attachments require an explicit download."
+                                          Margin="0,6,0,0"/>
                                 <CheckBox Content="Show filtered destination _tab after applying rules"
                                           IsChecked="{Binding ShowFilteredDestinationTab, Mode=TwoWay}"
                                           Margin="0,6,0,0"/>

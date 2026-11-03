@@ -40,6 +40,12 @@ public partial class SettingsViewModel : ObservableObject
     private bool _showTodayAgenda = true;
 
     [ObservableProperty]
+    private bool _attachmentHoverPreview = true;
+
+    [ObservableProperty]
+    private bool _showHomeAfterInactivity = true;
+
+    [ObservableProperty]
     private int _syncDays;
 
     [ObservableProperty]
@@ -500,6 +506,8 @@ public partial class SettingsViewModel : ObservableObject
         ShowCalendar = cfg.ShowCalendar;
         ShowAccountsPanel = cfg.ShowAccountsPanel;
         ShowTodayAgenda = cfg.ShowTodayAgenda;
+        AttachmentHoverPreview = cfg.AttachmentHoverPreview;
+        ShowHomeAfterInactivity = cfg.ShowHomeAfterInactivity;
         ShowFilteredDestinationTab = cfg.ShowFilteredDestinationTab;
         OpenSearchesInResultsTab = cfg.OpenSearchesInResultsTab;
         SyncDays = cfg.SyncDays;
@@ -606,6 +614,8 @@ public partial class SettingsViewModel : ObservableObject
         cfg.ShowCalendar = ShowCalendar;
         cfg.ShowAccountsPanel = ShowAccountsPanel;
         cfg.ShowTodayAgenda = ShowTodayAgenda;
+        cfg.AttachmentHoverPreview = AttachmentHoverPreview;
+        cfg.ShowHomeAfterInactivity = ShowHomeAfterInactivity;
         cfg.ShowFilteredDestinationTab = ShowFilteredDestinationTab;
         cfg.OpenSearchesInResultsTab = OpenSearchesInResultsTab;
         cfg.SyncDays = SyncDays;

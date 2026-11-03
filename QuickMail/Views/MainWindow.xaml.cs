@@ -314,6 +314,10 @@ public partial class MainWindow : Window
 
         _truthProbe       = truthProbe;
         InitializeComponent();
+        _ = new AttachmentHoverPreview(this, ReadingPaneAttachmentList, () => _vm.MessageDetail,
+            _imap, () => _configService.Load().AttachmentHoverPreview,
+            async (message, ct) => await _localStore.GetSnoozedOriginalFolderAsync(
+                message.AccountId, message.FolderName, message.MessageId, ct) ?? message.FolderName);
         UpdateStatusClock();
         _statusClockTimer.Tick += StatusClockTimer_Tick;
         _statusClockTimer.Start();
@@ -412,6 +416,15 @@ public partial class MainWindow : Window
         FilterFlaggedItem.SubmenuOpened += (_, _) => UpdateFlagSubmenuChecks();
 
         ((ContextMenu)FindResource("MessageContextMenu")).Opened          += (_, _) => RebuildMessageContextFlagsSubmenu();
+        ((ContextMenu)FindResource("MessageContextMenu")).Opened += (_, _) =>
+        {
+            var selected = GetSelectedMessages();
+            var menu = (ContextMenu)FindResource("MessageContextMenu");
+            var send = menu.Items.OfType<MenuItem>().First(i => Equals(i.Tag, "send-scheduled-now"));
+            send.Visibility = _outgoingQueue is ScheduledSendService && selected.Count > 0 &&
+                selected.All(m => string.Equals(m.FolderName, "Scheduled", StringComparison.OrdinalIgnoreCase))
+                ? Visibility.Visible : Visibility.Collapsed;
+        };
         ((ContextMenu)FindResource("ConversationGroupContextMenu")).Opened += (_, _) => RebuildConversationContextFlagsSubmenu();
         ((ContextMenu)FindResource("SenderGroupContextMenu")).Opened       += (_, _) => RebuildSenderContextFlagsSubmenu();
         ((ContextMenu)FindResource("ToGroupContextMenu")).Opened           += (_, _) => RebuildToContextFlagsSubmenu();
@@ -438,6 +451,8 @@ public partial class MainWindow : Window
         vm.CreateRuleFromMessageRequested += (_, template) => OpenRuleFromMessage(template);
         vm.FilterAllLikeThisRequested += async (_, _) => await FilterAllLikeThisAsync();
         vm.TutorialRequested += (_, _) => ShowTutorial();
+        vm.ManualUpdateResultRequested += (_, result) =>
+            MessageBox.Show(this, result, "Check for updates", MessageBoxButton.OK, MessageBoxImage.Information);
         vm.UpdateDialogRequested += (_, info) =>
         {
             var dialog = new UpdateDialog(info.Version, info.WhatsNewUrl, InstallUpdateAsync)
@@ -535,6 +550,8 @@ public partial class MainWindow : Window
         // runs last and wins — the correct post-delete focus position is preserved.
         vm.PropertyChanged += (_, e) =>
         {
+            if (vm.ActiveTab is HomeTabViewModel && e.PropertyName is nameof(MainViewModel.Messages)
+                or nameof(MainViewModel.Conversations) or nameof(MainViewModel.SelectedMessage)) return;
             if (e.PropertyName == nameof(MainViewModel.Messages) && IsActive)
             {
                 LogService.Debug($"[FOCUS] PropChanged:Messages viewMode={_vm.ViewMode} {FocusInfo()}");
@@ -1097,13 +1114,21 @@ public partial class MainWindow : Window
         // selected from history, clearing the observable collection also cleared ComboBox.Text;
         // Search Everywhere then received an empty query and merely reset the result set.
         var query = SearchBox.Text ?? string.Empty;
-        bool slowWildcard;
-        try { slowWildcard = QuickSearchParser.HasSlowWildcard(query); }
-        catch (FormatException) { slowWildcard = false; } // The search itself reports syntax errors.
-        if (slowWildcard && MessageBox.Show(this,
-                "This wildcard search scans message text and may take a while. Continue?",
-                "Slow search", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
-            return;
+        bool hasWildcard;
+        try { hasWildcard = QuickSearchParser.HasWildcard(query); }
+        catch (FormatException) { hasWildcard = false; } // The search itself reports syntax errors.
+        if (hasWildcard)
+        {
+            var choice = MessageBox.Show(this,
+                "The search contains * or ?. How should they be interpreted?\n\n" +
+                "Yes: use wildcards. This may scan message text and be slow; a trailing * prefix can use the index.\n\n" +
+                "No: treat them literally, without wildcard expansion. Text fields use the word index, which ignores punctuation (it does not require the * or ? character to be present). Attachment names use literal filename matching.\n\n" +
+                "Cancel: do not search.",
+                "Search wildcards or literal text", MessageBoxButton.YesNoCancel,
+                MessageBoxImage.Question, MessageBoxResult.No);
+            if (choice == MessageBoxResult.Cancel) return;
+            if (choice == MessageBoxResult.No) query = QuickSearchParser.AsLiteralWildcardSearch(query);
+        }
         var updated = QuickSearchHistory.Add(_quickSearchHistory, query);
         _quickSearchHistory.Clear();
         foreach (var search in updated) _quickSearchHistory.Add(search);
@@ -1113,12 +1138,9 @@ public partial class MainWindow : Window
         var config = _configService.Load();
         config.QuickSearchHistory = updated;
         _configService.Save(config);
-        if (slowWildcard)
-            await RunWithDelayedIndicatorAsync("Searching messages…",
-                () => _vm.RunQuickSearchInTabAsync(query, everywhere),
-                () => _vm.StatusText);
-        else
-            await _vm.RunQuickSearchInTabAsync(query, everywhere);
+        await RunWithDelayedIndicatorAsync("Searching messages…",
+            () => _vm.RunQuickSearchInTabAsync(query, everywhere),
+            () => _vm.StatusText, cancellationProvider: _vm.CaptureSearchCancellation);
     }
 
     private async void SearchButton_Click(object sender, RoutedEventArgs e) => await ExecuteSearchAsync();
@@ -1164,7 +1186,9 @@ public partial class MainWindow : Window
     private void AdvancedSearchButton_Click(object sender, RoutedEventArgs e)
     {
         var window = new AdvancedSearchWindow { Owner = this };
-        window.SearchRequested += async criteria => await _vm.RunAdvancedSearchInTabAsync(criteria);
+        window.SearchRequested += async criteria => await RunWithDelayedIndicatorAsync("Searching…",
+            () => _vm.RunAdvancedSearchInTabAsync(criteria), () => _vm.StatusText,
+            cancellationProvider: _vm.CaptureSearchCancellation);
         window.Show();
     }
 
@@ -1172,13 +1196,13 @@ public partial class MainWindow : Window
     {
         if (e.Key == Key.Enter)
         {
-            await ExecuteSearchAsync(everywhere: Keyboard.Modifiers == ModifierKeys.Control);
-            e.Handled = true;
+            await QuickSearchKeyboard.ExecuteEnterAsync(e, e.KeyboardDevice.Modifiers,
+                everywhere => ExecuteSearchAsync(everywhere));
         }
         else if (e.Key == Key.Escape)
         {
-            await ClearMessageSearchAsync();
             e.Handled = true;
+            await ClearMessageSearchAsync();
         }
         else if (e.Key == Key.Down)
         {
@@ -2047,12 +2071,18 @@ public partial class MainWindow : Window
     // Global key handler (PreviewKeyDown so it fires before any child can swallow the event).
     private async void OnWindowKeyDown(object sender, KeyEventArgs e)
     {
+        // The dashboard must never apply mail shortcuts to hidden selected messages.
+        if (_vm.ActiveTab is HomeTabViewModel) return;
         var modifiers = e.KeyboardDevice.Modifiers;
         var key = e.Key == Key.System
             ? e.SystemKey
             : e.Key == Key.ImeProcessed
                 ? e.ImeProcessedKey
                 : e.Key;
+
+        // The search editor owns Enter/Ctrl+Enter; do not dispatch a global mail command
+        // before its PreviewKeyDown handler can choose the search scope.
+        if (SearchBox.IsKeyboardFocusWithin && key == Key.Enter) return;
 
         // WPF reports AltGr as Ctrl+Alt on many European keyboard layouts. Do not let a
         // character such as @ (AltGr+2 on Spanish keyboards) trigger the global pane shortcut
@@ -2494,7 +2524,7 @@ public partial class MainWindow : Window
 
     private async void FolderList_SelectedItemChanged(object sender, RoutedPropertyChangedEventArgs<object> e)
     {
-        if (Mouse.LeftButton != MouseButtonState.Pressed
+        if (_syncingFolderTreeSelection || Mouse.LeftButton != MouseButtonState.Pressed
             || e.NewValue is not FolderTreeNode { Folder: { } folder }) return;
         _folderSelectionChangedDuringClick = true;
         await _vm.SelectFolderCommand.ExecuteAsync(folder);
@@ -2757,17 +2787,30 @@ public partial class MainWindow : Window
         if (_vm.SelectedFolder == null)
             return false;
 
+        // A saved search can be scoped to the physical folder that was selected when it was
+        // created. That folder supplies the search scope, but the selected tree node remains
+        // the saved view. Otherwise the tree selects In while the mouse is still down and its
+        // SelectedItemChanged handler opens In over the finished search.
+        var targetFolder = _vm.ActiveView is { } view
+            ? new MailFolderModel { FullName = $"\0View:{view.Id}", DisplayName = view.Name }
+            : _vm.SelectedFolder;
+
         var roots = FolderList.Items.OfType<FolderTreeNode>().ToList();
         if (roots.Count == 0)
             return false;
 
-        if (!FindAndExpandFolderPath(roots, _vm.SelectedFolder))
+        if (!FindAndExpandFolderPath(roots, targetFolder))
             return false;
 
         FolderList.UpdateLayout();
-        var target = FindFolderTreeNode(roots, _vm.SelectedFolder);
-        return target != null && SelectTreeViewNode(FolderList, target, focusNode);
+        var target = FindFolderTreeNode(roots, targetFolder);
+        if (target == null) return false;
+        _syncingFolderTreeSelection = true;
+        try { return SelectTreeViewNode(FolderList, target, focusNode); }
+        finally { _syncingFolderTreeSelection = false; }
     }
+
+    private bool _syncingFolderTreeSelection;
 
     private static FolderTreeNode? FindFolderTreeNode(System.Collections.Generic.IEnumerable<FolderTreeNode> nodes, MailFolderModel target)
         => TreeViewFocusHelper.FindFolderTreeNode(nodes, target);
@@ -7421,6 +7464,10 @@ public partial class MainWindow : Window
         _tabStripCloseInProgress = false;
 
         var tab = _vm.ActiveTab;
+        var home = tab is HomeTabViewModel;
+        HomeHost.Visibility = home ? Visibility.Visible : Visibility.Collapsed;
+        MailWorkspace.Visibility = home ? Visibility.Collapsed : Visibility.Visible;
+        if (home) { await RefreshHomeAsync(); return; }
         if (tab == null)
         {
             _vm.IsMessageOpen = false;
@@ -7461,8 +7508,10 @@ public partial class MainWindow : Window
         {
             _vm.IsMessageOpen = false;
             _vm.MessageDetail = null;
-            if (listTab.Folder != null && (_vm.SelectedFolder == null ||
-                !FolderMatches(listTab.Folder, _vm.SelectedFolder)))
+            var tabIsCurrentView = listTab.Folder is { } tabFolder && _vm.ActiveView is { } activeView &&
+                string.Equals(tabFolder.FullName, $"\0View:{activeView.Id}", StringComparison.Ordinal);
+            if (!_vm.IsFolderSelectionInProgress && !tabIsCurrentView && listTab.Folder != null &&
+                (_vm.SelectedFolder == null || !FolderMatches(listTab.Folder, _vm.SelectedFolder)))
                 await _vm.SelectFolderCommand.ExecuteAsync(listTab.Folder);
             if (closeInProgress)
                 await Dispatcher.InvokeAsync(FocusActiveTabStripItem, DispatcherPriority.Input);
@@ -7730,6 +7779,8 @@ public partial class MainWindow : Window
     private async void CheckMailButton_Click(object sender, RoutedEventArgs e)
     {
         if (Application.Current is not App app) return;
+        if (_vm.IsManualCheckMailRunning) return;
+        _vm.IsManualCheckMailRunning = true;
         if (app.MailActivityPolicy is { Mode: not MailActivityMode.Online } activity)
         {
             activity.GoOnline();
@@ -7740,17 +7791,24 @@ public partial class MainWindow : Window
         try
         {
             var failures = new List<MailOperationFailure>();
-            failures.AddRange(await _vm.CheckRemoteMailNowAsync(message =>
+            var remoteCheck = _vm.CheckRemoteMailNowAsync(message =>
             {
                 _vm.IsStatusHighlighted = true;
                 _vm.StatusText = message;
-            }));
-            failures.AddRange(await app.CheckMailNowAsync(message =>
+            });
+            var pop3Check = app.CheckMailNowAsync(message =>
             {
                 _vm.IsStatusHighlighted = true;
                 _vm.StatusText = message;
-            }));
-            await _vm.RefreshCommand.ExecuteAsync(null);
+            }, dispatchQueued: false);
+            var checkResults = await Task.WhenAll(remoteCheck, pop3Check);
+            foreach (var result in checkResults) failures.AddRange(result);
+            if (app.ScheduledSender != null)
+            {
+                _vm.StatusText = "Sending queued messages…";
+                failures.AddRange(await app.ScheduledSender.DispatchDueAsync(manual: true));
+            }
+            await _vm.RefreshAfterManualCheckAsync();
             _vm.IsStatusHighlighted = true;
             _vm.StatusText = failures.Count == 0
                 ? "Mail check complete."
@@ -7769,7 +7827,11 @@ public partial class MainWindow : Window
             _vm.StatusText = $"Mail check failed: {ex.Message}";
             LogService.Log("Manual Check Mail", ex);
         }
-        finally { _vm.IsBusy = false; }
+        finally
+        {
+            _vm.IsManualCheckMailRunning = false;
+            _vm.IsBusy = false;
+        }
     }
 
     private void PromoteTabToWindow(MessageTabViewModel tab)
@@ -8264,6 +8326,7 @@ public partial class MainWindow : Window
 
     private List<MailMessageSummary> GetSelectedMessages()
     {
+        if (_vm.ActiveTab is HomeTabViewModel) return [];
         // MessageList (standard view)
         if (MessageList.IsVisible && MessageList.SelectedItems.Count > 0)
             return MessageList.SelectedItems.OfType<MailMessageSummary>().ToList();
@@ -8774,9 +8837,10 @@ public partial class MainWindow : Window
         }
     }
 
-    private async Task RunWithDelayedIndicatorAsync(string title, Func<Task> operation, Func<string>? statusProvider = null, bool activate = true)
+    private async Task RunWithDelayedIndicatorAsync(string title, Func<Task> operation, Func<string>? statusProvider = null, bool activate = true, Func<Action?>? cancellationProvider = null)
     {
         var work = operation();
+        var cancel = cancellationProvider?.Invoke();
         var delay = Task.Delay(TimeSpan.FromSeconds(2));
         if (await Task.WhenAny(work, delay) == work)
         {
@@ -8785,7 +8849,7 @@ public partial class MainWindow : Window
         }
 
         if (work.IsCompleted || !IsVisible) { await work; return; }
-        var indicator = new SlowOperationWindow(title, statusProvider ?? (() => _vm.StatusText)) { Owner = this, ShowActivated = activate };
+        var indicator = new SlowOperationWindow(title, statusProvider ?? (() => _vm.StatusText), cancel) { Owner = this, ShowActivated = activate };
         indicator.Show();
         try { await work; }
         finally { indicator.Close(); }
@@ -8826,6 +8890,24 @@ public partial class MainWindow : Window
             : (sender as MenuItem)?.Tag as string == "empty-junk" ? SpecialFolderKind.Junk
             : SpecialFolderKind.RecoveryDeleted;
         await _vm.EmptySystemFolderAsync(folder, kind);
+    }
+
+    private async void MessageContextMenu_SendImmediately_Click(object sender, RoutedEventArgs e)
+    {
+        if (_outgoingQueue is not ScheduledSendService scheduler) return;
+        var selected = GetSelectedMessages().ToList();
+        if (selected.Count == 0 || selected.Any(m => !string.Equals(m.FolderName, "Scheduled", StringComparison.OrdinalIgnoreCase))) return;
+        var requested = 0;
+        var failures = new List<string>();
+        foreach (var message in selected)
+        {
+            try { await scheduler.SendNowAsync(message.AccountId, message.MessageId); requested++; }
+            catch (Exception ex) { failures.Add($"{message.Subject}: {ex.Message}"); }
+        }
+        _vm.StatusText = $"Immediate sending requested for {requested} message(s).";
+        if (failures.Count > 0)
+            MessageBox.Show(this, _vm.StatusText + "\n\n" + string.Join("\n", failures), "Send immediately",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
     }
 
     private async void MessageContextMenu_Snooze_Click(object sender, RoutedEventArgs e)
@@ -9679,7 +9761,7 @@ public partial class MainWindow : Window
 
     private async void OpenRulesManager(MailRule? template = null,
         IReadOnlyCollection<string>? targetFolderFilter = null, Guid? selectRuleId = null,
-        MailMessageSummary? compatibilityMessage = null, string? compatibilityBodyOverride = null)
+        MailMessageSummary? compatibilityMessage = null, string? compatibilityBodyOverride = null, bool forceClientEditor = false)
     {
         // Repair the short-lived internal-id spelling that older folder pickers persisted. Rules
         // should contain a human-readable canonical path, both for the editor and for diagnostics.
@@ -9858,7 +9940,7 @@ public partial class MainWindow : Window
 
         Window dialog;
         UnifiedRulesWindow? unifiedWindow = null;
-        if (_serverRuleService != null
+        if (!forceClientEditor && _serverRuleService != null
             && _featureGate.IsEnabled(FeatureFlag.ServerRules)
             && accounts.Any(a => a.BackendKind == BackendKind.MicrosoftGraph))
         {
@@ -9868,6 +9950,11 @@ public partial class MainWindow : Window
                 _ruleService, _serverRuleService, accounts, _vm.CachedFolders, _vm.SelectedAccount?.Id,
                 selectedMessagesForTest: selectedMessages, configService: _configService);
             unifiedVm.RunOnExistingRequested += RunClientRulesOnExisting;
+            unifiedVm.ClientEditorRequested += rule =>
+            {
+                unifiedWindow?.Close();
+                OpenRulesManager(selectRuleId: rule.Id, forceClientEditor: true);
+            };
             // The window prefills from the template (Ctrl+Shift+F) in its Loaded handler, once shown.
             unifiedWindow = new UnifiedRulesWindow(unifiedVm, accounts, _vm.CachedFolders, template);
             dialog = unifiedWindow;
@@ -9885,6 +9972,13 @@ public partial class MainWindow : Window
                 targetFolderFilter: targetFolderFilter);
             foreach (var replyTemplate in await _templateService.LoadAllAsync())
                 rulesVm.ReplyTemplates.Add(replyTemplate);
+            if (_flagService != null)
+            {
+                rulesVm.FlagOptions.Clear();
+                rulesVm.FlagOptions.Add(new RuleFlagOption(null, "Remove flag"));
+                foreach (var flag in await _flagService.LoadFlagDefinitionsAsync())
+                    rulesVm.FlagOptions.Add(new RuleFlagOption(flag.Id.ToString(), flag.Name));
+            }
             if (selectRuleId is { } ruleId) rulesVm.SelectRule(ruleId);
             rulesVm.RunOnExistingRequested += RunClientRulesOnExisting;
             rulesVm.ApplyToCurrentFolderRequested += ApplySelectedRuleToCurrentFolder;

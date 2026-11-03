@@ -87,6 +87,9 @@ public partial class MainWindow
         finally { _backupPollRunning = false; }
     }
     private void MenuBackupRestore_Click(object sender, RoutedEventArgs e)
+        => OpenBackupConfiguration(null);
+
+    private void OpenBackupConfiguration(string? tab)
     {
         try
         {
@@ -106,6 +109,7 @@ public partial class MainWindow
             }
             var start = new ProcessStartInfo(executable) { UseShellExecute = true };
             start.ArgumentList.Add("/config"); start.ArgumentList.Add("/job"); start.ArgumentList.Add(path);
+            if (!string.IsNullOrWhiteSpace(tab)) { start.ArgumentList.Add("/tab"); start.ArgumentList.Add(tab); }
             Process.Start(start);
         }
         catch (Exception ex) { MessageBox.Show(this, ex.Message, "Backup and Restore", MessageBoxButton.OK, MessageBoxImage.Error); }

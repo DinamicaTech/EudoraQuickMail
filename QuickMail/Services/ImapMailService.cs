@@ -1306,6 +1306,8 @@ public class ImapMailService : IMailService, IChangeNotifier, IConnectionProbe
                       HostConnectionCensus.Describe(account.ImapHost));
 
             var perf = $"account={account.Id}; host={account.ImapHost}";
+            var testEndpoint = $"IMAP {account.ImapHost}:{account.ImapPort} ({ssl})";
+            ConnectionTestTrace.Report(testEndpoint + ": connecting (DNS, TCP, server greeting and TLS)…");
             await FilterOperationTrace.RunAsync("IMAP: connect/TCP-TLS", perf,
                 "Connecting to the IMAP server…", () => client.ConnectAsync(account.ImapHost, account.ImapPort, ssl, ct));
             connected = true;
@@ -1313,8 +1315,10 @@ public class ImapMailService : IMailService, IChangeNotifier, IConnectionProbe
 
             if (account.AuthType is AuthType.OAuth2Microsoft or AuthType.OAuth2Google)
             {
+                ConnectionTestTrace.Report(testEndpoint + ": obtaining OAuth access token…");
                 var token = await FilterOperationTrace.RunAsync("IMAP: connect/OAuth token", perf,
                     "Obtaining IMAP authorization…", () => _oauth.GetAccessTokenAsync(account, ct));
+                ConnectionTestTrace.Report(testEndpoint + ": authenticating with OAuth…");
                 await FilterOperationTrace.RunAsync("IMAP: connect/authenticate", perf,
                     "Authenticating with the IMAP server…",
                     () => client.AuthenticateAsync(new SaslMechanismOAuth2(account.Username, token), ct));
@@ -1323,6 +1327,7 @@ public class ImapMailService : IMailService, IChangeNotifier, IConnectionProbe
             {
                 if (password is null)
                     throw new InvalidOperationException($"No password is available for account {account.Username}.");
+                ConnectionTestTrace.Report(testEndpoint + ": authenticating with username/password…");
                 await FilterOperationTrace.RunAsync("IMAP: connect/authenticate", perf,
                     "Authenticating with the IMAP server…",
                     () => client.AuthenticateAsync(account.AuthUsername, password, ct));

@@ -58,7 +58,7 @@ public partial class RulesManagerWindow : Window
         // Focus the client rule list on open (#348).
         Loaded += (_, _) =>
         {
-            Height = Math.Min(Height, SystemParameters.WorkArea.Height * 0.9);
+            Height = Math.Min(Height, SystemParameters.WorkArea.Height * 0.95);
             FocusFirstRule();
         };
     }
@@ -237,12 +237,20 @@ public partial class RulesManagerWindow : Window
 
         if (e.Key == Key.Escape)
         {
-            if (AccountScopeCombo.IsDropDownOpen || ActionCombo.IsDropDownOpen)
+            if (HasOpenCombo(this))
                 return;
 
             Close();
             e.Handled = true;
         }
+    }
+
+    private static bool HasOpenCombo(DependencyObject parent)
+    {
+        if (parent is ComboBox { IsDropDownOpen: true }) return true;
+        for (var i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)
+            if (HasOpenCombo(VisualTreeHelper.GetChild(parent, i))) return true;
+        return false;
     }
 
     protected override void OnClosed(EventArgs e)

@@ -83,7 +83,7 @@ public static class LogService
         {
             try
             {
-                File.AppendAllText(_logFile, line);
+                Helpers.BoundedLogFile.Append(_logFile, line);
                 return;
             }
             catch (IOException) when (attempt < maxAttempts)

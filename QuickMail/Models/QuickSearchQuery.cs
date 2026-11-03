@@ -5,17 +5,51 @@ namespace QuickMail.Models;
 
 public enum QuickSearchField { Any, To, From, Cc, Subject, Body, AttachmentCount, AttachmentName, AttachmentContent, Date, Unread, Flagged, Incoming, Outgoing, Spam, Notes }
 
-public sealed record QuickSearchTerm(QuickSearchField Field, string Operator, string Value);
+public sealed record QuickSearchTerm(QuickSearchField Field, string Operator, string Value, bool Literal = false);
 public sealed record QuickSearchGroup(IReadOnlyList<QuickSearchTerm> Alternatives);
 public sealed record ParsedQuickSearch(IReadOnlyList<QuickSearchGroup> Groups);
 
 /// <summary>Parser for the compact search language used by the main search box.</summary>
 public static class QuickSearchParser
 {
+    public static bool HasWildcard(string input) => Parse(input).Groups
+        .SelectMany(group => group.Alternatives).Any(term => !term.Literal &&
+            (term.Value.Contains('*') || term.Value.Contains('?')));
+
+    // Persist the choice in the query itself, including history and saved searches.
+    public static string AsLiteralWildcardSearch(string input)
+    {
+        static string Format(QuickSearchTerm term)
+        {
+            var prefix = term.Field switch
+            {
+                QuickSearchField.Any => "", QuickSearchField.To => "T:",
+                QuickSearchField.From => "F:", QuickSearchField.Cc => "C:",
+                QuickSearchField.Subject => "S:", QuickSearchField.Body => "B:",
+                QuickSearchField.Notes => "N:", QuickSearchField.AttachmentName => "AN:",
+                QuickSearchField.AttachmentContent => "AC:",
+                QuickSearchField.Date => "D" + term.Operator,
+                QuickSearchField.AttachmentCount => "A#" + term.Operator,
+                QuickSearchField.Unread => "N", QuickSearchField.Flagged => "F",
+                QuickSearchField.Incoming => "I", QuickSearchField.Outgoing => "O",
+                QuickSearchField.Spam => "is:spam", _ => ""
+            };
+            if (term.Value.Length == 0) return prefix;
+            return prefix + "\"" + term.Value.Replace("\"", "\"\"") + "\"";
+        }
+        // OR groups use a common field prefix in this grammar.
+        return string.Join(";", Parse(input).Groups.Select(group =>
+        {
+            var first = Format(group.Alternatives[0]);
+            if (group.Alternatives.Count == 1) return first;
+            return first[..first.IndexOf('"')] + "(" + string.Join(";", group.Alternatives.Select(t =>
+                "\"" + t.Value.Replace("\"", "\"\"") + "\"")) + ")";
+        }));
+    }
     /// <summary>Leading or embedded * requires a scan of indexed text instead of an FTS prefix lookup.</summary>
     public static bool HasSlowWildcard(string input) =>
         Parse(input).Groups.SelectMany(group => group.Alternatives).Any(term =>
-            (term.Field is QuickSearchField.Any or QuickSearchField.To or QuickSearchField.From
+            !term.Literal && (term.Field is QuickSearchField.Any or QuickSearchField.To or QuickSearchField.From
                 or QuickSearchField.Cc or QuickSearchField.Subject or QuickSearchField.Body or QuickSearchField.Notes
                 or QuickSearchField.AttachmentName or QuickSearchField.AttachmentContent)
             && (term.Value.Contains('?') || term.Value.Contains('*') &&
@@ -56,7 +90,7 @@ public static class QuickSearchParser
             }
             if (IsEntirelyQuoted(token))
             {
-                groups.Add(new([new(QuickSearchField.Any, ":", Unquote(token))]));
+                groups.Add(new([new(QuickSearchField.Any, ":", Unquote(token), true)]));
                 continue;
             }
 
@@ -64,12 +98,12 @@ public static class QuickSearchParser
             if (parsed.Value.Length >= 2 && parsed.Value[0] == '(' && parsed.Value[^1] == ')')
             {
                 var alternatives = SplitTopLevel(parsed.Value[1..^1], ';')
-                    .Select(v => new QuickSearchTerm(parsed.Field, parsed.Operator, Unquote(v.Trim())))
+                    .Select(v => new QuickSearchTerm(parsed.Field, parsed.Operator, Unquote(v.Trim()), IsEntirelyQuoted(v.Trim())))
                     .Where(v => v.Value.Length > 0).ToList();
                 if (alternatives.Count == 0) throw new FormatException("An OR group cannot be empty.");
                 groups.Add(new(alternatives));
             }
-            else groups.Add(new([parsed with { Value = Unquote(parsed.Value.Trim()) }]));
+            else groups.Add(new([parsed with { Value = Unquote(parsed.Value.Trim()), Literal = IsEntirelyQuoted(parsed.Value.Trim()) }]));
         }
         return new(groups);
     }

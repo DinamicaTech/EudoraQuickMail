@@ -6,6 +6,7 @@ QuickMail is a keyboard and screen reader friendly email program for Windows. Gm
 
 ## Contents
 
+- [Home dashboard](#home-dashboard)
 - [System Requirements](#system-requirements)
 - [Installing and Updating QuickMail](#installing-and-updating-quickmail)
 - [Accounts](#accounts)
@@ -121,6 +122,53 @@ Remove QuickMail from **Settings → Apps** as usual. After the app is removed, 
 
 ---
 
+## Home dashboard
+
+The fixed **Home** tab summarizes account health, backups, pending mail and local mail activity.
+Receiving and sending are tracked separately. Errors remain visible until a successful operation
+or connection test for that channel. Unknown or old results are not a guarantee that a server is
+available. This history begins with the first version supporting the dashboard; it does not infer
+past SMTP success from a stored password. Double-click an account to edit it or test its connection.
+
+Backup information comes only from local receipts: opening Home never connects to the NAS or
+changes network credentials. An external backup window is not proof that the external backup
+succeeded. **Backup settings** and **History** open the corresponding backup-agent tab.
+Restore-test warnings offer a direct link to the Restore test settings.
+
+The attention panel groups problems with an action beside each warning. **Test** checks one
+account; **Test all** checks active network accounts with progress and cancellation. **Test sending
+on all accounts** connects/authenticates without sending an email (Graph sending permissions cannot
+be verified this way). **Check these accounts now** downloads mail for accounts with no receive
+check recorded. These checks run only when explicitly requested, not when Home opens.
+
+Activity counts use stored message dates, not download dates. Gmail label copies with the same
+Message-ID are grouped within each account. Drafts and scheduled messages are excluded from
+activity; pending unread also excludes Trash, Junk and RecoveryDeleted. Counts describe local
+data, so unsynchronized mail and messages with unknown direction may not be represented.
+The account selector scopes the statistics; the shortcut search buttons explicitly search all
+accounts; the unread shortcut excludes Trash, Junk and RecoveryDeleted to match the pending count.
+Changing the account selector reuses the loaded statistics without another database query.
+The daily comparison uses elapsed calendar days this week/month, including today. **Folders to
+review** lists local unread counts and drafts, with buttons to open those folders. Today's events
+retain their calendar account colors and **New appointment** opens the existing event editor.
+
+**Google Calendar** shows each configured Google calendar account, whether calendar sync is
+enabled, its last successful synchronization and any recorded failure. **Sync now** retries that
+account only, with progress and cancellation; it does not send or receive mail. Offline/Focus
+mode and ongoing maintenance block this action. Opening Home itself only reloads cached events.
+Calendar health starts being recorded with this feature; older successful synchronizations cannot
+be inferred from existing appointments. Today's agenda includes all calendar sources regardless
+of the Calendar tab's source filter, shows all-day events first, then timed events, and retains
+cached appointments with a warning when synchronization is unverified or stale. Double-click an
+appointment to use the same open/edit behavior as the calendar, including existing read-only
+restrictions and invitation handling.
+
+In **Settings → General**, **Show Home after 15 minutes of inactivity** is enabled by default.
+It measures activity in QuickMail, waits while an editor/dialog/operation is open, and does not
+bring the application to the foreground. Your other tabs and list selection remain available.
+Home loads asynchronously and refreshes at most every five minutes while visible, unless you
+press **Refresh**. Statistics have a time limit and can be retried without blocking mail use.
+
 ## Accounts
 
 Adding an account, changing one, testing it, and removing it all happen in **Manage Accounts**. Open it from **File → Manage Accounts…**, from the **Accounts** button on the toolbar, or from the Command Palette (**Ctrl+Shift+P**) by choosing **Manage Accounts**. It has no keyboard shortcut of its own to begin with; you can give it one under **File → Settings → Keyboard Shortcuts**.
@@ -214,6 +262,8 @@ If you already had an account set up that way, QuickMail copies the login name i
 ### Testing a connection
 
 **Test Connection** is on both the Add Account dialog and Manage Accounts, so it is as useful on an account that has stopped working as on one you are still setting up. In Manage Accounts it appears as soon as an account is selected.
+
+The test displays a progress window with the current protocol/phase, elapsed time and **Cancel test**. No email is sent. SMTP and IMAP identify connection/TLS negotiation, OAuth authorization and authentication; POP3 also checks UIDL. Errors show the configured host, port, transport mode, failing phase, elapsed time and underlying socket/server error when available. A connection timeout does not by itself mean the password is wrong. Per-phase timing is recorded in `performance.log`; diagnostic failures are recorded in `quickmail.log` with the entered password redacted and without a protocol transcript.
 
 QuickMail checks **incoming and outgoing mail separately** and reports both — "IMAP: OK. SMTP: OK." A failure names its own side and gives the reason, so a working inbox with a misconfigured send server is caught here rather than the first time you try to send. Neither check waits longer than 30 seconds; one that runs out of time reports that it timed out rather than leaving you waiting.
 
@@ -803,6 +853,8 @@ Press `Ctrl+K` to check every address in the To, Cc, and Bcc fields. QuickMail l
 
 ### Sending
 
+In **Scheduled**, select one or more messages and choose **Send immediately** from the message context menu to request background sending now. Other scheduled messages keep their dates. Repeated messages keep their original recurrence calendar for subsequent deliveries. Offline mode and backup maintenance still block sending, and a message already being sent or accepted by SMTP cannot be resent through this option.
+
 | Shortcut | Action |
 |----------|--------|
 | `Alt+S` or `Ctrl+Enter` | Send |
@@ -967,7 +1019,23 @@ Open the **Rules Manager** from the **Tools** menu (`Ctrl+Shift+L`) or the comma
 - **Enabled** — turn a rule off without deleting it.
 - **Account** — which mailbox the rule watches. Every rule belongs to exactly one account; see [Rules belong to one account](#rules-belong-to-one-account).
 - **Conditions** — **From**, **To**, **Subject**, **Body**, and **Has attachments**. Check the ones you want and type the text to look for; the match is not case sensitive and looks for your text anywhere in the field. A message must satisfy **every** condition you checked, so leaving a condition unchecked is how you say "don't care".
-- **Action** — one of **Mark as read**, **Mark as unread**, **Move to folder**, or **Delete**. Choosing Move to folder adds a **Choose Folder…** button; the button then shows the folder you picked. The picker is the same folder tree used everywhere else you choose a destination, showing the folders of the rule's own account — a rule files mail within one mailbox. It opens on the folder the rule already files into, or on the first folder for a new rule.
+- **Actions** — all actions appear as directly editable blocks, separated by horizontal lines. Use **Add action** to combine **Forward**, **Reply template**, **Flag**, **Execute**, **Move to folder**, **Delete**, or read/unread changes. The last option in each action dropdown, **Remove action**, removes that block. Move/Delete automatically sort last; only one Move/Delete action is supported. Only parameters relevant to that action appear.
+- **Mark as read** is the first block, an independent checkbox enabled by default. There is no need to add a separate read action to ordinary filters. Removing all other actions leaves a read-only rule; unchecking Mark as read then requires adding an action before saving.
+- **Forward** accepts one address per action. Multiple recipients display a warning: use a separate Forward action for each recipient.
+- **Execute** runs a trusted local `.exe` command once per matching message, as your Windows user, without elevation or sandboxing. Quote executable paths containing spaces. For scripts, use an explicit interpreter, for example `powershell.exe -NoProfile -File "C:\Scripts\lights.ps1"`. **Add subject to command line** appends the subject as one final literal argument; the script must treat it as data, never evaluate it as code. This option rejects `cmd.exe` and requires `-File` with PowerShell. Commands time out after 60 seconds; cancellation stops the process tree. A nonzero exit code fails the action and stops later actions. Effects already performed cannot be undone; manually applying a rule again runs the command again. Use narrow conditions and remember that a sender address can be forged. Test Rule/Preview never executes commands.
+
+For **Forward + Move**, EQM first durably queues forwarding, then marks the original read if requested,
+then moves it. This does not wait for SMTP delivery: if sending later fails, its queued copy remains
+managed by Scheduled. Forward/reply duplicate and loop protections still apply. **Move or Delete
+always runs last**, with at most one destination action per rule. There may be only one Reply template
+action, consistent with its per-sender protection. Combining Mark as unread with other actions
+requires clearing Also mark as read.
+
+If a step fails, remaining actions stop and the error lists completed steps. Earlier work is not
+rolled back, and a failed step may have processed part of a multi-message selection. Cancellation
+also does not undo queued forwards or earlier changes. Test Rule/Preview lists the planned actions.
+SPAM filters remain specialized single-action rules. Cleanup does not remove multi-action rules
+merely because their destination is In or missing; review those rules manually.
 
 **Test Rule** runs the rule against the messages currently in your list and tells you how many it would match, so you can check a rule before letting it loose. **Save** stores the rule; **New Rule** and **Delete** manage the list.
 
@@ -979,7 +1047,7 @@ Every enabled rule for the account is tried, in list order, and each one that ma
 
 Enable **Active until (inclusive)** to limit a rule to a local calendar date. After that date the rule remains saved but is skipped, including manual execution. Clear the checkbox to remove expiration. Changing the date does not retroactively undo earlier actions.
 
-The **Reply template** action selects an existing template and sends its text from the receiving account to Reply-To (or From if Reply-To is absent). It preserves the original message, uses the template subject when supplied (otherwise `Re:` plus the original subject), and does not attach the original attachments. The existing `{sender}`, `{date}` and `{time}` template substitutions are supported. Create/edit templates from the composer before choosing them in Rule Manager.
+The **Reply template** action selects an existing template and sends its text from the receiving account to Reply-To (or From if Reply-To is absent). It preserves the original unless another action moves it, uses the template subject when supplied (otherwise `Re:` plus the original subject), and does not attach the original attachments. The existing `{sender}`, `{date}` and `{time}` template substitutions are supported. Create/edit templates from the composer before choosing them in Rule Manager.
 
 For vacation replies, choose the account, template and expiration date, enable automatic processing, and leave conditions empty if the reply should cover all eligible incoming senders. There is at most one queued reply per sender, rule and expiration date, even after restarting EQM. Changing expiration starts a new response period. Without expiration, the same sender receives only one reply for that rule. Removing a queued automatic reply does not reset that protection.
 
@@ -1854,6 +1922,20 @@ confirmation.
 
 ## Private Notes and message investigation
 
+### Search punctuation and wildcards
+
+When an F3 search contains an unquoted `*` or `?`, QuickMail asks how to interpret it:
+**Yes** enables wildcard matching (potentially a slow text scan; a single trailing `*`
+can use the prefix index), **No** searches literal text without wildcard expansion,
+and **Cancel** does not run the search. No is the default.
+Literal terms are stored in quotes in search history and saved views. You can also
+type quotes yourself, for example `S:"Annual report?"`. The word index ignores
+punctuation: this finds the words, not necessarily the question-mark character.
+Attachment-name searches use literal filename matching instead of the word index.
+Searches run off the UI thread. If a search takes over two seconds, its progress
+window offers **Cancel search**; no percentage is shown because SQLite does not
+provide a reliable completion percentage.
+
 **Notes:** beneath Subject in composition and the existing-message editor holds private keywords or
 annotations. It is stored locally and backed up with the database, never sent to recipients. The
 message list has a sortable Notes column. General search includes notes; use `N:project` to search
@@ -1878,10 +1960,28 @@ or deletion. Events are retained up to 90 days and 100,000 events per profile, w
 shown per message. Gmail labels sharing a Message-ID share the activity history within the account.
 # Attachment investigation tools
 
+Hover over an attachment for 750 ms to preview JPG/JPEG, PNG, GIF (first frame), BMP, PDF or TXT.
+This works in the reading pane and detached message windows. The floating preview does not select
+the attachment or take keyboard focus; right-click, double-click and drag remain available.
+Move onto the preview to scroll text or use Previous/Next page for PDFs. Move away or press Esc to
+close it. Clicking the attachment closes the preview before the normal attachment action.
+The preview opens beside the attachment label on the right, up to 900 × 1000 logical pixels,
+and shifts vertically to fit the monitor. Smaller screens use a reduced preview; the left side
+is used only when there is insufficient room on the right.
+Remote attachments require **Download and preview**; hovering never downloads them automatically.
+Previews are limited to 25 MB, text to 64K characters, and large images to 100 million source pixels.
+TXT preserves line breaks (UTF-8 and BOM-marked UTF-16/UTF-32); PDF pages are rendered by Windows,
+not a browser. Missing files show the original path. Disable **Preview attachments on hover** in
+Settings > General > display options if preferred (enabled by default).
+
 **Tools > Attachment explorer** lists cached attachments in the current folder, or throughout EQM
 with **Everywhere**. Search filenames, senders or subjects; sort the columns; save selected files
 without overwriting existing names; or use **Go to message**. Embedded images and messages whose
 attachment metadata has not been downloaded are excluded. A capped result asks you to refine the search.
+The title counts displayed attachment rows. Sizes are shown in MB (1,048,576 bytes), with two
+decimal places and regional separators, right-aligned and sorted numerically. Search reads cached
+database metadata only; it does not scan directories. Directory scanning is a separate, explicit
+**Locate missing attachment** operation.
 
 For a missing file, select **Locate missing attachment**, choose a backup directory and inspect the
 candidates. **Recover a copy** copies into EQM; **Use candidate location** changes only this reference.
@@ -1893,3 +1993,24 @@ listing active matching rules in execution order and flagging competing actions.
 remain visible. This is a read-only simulation, not execution or a guarantee of remote delivery.
 
 See [Attachment investigation](ATTACHMENT-INVESTIGATION.md) for scope, keyboard navigation and limitations.
+
+## Reliability and diagnostics
+
+If delivery succeeds but EQM cannot save the sent copy, the message stays in Scheduled as
+**Sent — archival pending**. It retries saving the copy without sending the email again.
+An already-sent message cannot be edited or replaced as an unsent scheduled message.
+Switching to Offline allows an active send to finish but stops subsequent queued sends.
+
+Advanced searches run without blocking the interface. Long searches show **Cancel search**;
+cancellation keeps the previous results rather than substituting incomplete results.
+**Help > Check for updates** reports its result explicitly, including disabled checks and failures.
+
+Damaged or unreadable `accounts.json`, `rules.json` or `views.json` is reported rather than
+silently replaced with an empty configuration. Close EQM and restore a known-good backup;
+the `.previous` sibling file contains the previous valid saved version when available.
+Do not assume that an older configuration includes your latest account/rule changes.
+
+Each diagnostic log (`quickmail.log`, `performance.log`) keeps up to three rotated files
+(`.1` newest through `.3` oldest), in addition to the current file, with a 10 MiB limit per file
+for newly generated logs. Existing oversized logs rotate on the next write. When reporting an
+issue, include the relevant rotated files if the operation is no longer in the current log.
