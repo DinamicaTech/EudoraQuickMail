@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' https://*.ts.net:*; form-action 'self'; base-uri 'none'">
+  <title>QuickMail private access</title>
+  <style>
+    :root { color-scheme: light dark; font: 16px/1.5 system-ui, sans-serif; }
+    body { margin: 0 auto; padding: 1rem; max-width: 1050px; }
+    button, input, select, textarea { font: inherit; }
+    button { padding: .5rem .8rem; cursor: pointer; }
+    input, select, textarea { box-sizing: border-box; width: 100%; padding: .5rem; }
+    textarea { min-height: 16rem; resize: vertical; }
+    label { display: block; margin: .8rem 0; }
+    header, .actions, .pagination { display: flex; gap: .6rem; align-items: center; flex-wrap: wrap; }
+    header { justify-content: space-between; border-bottom: 1px solid #888; margin-bottom: 1rem; }
+    header h1 { font-size: 1.4rem; }
+    main { display: grid; grid-template-columns: minmax(250px, 34%) minmax(0, 1fr); gap: 1rem; }
+    .message { display: block; text-align: left; width: 100%; border: 0; border-bottom: 1px solid #8888; background: transparent; padding: .7rem; }
+    .message:hover, .message:focus { background: #8883; }
+    .message.unread { font-weight: 700; }
+    .message small { display: block; font-weight: normal; }
+    .body { white-space: pre-wrap; overflow-wrap: anywhere; }
+    .panel { border: 1px solid #8888; border-radius: .4rem; padding: 1rem; min-width: 0; }
+    .muted { opacity: .8; }
+    .warning, #status { padding: .6rem; }
+    .warning { border: 1px solid #b76d00; }
+    #login { max-width: 450px; margin: 4rem auto; }
+    #status:empty { display: none; }
+    [hidden] { display: none !important; }
+    @media (max-width: 700px) { main { display: block; } .panel { margin-top: 1rem; } }
+  </style>
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <section id="login" class="panel" hidden>
+    <h1>QuickMail private access</h1>
+    <p>Enter the access code shown in EQM on your computer. This page works only while EQM is running.</p>
+    <form id="login-form">
+      <label id="server-label" hidden>Private EQM address <input id="server" type="url" placeholder="https://my-computer.my-tailnet.ts.net" autocomplete="off"></label>
+      <label>Access code <input id="code" type="password" autocomplete="off" required></label>
+      <button type="submit">Sign in</button>
+    </form>
+  </section>
+  <section id="mail" hidden>
+    <header><h1>QuickMail</h1><div class="actions"><button id="new">New message</button><button id="refresh">Refresh</button><button id="logout">Sign out</button></div></header>
+    <p id="status" role="status" aria-live="polite"></p>
+    <main>
+      <section aria-label="Inbox" class="panel">
+        <label>Account <select id="account-filter"><option value="">All accounts</option></select></label>
+        <div id="messages"></div>
+        <div class="pagination"><button id="newer" disabled>Newer</button><button id="older" disabled>Older</button></div>
+      </section>
+      <section id="detail" class="panel" aria-label="Message details"><p>Select a message.</p></section>
+      <section id="compose" class="panel" aria-label="Compose message" hidden>
+        <h2 id="compose-title">New message</h2>
+        <p id="attachment-warning" class="warning" hidden>Attachments from the original message are not included in remote forwards. Use desktop EQM to forward them.</p>
+        <form id="compose-form">
+          <label>From <select id="from-account" required></select></label>
+          <label>To <input id="to" type="text" required></label>
+          <label>Cc <input id="cc" type="text"></label>
+          <label>Bcc <input id="bcc" type="text"></label>
+          <label>Subject <input id="subject" type="text"></label>
+          <label>Body <textarea id="body"></textarea></label>
+          <div class="actions"><button id="send" type="submit">Send</button><button id="cancel-compose" type="button">Cancel</button></div>
+        </form>
+      </section>
+    </main>
+  </section>
+</body>
+</html>
