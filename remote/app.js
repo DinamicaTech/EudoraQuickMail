@@ -5,6 +5,7 @@ const pageSize = 40;
 let accounts = [];
 let offset = 0;
 let query = '';
+let view = 'all';
 let selected = null;
 let composeKind = 'new';
 let apiBase = '';
@@ -34,7 +35,11 @@ async function api(path, options = {}) {
     el('login').hidden = false;
     throw new Error('La sesión ha caducado. Entra de nuevo.');
   }
-  if (!response.ok) throw new Error(await response.text() || `Error de conexión (${response.status}).`);
+  if (!response.ok) {
+    const error = new Error(await response.text() || `Error de conexión (${response.status}).`);
+    error.status = response.status;
+    throw error;
+  }
   return response.status === 204 || !response.headers.get('content-type')?.includes('json')
     ? null : response.json();
 }
@@ -54,7 +59,50 @@ async function signedIn() {
   el('login').hidden = true;
   el('mail').hidden = false;
   showView('listing');
+  await loadTabs();
   await loadMessages();
+}
+
+async function loadTabs() {
+  const params = new URLSearchParams();
+  if (el('account-filter').value) params.set('accountId', el('account-filter').value);
+  let tabs;
+  try { tabs = await api(`/api/folder-tabs?${params}`); }
+  catch (error) {
+    if (error.status !== 404) throw error;
+    // Existing desktop builds can use the redesigned list until the new folder-tab API is installed.
+    tabs = [{ id: 'all', label: 'Todos', unread: 0 }];
+  }
+  if (!tabs.some(tab => tab.id === view)) view = 'all';
+  const nav = el('folder-tabs');
+  nav.replaceChildren();
+  for (const tab of tabs) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = `folder-tab${tab.id === view ? ' active' : ''}`;
+    button.textContent = tab.label;
+    if (tab.unread > 0) {
+      const count = document.createElement('span');
+      count.className = 'folder-count';
+      count.textContent = tab.unread.toLocaleString('es-ES');
+      button.append(count);
+    }
+    if (tab.id === view) button.setAttribute('aria-current', 'page');
+    button.addEventListener('click', () => {
+      if (view === tab.id) return;
+      view = tab.id; offset = 0;
+      for (const item of nav.children) {
+        item.classList.toggle('active', item === button);
+        if (item === button) item.setAttribute('aria-current', 'page');
+        else item.removeAttribute('aria-current');
+      }
+      el('view-title').textContent = tab.label;
+      showView('listing');
+      loadMessages().catch(error => status(error.message));
+    });
+    nav.append(button);
+  }
+  el('view-title').textContent = tabs.find(tab => tab.id === view)?.label || 'Todos';
 }
 
 function messageRow(message) {
@@ -93,15 +141,17 @@ async function loadMessages() {
   const params = new URLSearchParams({ offset: String(offset), limit: String(pageSize) });
   if (el('account-filter').value) params.set('accountId', el('account-filter').value);
   if (query) params.set('q', query);
+  if (view !== 'all') params.set('view', view);
   const data = await api(`/api/messages?${params}`);
   if (request !== listRequest) return;
   el('messages').replaceChildren(...data.messages.map(messageRow));
   el('empty').hidden = data.messages.length !== 0;
   el('newer').disabled = offset === 0;
   el('older').disabled = !data.hasMore;
+  el('pager').hidden = data.total <= pageSize;
   const start = data.messages.length ? offset + 1 : 0;
   el('page-info').textContent = `${start.toLocaleString('es-ES')}–${(offset + data.messages.length).toLocaleString('es-ES')} de ${data.total.toLocaleString('es-ES')}`;
-  status(query ? `Resultados de «${query}» en todas las carpetas.` : '');
+  status(query ? `Resultados de «${query}» en ${view === 'all' ? 'todas las carpetas' : el('view-title').textContent}.` : '');
 }
 
 async function openMessage(message) {
@@ -112,8 +162,10 @@ async function openMessage(message) {
   el('reader-from').textContent = data.from || '(sin remitente)';
   el('reader-to').textContent = `Para: ${data.to || ''}`;
   el('reader-date').textContent = formatDate(data.date, { dateStyle: 'full', timeStyle: 'short' });
-  const sender = data.from || '';
-  el('reader-avatar').textContent = (sender.trim().match(/[\p{L}\p{N}]/u)?.[0] || '?').toUpperCase();
+  const sender = (data.from || '').split('<')[0].replace(/["']/g, '').trim();
+  const words = sender.split(/\s+/).filter(Boolean);
+  el('reader-avatar').textContent = (words.length > 1
+    ? words[0][0] + words[1][0] : words[0]?.slice(0, 2) || '?').toUpperCase();
   el('reader-body').textContent = data.body || '(El cuerpo no está disponible en la caché.)';
   const attachments = el('reader-attachments');
   attachments.replaceChildren();
@@ -175,7 +227,8 @@ el('login-form').addEventListener('submit', async event => {
   } catch (error) { el('code').value = ''; alert(error.message); }
 });
 el('account-filter').addEventListener('change', () => {
-  offset = 0; showView('listing'); loadMessages().catch(error => status(error.message));
+  view = 'all'; offset = 0; showView('listing');
+  loadTabs().then(loadMessages).catch(error => status(error.message));
 });
 el('search-form').addEventListener('submit', event => {
   event.preventDefault(); query = el('search').value.trim(); offset = 0;
@@ -190,7 +243,7 @@ el('density').addEventListener('click', () => {
   el('messages').classList.toggle('comfortable', !compact);
   el('density').classList.toggle('active', compact);
   el('density').setAttribute('aria-pressed', String(compact));
-  el('density').textContent = compact ? '≡ Compacta' : '☷ Cómoda';
+  el('density').textContent = compact ? '▤ Compacta' : '▤ Cómoda';
 });
 el('newer').addEventListener('click', () => {
   offset = Math.max(0, offset - pageSize); loadMessages().catch(error => status(error.message));
@@ -198,7 +251,10 @@ el('newer').addEventListener('click', () => {
 el('older').addEventListener('click', () => {
   offset += pageSize; loadMessages().catch(error => status(error.message));
 });
-el('refresh').addEventListener('click', () => loadMessages().catch(error => status(error.message)));
+el('refresh').addEventListener('click', () => {
+  el('more').open = false;
+  loadTabs().then(loadMessages).catch(error => status(error.message));
+});
 el('new').addEventListener('click', () => prepareCompose('new').catch(error => status(error.message)));
 el('back').addEventListener('click', () => { showView('listing'); el('search').focus(); });
 el('reply').addEventListener('click', () => prepareCompose('reply').catch(error => status(error.message)));

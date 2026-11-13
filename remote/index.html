@@ -6,67 +6,86 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' https://*.ts.net:*; form-action 'self'; base-uri 'none'">
   <title>Buzón · Eudora QuickMail</title>
   <style>
-    :root { font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #253044; background: #fff; }
+    :root { font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #263244; background: #fff; }
     * { box-sizing: border-box; }
     body { margin: 0; }
     button, input, select, textarea { font: inherit; }
     button { cursor: pointer; }
+    .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
     button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid #2563c6; outline-offset: 2px; }
     [hidden] { display: none !important; }
     .muted { color: #687385; }
-    .app-header { min-height: 62px; display: flex; align-items: center; gap: 18px; padding: 9px 20px; border-bottom: 1px solid #e0e4eb; background: #f7f8fb; }
-    .brand { font-size: 17px; font-weight: 700; white-space: nowrap; }
-    .header-tabs { display: flex; gap: 6px; align-items: center; }
-    .header-tabs span { color: #2456aa; background: #e8efff; border-radius: 7px; padding: 8px 12px; font-weight: 600; }
-    .header-actions { margin-left: auto; display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
-    .account-select { max-width: 310px; min-width: 190px; height: 36px; border: 1px solid #d9dfe8; border-radius: 7px; background: #fff; padding: 0 10px; }
-    .button { border: 1px solid #d8dee9; background: #fff; color: #243249; border-radius: 7px; padding: 8px 12px; min-height: 36px; }
+    .app-header { min-height: 60px; display: flex; align-items: center; gap: 17px; padding: 9px 15px 9px 20px; border-bottom: 1px solid #dfe3ea; background: #f6f7fa; }
+    .brand { font-size: 15px; font-weight: 700; white-space: nowrap; }
+    .header-tabs { display: flex; gap: 3px; align-items: center; min-width: 0; overflow-x: auto; scrollbar-width: thin; }
+    .folder-tab { border: 0; background: transparent; color: #344155; border-radius: 7px; padding: 8px 10px; white-space: nowrap; }
+    .folder-tab:hover { background: #e9eef8; }
+    .folder-tab.active { color: #245bbd; background: #e8edfa; font-weight: 650; }
+    .folder-count { margin-left: 2px; font-size: 11px; color: #697587; }
+    .folder-tab.active .folder-count { color: #3863af; }
+    .header-actions { margin-left: auto; display: flex; align-items: center; gap: 9px; flex: none; }
+    .select-wrap { position: relative; }
+    .select-wrap::before { content: "✉"; position: absolute; left: 11px; top: 8px; color: #6b7788; pointer-events: none; }
+    .account-select { width: 210px; height: 36px; border: 1px solid #e0e4eb; border-radius: 8px; background: #fff; padding: 0 26px 0 34px; color: #293649; }
+    .button { border: 1px solid #dde2ea; background: #fff; color: #293649; border-radius: 7px; padding: 7px 12px; min-height: 35px; }
     .button:hover { background: #eef3fb; }
-    .button.primary { background: #2c61c8; border-color: #2c61c8; color: #fff; font-weight: 600; }
+    .button.primary { background: #3463ce; border-color: #3463ce; color: #fff; font-weight: 600; }
     .button.primary:hover { background: #1e50b2; }
     .button.subtle { background: transparent; border-color: transparent; }
-    .button.active { background: #e9f0ff; border-color: #84a7ee; color: #2858aa; }
-    .toolbar { display: flex; align-items: center; gap: 12px; padding: 12px 16px; }
-    .toolbar h1 { font-size: 15px; margin: 0; font-weight: 650; }
+    .button.active { background: #e8efff; border-color: #7ba0e8; color: #2858aa; }
+    .more-menu { position: relative; }
+    .more-menu summary { list-style: none; display: grid; place-items: center; width: 32px; height: 35px; border-radius: 7px; color: #59677b; cursor: pointer; }
+    .more-menu summary::-webkit-details-marker { display: none; }
+    .more-menu summary:hover, .more-menu[open] summary { background: #e9edf5; }
+    .more-popover { position: absolute; z-index: 5; right: 0; top: 39px; min-width: 132px; background: #fff; border: 1px solid #dce1e8; border-radius: 8px; box-shadow: 0 8px 25px #25304425; padding: 4px; }
+    .more-popover button { display: block; width: 100%; background: transparent; border: 0; border-radius: 5px; padding: 7px 9px; text-align: left; }
+    .more-popover button:hover { background: #edf2fa; }
+    .toolbar { display: flex; align-items: center; gap: 12px; min-height: 51px; padding: 9px 14px; }
+    .toolbar h1 { font-size: 14px; margin: 0; font-weight: 650; }
     .toolbar .right { margin-left: auto; }
-    .search-row { padding: 0 15px 14px; border-bottom: 1px solid #e3e6ec; }
+    .search-row { padding: 0 14px 14px; border-bottom: 1px solid #e3e6ec; }
     .search-form { position: relative; display: flex; width: 100%; }
-    .search-form input { width: 100%; min-height: 40px; background: #f4f5f8; border: 1px solid #dce1e9; border-radius: 8px; padding: 8px 90px 8px 35px; color: #253044; }
-    .search-icon { position: absolute; left: 12px; top: 10px; color: #7b8798; pointer-events: none; }
-    .search-form button { position: absolute; right: 4px; top: 4px; min-height: 32px; border: 0; background: transparent; color: #285ab2; border-radius: 5px; padding: 3px 10px; }
-    .search-form button:hover { background: #e6edfb; }
+    .search-form input { width: 100%; min-height: 38px; background: #f4f5f8; border: 1px solid #dfe3ea; border-radius: 8px; padding: 8px 35px; color: #253044; }
+    .search-icon { position: absolute; left: 12px; top: 10px; width: 17px; height: 17px; color: #7b8798; pointer-events: none; }
     .status { padding: 0 16px; color: #58677c; }
     .status:not(:empty) { padding-top: 8px; padding-bottom: 8px; border-bottom: 1px solid #e3e6ec; }
     .message-list { list-style: none; padding: 0; margin: 0; }
-    .message-row { width: 100%; display: grid; grid-template-columns: 8px minmax(160px, 25%) minmax(0, 1fr) minmax(92px, 11%) 84px 55px; align-items: start; gap: 12px; border: 0; border-bottom: 1px solid #e3e6ec; background: #fff; color: inherit; padding: 9px 16px; text-align: left; }
+    .message-row { width: 100%; display: grid; grid-template-columns: 8px minmax(0, 1fr) 116px 74px 45px; grid-template-rows: 20px 20px 19px; align-items: center; gap: 0 12px; border: 0; border-bottom: 1px solid #e3e6ec; background: #fff; color: inherit; padding: 10px 14px; text-align: left; }
     .message-row:hover, .message-row:focus-visible { background: #f3f6fc; }
     .message-row.unread { font-weight: 650; }
-    .unread-dot { width: 7px; height: 7px; border-radius: 50%; background: #3268d5; margin-top: 7px; visibility: hidden; }
+    .unread-dot { grid-column: 1; grid-row: 1; width: 7px; height: 7px; border-radius: 50%; background: #3268d5; visibility: hidden; }
     .message-row.unread .unread-dot { visibility: visible; }
     .correspondent, .subject-line, .snippet { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .correspondent { grid-column: 2; grid-row: 1; }
+    .summary { grid-column: 2 / -1; grid-row: 2 / 4; min-width: 0; }
     .subject-line { display: block; }
     .snippet { display: block; color: #6d7788; font-weight: 400; }
+    .folder-cell { grid-column: 3; grid-row: 1; min-width: 0; }
     .folder-pill { display: inline-block; max-width: 100%; border: 1px solid #e0e4eb; border-radius: 99px; background: #f2f4f7; color: #5a6677; padding: 1px 9px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 400; }
     .message-date, .message-time { color: #687385; font-size: 12px; font-weight: 400; white-space: nowrap; text-align: right; }
-    .compact .message-row { padding-top: 7px; padding-bottom: 7px; align-items: center; }
-    .compact .subject-line { display: inline; }
-    .compact .snippet { display: inline; margin-left: 5px; }
+    .message-date { grid-column: 4; grid-row: 1; }
+    .message-time { grid-column: 5; grid-row: 1; }
+    .compact .message-row { grid-template-columns: 8px minmax(160px, 25%) minmax(0, 1fr) 116px 74px 45px; grid-template-rows: 1fr; min-height: 35px; padding-top: 6px; padding-bottom: 6px; }
+    .compact .summary { grid-column: 3; grid-row: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .compact .folder-cell { grid-column: 4; }
+    .compact .message-date { grid-column: 5; }
+    .compact .message-time { grid-column: 6; }
+    .compact .subject-line, .compact .snippet { display: inline; }
+    .compact .snippet { margin-left: 5px; }
     .compact .snippet::before { content: "— "; }
-    .compact .unread-dot { margin-top: 0; }
     .comfortable .message-row { min-height: 86px; }
-    .comfortable .subject-line { margin: 2px 0; }
     .pager { display: flex; align-items: center; justify-content: center; gap: 14px; padding: 18px; }
     .empty { padding: 32px 18px; color: #687385; text-align: center; }
     .reader-toolbar { border-bottom: 1px solid #e3e6ec; }
-    .reader-surface { min-height: calc(100vh - 112px); background: #f6f7fa; padding: 24px 28px 50px; }
-    .reader-surface h1 { margin: 0 0 24px; font-size: 22px; line-height: 1.25; }
-    .reader-meta { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 26px; }
-    .avatar { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 50%; background: #e7edfb; color: #315fae; font-weight: 650; }
+    .reader-surface { min-height: calc(100vh - 112px); background: #f6f7fb; padding: 23px 27px 50px; }
+    .reader-surface h1 { margin: 0 0 14px; font-size: 21px; line-height: 1.25; }
+    .reader-meta { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; max-width: 670px; margin-bottom: 23px; }
+    .avatar { display: grid; place-items: center; flex: none; width: 40px; height: 40px; border-radius: 50%; background: #e8edff; color: #315fae; font-weight: 650; }
     .sender-block { min-width: 0; }
     .sender-block .muted { display: block; font-size: 13px; }
     .reader-date { margin-left: auto; color: #687385; font-size: 12px; }
-    .reader-body { max-width: 90ch; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.65; }
-    .attachment-list { max-width: 90ch; border-top: 1px solid #dbe0e8; margin-top: 24px; padding-top: 15px; }
+    .reader-body { max-width: 670px; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.65; }
+    .attachment-list { max-width: 670px; border-top: 1px solid #dbe0e8; margin-top: 24px; padding-top: 15px; }
     .attachment { display: inline-block; border: 1px solid #dce1e9; border-radius: 7px; background: #fff; margin: 0 7px 7px 0; padding: 7px 10px; }
     .compose-surface { max-width: 900px; min-height: calc(100vh - 112px); margin: 0 auto; padding: 22px; }
     .compose-surface h1 { font-size: 21px; margin: 0 0 15px; }
@@ -78,21 +97,25 @@
     .login-card { width: min(100%, 480px); background: #fff; border: 1px solid #e0e5ee; border-radius: 12px; box-shadow: 0 12px 38px #22345618; padding: 28px; }
     .login-card h1 { margin: 0 0 10px; }
     .login-card .button { width: 100%; margin-top: 8px; }
-    @media (max-width: 800px) {
+    @media (max-width: 850px) {
       .app-header { gap: 8px; flex-wrap: wrap; padding: 10px; }
-      .header-actions { width: 100%; }
-      .account-select { flex: 1; min-width: 0; }
-      .message-row { grid-template-columns: 8px minmax(0, 1fr) 76px; gap: 6px 8px; }
+      .header-tabs { order: 3; width: 100%; }
+      .header-actions { flex: 1; justify-content: flex-end; }
+      .account-select { width: min(42vw, 210px); }
+      .message-row { grid-template-columns: 8px minmax(0, 1fr) 76px; gap: 2px 8px; }
       .correspondent { grid-column: 2; }
-      .summary { grid-column: 2 / 4; grid-row: 2; }
-      .folder-cell { grid-column: 2; grid-row: 3; }
+      .summary { grid-column: 2 / 4; grid-row: 2 / 4; }
+      .folder-cell { grid-column: 2; grid-row: 4; }
       .message-date { grid-column: 3; grid-row: 1; }
       .message-time { display: none; }
-      .compact .summary { grid-column: 2 / 4; }
+      .compact .message-row { grid-template-columns: 8px minmax(0, 1fr) 76px; grid-template-rows: 20px 20px; }
+      .compact .summary { grid-column: 2 / 4; grid-row: 2; }
+      .compact .folder-cell { display: none; }
+      .compact .message-date { grid-column: 3; grid-row: 1; }
       .reader-surface { padding: 20px 15px 40px; }
     }
   </style>
-  <script src="app.js?v=8c1e6101" defer></script>
+  <script src="app.js?v=413bf723" defer></script>
 </head>
 <body>
   <section id="login" class="login-wrap" hidden>
@@ -111,31 +134,32 @@
   <section id="mail" hidden>
     <header class="app-header">
       <span class="brand">Buzón</span>
-      <nav class="header-tabs" aria-label="Vistas"><span aria-current="page">Todos</span></nav>
+      <nav id="folder-tabs" class="header-tabs" aria-label="Carpetas"></nav>
       <div class="header-actions">
-        <select id="account-filter" class="account-select" aria-label="Cuenta de correo"><option value="">Todas las cuentas</option></select>
-        <button id="refresh" class="button subtle" type="button">Actualizar</button>
-        <button id="logout" class="button subtle" type="button">Salir</button>
+        <span class="select-wrap"><select id="account-filter" class="account-select" aria-label="Cuenta de destino"><option value="">Todas las cuentas</option></select></span>
+        <details id="more" class="more-menu"><summary aria-label="Más opciones">···</summary><div class="more-popover">
+          <button id="refresh" type="button">Actualizar</button><button id="logout" type="button">Salir</button>
+        </div></details>
         <button id="new" class="button primary" type="button">＋ Redactar</button>
       </div>
     </header>
     <p id="status" class="status" role="status" aria-live="polite"></p>
 
     <section id="listing" aria-label="Lista de mensajes">
-      <div class="toolbar"><h1>Todos los mensajes</h1><button id="density" class="button right active" type="button" aria-pressed="true">≡ Compacta</button></div>
+      <div class="toolbar"><h1 id="view-title">Todos</h1><button id="density" class="button right" type="button" aria-pressed="false">▤ Cómoda</button></div>
       <div class="search-row"><form id="search-form" class="search-form" role="search">
-        <span class="search-icon" aria-hidden="true">⌕</span>
-        <input id="search" type="search" maxlength="120" placeholder="Buscar por remitente, asunto o texto en todas las carpetas" aria-label="Buscar correos">
-        <button type="submit">Buscar</button>
+        <svg class="search-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="10.8" cy="10.8" r="6.4"/><path d="m16 16 5 5"/></svg>
+        <input id="search" type="search" maxlength="120" placeholder="Buscar por remitente, asunto o texto" aria-label="Buscar correos">
+        <button class="sr-only" type="submit">Buscar</button>
       </form></div>
-      <ul id="messages" class="message-list compact" aria-label="Mensajes"></ul>
+      <ul id="messages" class="message-list comfortable" aria-label="Mensajes"></ul>
       <div id="empty" class="empty" hidden>No hay mensajes para esta selección.</div>
-      <div class="pager"><button id="newer" class="button" disabled>Más recientes</button><span id="page-info" class="muted"></span><button id="older" class="button" disabled>Más antiguos</button></div>
+      <div id="pager" class="pager" hidden><button id="newer" class="button" disabled>Más recientes</button><span id="page-info" class="muted"></span><button id="older" class="button" disabled>Más antiguos</button></div>
     </section>
 
     <section id="reader" hidden aria-label="Contenido del mensaje">
       <div class="toolbar reader-toolbar">
-        <button id="back" class="button subtle" type="button">← Volver a la lista</button>
+        <button id="back" class="button subtle" type="button" aria-label="Volver a la lista">←</button>
         <button id="reply" class="button" type="button">↶ Responder</button>
         <button id="forward" class="button" type="button">↪ Reenviar</button>
       </div>
