@@ -1,72 +1,170 @@
 <!doctype html>
-<html lang="en">
+<html lang="es">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' https://*.ts.net:*; form-action 'self'; base-uri 'none'">
-  <title>QuickMail private access</title>
+  <title>Buzón · Eudora QuickMail</title>
   <style>
-    :root { color-scheme: light dark; font: 16px/1.5 system-ui, sans-serif; }
-    body { margin: 0 auto; padding: 1rem; max-width: 1050px; }
+    :root { font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #253044; background: #fff; }
+    * { box-sizing: border-box; }
+    body { margin: 0; }
     button, input, select, textarea { font: inherit; }
-    button { padding: .5rem .8rem; cursor: pointer; }
-    input, select, textarea { box-sizing: border-box; width: 100%; padding: .5rem; }
-    textarea { min-height: 16rem; resize: vertical; }
-    label { display: block; margin: .8rem 0; }
-    header, .actions, .pagination { display: flex; gap: .6rem; align-items: center; flex-wrap: wrap; }
-    header { justify-content: space-between; border-bottom: 1px solid #888; margin-bottom: 1rem; }
-    header h1 { font-size: 1.4rem; }
-    main { display: grid; grid-template-columns: minmax(250px, 34%) minmax(0, 1fr); gap: 1rem; }
-    .message { display: block; text-align: left; width: 100%; border: 0; border-bottom: 1px solid #8888; background: transparent; padding: .7rem; }
-    .message:hover, .message:focus { background: #8883; }
-    .message.unread { font-weight: 700; }
-    .message small { display: block; font-weight: normal; }
-    .body { white-space: pre-wrap; overflow-wrap: anywhere; }
-    .panel { border: 1px solid #8888; border-radius: .4rem; padding: 1rem; min-width: 0; }
-    .muted { opacity: .8; }
-    .warning, #status { padding: .6rem; }
-    .warning { border: 1px solid #b76d00; }
-    #login { max-width: 450px; margin: 4rem auto; }
-    #status:empty { display: none; }
+    button { cursor: pointer; }
+    button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid #2563c6; outline-offset: 2px; }
     [hidden] { display: none !important; }
-    @media (max-width: 700px) { main { display: block; } .panel { margin-top: 1rem; } }
+    .muted { color: #687385; }
+    .app-header { min-height: 62px; display: flex; align-items: center; gap: 18px; padding: 9px 20px; border-bottom: 1px solid #e0e4eb; background: #f7f8fb; }
+    .brand { font-size: 17px; font-weight: 700; white-space: nowrap; }
+    .header-tabs { display: flex; gap: 6px; align-items: center; }
+    .header-tabs span { color: #2456aa; background: #e8efff; border-radius: 7px; padding: 8px 12px; font-weight: 600; }
+    .header-actions { margin-left: auto; display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+    .account-select { max-width: 310px; min-width: 190px; height: 36px; border: 1px solid #d9dfe8; border-radius: 7px; background: #fff; padding: 0 10px; }
+    .button { border: 1px solid #d8dee9; background: #fff; color: #243249; border-radius: 7px; padding: 8px 12px; min-height: 36px; }
+    .button:hover { background: #eef3fb; }
+    .button.primary { background: #2c61c8; border-color: #2c61c8; color: #fff; font-weight: 600; }
+    .button.primary:hover { background: #1e50b2; }
+    .button.subtle { background: transparent; border-color: transparent; }
+    .button.active { background: #e9f0ff; border-color: #84a7ee; color: #2858aa; }
+    .toolbar { display: flex; align-items: center; gap: 12px; padding: 12px 16px; }
+    .toolbar h1 { font-size: 15px; margin: 0; font-weight: 650; }
+    .toolbar .right { margin-left: auto; }
+    .search-row { padding: 0 15px 14px; border-bottom: 1px solid #e3e6ec; }
+    .search-form { position: relative; display: flex; width: 100%; }
+    .search-form input { width: 100%; min-height: 40px; background: #f4f5f8; border: 1px solid #dce1e9; border-radius: 8px; padding: 8px 90px 8px 35px; color: #253044; }
+    .search-icon { position: absolute; left: 12px; top: 10px; color: #7b8798; pointer-events: none; }
+    .search-form button { position: absolute; right: 4px; top: 4px; min-height: 32px; border: 0; background: transparent; color: #285ab2; border-radius: 5px; padding: 3px 10px; }
+    .search-form button:hover { background: #e6edfb; }
+    .status { padding: 0 16px; color: #58677c; }
+    .status:not(:empty) { padding-top: 8px; padding-bottom: 8px; border-bottom: 1px solid #e3e6ec; }
+    .message-list { list-style: none; padding: 0; margin: 0; }
+    .message-row { width: 100%; display: grid; grid-template-columns: 8px minmax(160px, 25%) minmax(0, 1fr) minmax(92px, 11%) 84px 55px; align-items: start; gap: 12px; border: 0; border-bottom: 1px solid #e3e6ec; background: #fff; color: inherit; padding: 9px 16px; text-align: left; }
+    .message-row:hover, .message-row:focus-visible { background: #f3f6fc; }
+    .message-row.unread { font-weight: 650; }
+    .unread-dot { width: 7px; height: 7px; border-radius: 50%; background: #3268d5; margin-top: 7px; visibility: hidden; }
+    .message-row.unread .unread-dot { visibility: visible; }
+    .correspondent, .subject-line, .snippet { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .subject-line { display: block; }
+    .snippet { display: block; color: #6d7788; font-weight: 400; }
+    .folder-pill { display: inline-block; max-width: 100%; border: 1px solid #e0e4eb; border-radius: 99px; background: #f2f4f7; color: #5a6677; padding: 1px 9px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 400; }
+    .message-date, .message-time { color: #687385; font-size: 12px; font-weight: 400; white-space: nowrap; text-align: right; }
+    .compact .message-row { padding-top: 7px; padding-bottom: 7px; align-items: center; }
+    .compact .subject-line { display: inline; }
+    .compact .snippet { display: inline; margin-left: 5px; }
+    .compact .snippet::before { content: "— "; }
+    .compact .unread-dot { margin-top: 0; }
+    .comfortable .message-row { min-height: 86px; }
+    .comfortable .subject-line { margin: 2px 0; }
+    .pager { display: flex; align-items: center; justify-content: center; gap: 14px; padding: 18px; }
+    .empty { padding: 32px 18px; color: #687385; text-align: center; }
+    .reader-toolbar { border-bottom: 1px solid #e3e6ec; }
+    .reader-surface { min-height: calc(100vh - 112px); background: #f6f7fa; padding: 24px 28px 50px; }
+    .reader-surface h1 { margin: 0 0 24px; font-size: 22px; line-height: 1.25; }
+    .reader-meta { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 26px; }
+    .avatar { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 50%; background: #e7edfb; color: #315fae; font-weight: 650; }
+    .sender-block { min-width: 0; }
+    .sender-block .muted { display: block; font-size: 13px; }
+    .reader-date { margin-left: auto; color: #687385; font-size: 12px; }
+    .reader-body { max-width: 90ch; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.65; }
+    .attachment-list { max-width: 90ch; border-top: 1px solid #dbe0e8; margin-top: 24px; padding-top: 15px; }
+    .attachment { display: inline-block; border: 1px solid #dce1e9; border-radius: 7px; background: #fff; margin: 0 7px 7px 0; padding: 7px 10px; }
+    .compose-surface { max-width: 900px; min-height: calc(100vh - 112px); margin: 0 auto; padding: 22px; }
+    .compose-surface h1 { font-size: 21px; margin: 0 0 15px; }
+    .compose-surface label, .login-card label { display: block; margin: 12px 0; }
+    .compose-surface input, .compose-surface select, .compose-surface textarea, .login-card input { width: 100%; padding: 9px; border: 1px solid #cfd7e3; border-radius: 6px; }
+    .compose-surface textarea { min-height: 260px; resize: vertical; }
+    .warning { border: 1px solid #d7a951; background: #fff8e6; padding: 10px; border-radius: 6px; }
+    .login-wrap { min-height: 100vh; display: grid; place-items: center; background: #f3f5f9; padding: 20px; }
+    .login-card { width: min(100%, 480px); background: #fff; border: 1px solid #e0e5ee; border-radius: 12px; box-shadow: 0 12px 38px #22345618; padding: 28px; }
+    .login-card h1 { margin: 0 0 10px; }
+    .login-card .button { width: 100%; margin-top: 8px; }
+    @media (max-width: 800px) {
+      .app-header { gap: 8px; flex-wrap: wrap; padding: 10px; }
+      .header-actions { width: 100%; }
+      .account-select { flex: 1; min-width: 0; }
+      .message-row { grid-template-columns: 8px minmax(0, 1fr) 76px; gap: 6px 8px; }
+      .correspondent { grid-column: 2; }
+      .summary { grid-column: 2 / 4; grid-row: 2; }
+      .folder-cell { grid-column: 2; grid-row: 3; }
+      .message-date { grid-column: 3; grid-row: 1; }
+      .message-time { display: none; }
+      .compact .summary { grid-column: 2 / 4; }
+      .reader-surface { padding: 20px 15px 40px; }
+    }
   </style>
-  <script src="app.js" defer></script>
+  <script src="app.js?v=8c1e6101" defer></script>
 </head>
 <body>
-  <section id="login" class="panel" hidden>
-    <h1>QuickMail private access</h1>
-    <p>Enter the access code shown in EQM on your computer. This page works only while EQM is running.</p>
-    <form id="login-form">
-      <label id="server-label" hidden>Private EQM address <input id="server" type="url" placeholder="https://my-computer.my-tailnet.ts.net" autocomplete="off"></label>
-      <label>Access code <input id="code" type="password" autocomplete="off" required></label>
-      <button type="submit">Sign in</button>
-    </form>
+  <section id="login" class="login-wrap" hidden>
+    <div class="login-card">
+      <h1>Acceso privado a QuickMail</h1>
+      <p class="muted">Introduce la dirección y el código que muestra EQM. El ordenador debe estar encendido y EQM abierto.</p>
+      <form id="login-form">
+        <label id="server-label" hidden>Dirección privada de EQM
+          <input id="server" type="url" placeholder="https://mi-equipo.mi-red.ts.net:8443/" autocomplete="off">
+        </label>
+        <label>Código de acceso <input id="code" type="password" autocomplete="off" required></label>
+        <button class="button primary" type="submit">Entrar</button>
+      </form>
+    </div>
   </section>
   <section id="mail" hidden>
-    <header><h1>QuickMail</h1><div class="actions"><button id="new">New message</button><button id="refresh">Refresh</button><button id="logout">Sign out</button></div></header>
-    <p id="status" role="status" aria-live="polite"></p>
-    <main>
-      <section aria-label="Inbox" class="panel">
-        <label>Account <select id="account-filter"><option value="">All accounts</option></select></label>
-        <div id="messages"></div>
-        <div class="pagination"><button id="newer" disabled>Newer</button><button id="older" disabled>Older</button></div>
-      </section>
-      <section id="detail" class="panel" aria-label="Message details"><p>Select a message.</p></section>
-      <section id="compose" class="panel" aria-label="Compose message" hidden>
-        <h2 id="compose-title">New message</h2>
-        <p id="attachment-warning" class="warning" hidden>Attachments from the original message are not included in remote forwards. Use desktop EQM to forward them.</p>
-        <form id="compose-form">
-          <label>From <select id="from-account" required></select></label>
-          <label>To <input id="to" type="text" required></label>
-          <label>Cc <input id="cc" type="text"></label>
-          <label>Bcc <input id="bcc" type="text"></label>
-          <label>Subject <input id="subject" type="text"></label>
-          <label>Body <textarea id="body"></textarea></label>
-          <div class="actions"><button id="send" type="submit">Send</button><button id="cancel-compose" type="button">Cancel</button></div>
-        </form>
-      </section>
-    </main>
+    <header class="app-header">
+      <span class="brand">Buzón</span>
+      <nav class="header-tabs" aria-label="Vistas"><span aria-current="page">Todos</span></nav>
+      <div class="header-actions">
+        <select id="account-filter" class="account-select" aria-label="Cuenta de correo"><option value="">Todas las cuentas</option></select>
+        <button id="refresh" class="button subtle" type="button">Actualizar</button>
+        <button id="logout" class="button subtle" type="button">Salir</button>
+        <button id="new" class="button primary" type="button">＋ Redactar</button>
+      </div>
+    </header>
+    <p id="status" class="status" role="status" aria-live="polite"></p>
+
+    <section id="listing" aria-label="Lista de mensajes">
+      <div class="toolbar"><h1>Todos los mensajes</h1><button id="density" class="button right active" type="button" aria-pressed="true">≡ Compacta</button></div>
+      <div class="search-row"><form id="search-form" class="search-form" role="search">
+        <span class="search-icon" aria-hidden="true">⌕</span>
+        <input id="search" type="search" maxlength="120" placeholder="Buscar por remitente, asunto o texto en todas las carpetas" aria-label="Buscar correos">
+        <button type="submit">Buscar</button>
+      </form></div>
+      <ul id="messages" class="message-list compact" aria-label="Mensajes"></ul>
+      <div id="empty" class="empty" hidden>No hay mensajes para esta selección.</div>
+      <div class="pager"><button id="newer" class="button" disabled>Más recientes</button><span id="page-info" class="muted"></span><button id="older" class="button" disabled>Más antiguos</button></div>
+    </section>
+
+    <section id="reader" hidden aria-label="Contenido del mensaje">
+      <div class="toolbar reader-toolbar">
+        <button id="back" class="button subtle" type="button">← Volver a la lista</button>
+        <button id="reply" class="button" type="button">↶ Responder</button>
+        <button id="forward" class="button" type="button">↪ Reenviar</button>
+      </div>
+      <article class="reader-surface">
+        <h1 id="reader-subject"></h1>
+        <div class="reader-meta">
+          <span id="reader-avatar" class="avatar" aria-hidden="true"></span>
+          <span class="sender-block"><strong id="reader-from"></strong><span id="reader-to" class="muted"></span></span>
+          <span id="reader-date" class="reader-date"></span>
+        </div>
+        <div id="reader-body" class="reader-body"></div>
+        <div id="reader-attachments" class="attachment-list" hidden></div>
+      </article>
+    </section>
+
+    <section id="compose" class="compose-surface" hidden aria-label="Redactar mensaje">
+      <h1 id="compose-title">Nuevo mensaje</h1>
+      <p id="attachment-warning" class="warning" hidden>Los adjuntos del mensaje original no se incluyen al reenviar desde el cliente remoto. Usa EQM de escritorio para enviarlos.</p>
+      <form id="compose-form">
+        <label>De <select id="from-account" required></select></label>
+        <label>Para <input id="to" type="text" required></label>
+        <label>Cc <input id="cc" type="text"></label>
+        <label>Cco <input id="bcc" type="text"></label>
+        <label>Asunto <input id="subject" type="text"></label>
+        <label>Mensaje <textarea id="body"></textarea></label>
+        <button id="send" class="button primary" type="submit">Enviar</button>
+        <button id="cancel-compose" class="button" type="button">Cancelar</button>
+      </form>
+    </section>
   </section>
 </body>
 </html>
