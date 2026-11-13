@@ -185,8 +185,15 @@ jobs:
           print(f"Generated {len(section_files)} sections")
           EOF
 
+      - name: Include the static private remote client
+        run: |
+          if [ -f QuickMail/Assets/Remote/index.html ]; then
+            mkdir -p build/docs/remote
+            cp QuickMail/Assets/Remote/index.html QuickMail/Assets/Remote/app.js build/docs/remote/
+          fi
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./build/docs
+          keep_files: true
