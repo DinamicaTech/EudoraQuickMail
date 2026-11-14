@@ -130,7 +130,9 @@ function messageRow(message) {
   const time = document.createElement('time'); time.className = 'message-time';
   time.dateTime = message.date; time.textContent = formatDate(message.date, { hour: '2-digit', minute: '2-digit' });
   button.append(dot, correspondent, summary, folderCell, date, time);
-  button.addEventListener('click', () => openMessage(message).catch(error => status(error.message)));
+  button.addEventListener('click', () => openMessage(message)
+    .then(() => button.classList.remove('unread'))
+    .catch(error => status(error.message)));
   item.append(button);
   return item;
 }
@@ -157,6 +159,7 @@ async function loadMessages() {
 async function openMessage(message) {
   status('Cargando mensaje…');
   const data = await api(`/api/message?${params(message)}`);
+  message.unread = false;
   selected = message;
   el('reader-subject').textContent = data.subject || '(sin asunto)';
   el('reader-from').textContent = data.from || '(sin remitente)';
@@ -171,18 +174,55 @@ async function openMessage(message) {
   attachments.replaceChildren();
   attachments.hidden = !data.hasAttachments;
   if (data.hasAttachments) {
-    for (const name of data.attachments) {
-      const chip = document.createElement('span'); chip.className = 'attachment';
+    for (const [index, name] of data.attachments.entries()) {
+      const chip = document.createElement('button'); chip.type = 'button'; chip.className = 'attachment';
       chip.textContent = `📎 ${name}`;
+      chip.title = `Abrir ${name}`;
+      chip.addEventListener('click', () => openAttachment(message, index, name));
       attachments.append(chip);
     }
-    const note = document.createElement('p'); note.className = 'muted';
-    note.textContent = 'Abre EQM de escritorio para acceder a los adjuntos.';
-    attachments.append(note);
   }
   showView('reader');
   status('');
   el('back').focus();
+}
+
+async function openAttachment(message, index, name) {
+  const extension = name.split('.').pop()?.toLowerCase();
+  const previewTypes = { pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg',
+    jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', txt: 'text/plain' };
+  const previewType = previewTypes[extension];
+  // Open synchronously from the click so browser popup protection allows the preview.
+  const preview = previewType ? window.open('', '_blank') : null;
+  if (preview) {
+    preview.opener = null;
+    preview.document.title = 'Cargando adjunto…';
+    preview.document.body.textContent = 'Cargando adjunto…';
+  }
+  status(`Abriendo ${name}…`);
+  try {
+    const response = await fetch(`${apiBase}/api/attachment?${params(message)}&index=${index}`, {
+      credentials: 'same-origin', cache: 'no-store',
+      headers: { 'X-QuickMail-Request': '1',
+        ...(bearerToken ? { Authorization: `Bearer ${bearerToken}` } : {}) }
+    });
+    if (!response.ok) throw new Error(response.status === 404
+      ? 'El adjunto ya no está disponible.' : `No se ha podido abrir el adjunto (${response.status}).`);
+    const downloaded = await response.blob();
+    const blob = previewType ? new Blob([downloaded], { type: previewType }) : downloaded;
+    const url = URL.createObjectURL(blob);
+    if (preview) preview.location.replace(url);
+    else {
+      const link = document.createElement('a');
+      link.href = url; link.download = name || 'adjunto';
+      document.body.append(link); link.click(); link.remove();
+    }
+    setTimeout(() => URL.revokeObjectURL(url), 300000);
+    status('');
+  } catch (error) {
+    if (preview) preview.close();
+    status(error.message);
+  }
 }
 
 async function prepareCompose(kind) {
@@ -256,7 +296,10 @@ el('refresh').addEventListener('click', () => {
   loadTabs().then(loadMessages).catch(error => status(error.message));
 });
 el('new').addEventListener('click', () => prepareCompose('new').catch(error => status(error.message)));
-el('back').addEventListener('click', () => { showView('listing'); el('search').focus(); });
+el('back').addEventListener('click', () => {
+  showView('listing'); el('search').focus();
+  loadTabs().then(loadMessages).catch(error => status(error.message));
+});
 el('reply').addEventListener('click', () => prepareCompose('reply').catch(error => status(error.message)));
 el('forward').addEventListener('click', () => prepareCompose('forward').catch(error => status(error.message)));
 el('cancel-compose').addEventListener('click', () => showView(selected && composeKind !== 'new' ? 'reader' : 'listing'));
