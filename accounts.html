@@ -25,7 +25,7 @@
 
 </head>
 <body>
-  <div class="nav"><a href="index.html">Contents</a> | <a href="full.html">Single Page</a> | <a href="installing-and-updating-quickmail.html">Previous: Installing and Updating QuickMail</a> | <a href="for-microsoft-365-administrators-and-tenant-owners.html">Next: For Microsoft 365 Administrators and Tenant Owners</a></div>
+  <div class="nav"><a href="index.html">Contents</a> | <a href="full.html">Single Page</a> | <a href="home-dashboard.html">Previous: Home dashboard</a> | <a href="for-microsoft-365-administrators-and-tenant-owners.html">Next: For Microsoft 365 Administrators and Tenant Owners</a></div>
   <h1 id="accounts">Accounts</h1>
 <p>Adding an account, changing one, testing it, and removing it all
 happen in <strong>Manage Accounts</strong>. Open it from <strong>File →
@@ -232,6 +232,16 @@ need to enter the address.</p>
 and Manage Accounts, so it is as useful on an account that has stopped
 working as on one you are still setting up. In Manage Accounts it
 appears as soon as an account is selected.</p>
+<p>The test displays a progress window with the current protocol/phase,
+elapsed time and <strong>Cancel test</strong>. No email is sent. SMTP
+and IMAP identify connection/TLS negotiation, OAuth authorization and
+authentication; POP3 also checks UIDL. Errors show the configured host,
+port, transport mode, failing phase, elapsed time and underlying
+socket/server error when available. A connection timeout does not by
+itself mean the password is wrong. Per-phase timing is recorded in
+<code>performance.log</code>; diagnostic failures are recorded in
+<code>quickmail.log</code> with the entered password redacted and
+without a protocol transcript.</p>
 <p>QuickMail checks <strong>incoming and outgoing mail
 separately</strong> and reports both — “IMAP: OK. SMTP: OK.” A failure
 names its own side and gives the reason, so a working inbox with a
@@ -464,6 +474,6 @@ account removes it from QuickMail only — add it again and your mail is
 still there.</p>
 <hr />
 
-  <div class="nav"><a href="index.html">Contents</a> | <a href="full.html">Single Page</a> | <a href="installing-and-updating-quickmail.html">Previous: Installing and Updating QuickMail</a> | <a href="for-microsoft-365-administrators-and-tenant-owners.html">Next: For Microsoft 365 Administrators and Tenant Owners</a></div>
+  <div class="nav"><a href="index.html">Contents</a> | <a href="full.html">Single Page</a> | <a href="home-dashboard.html">Previous: Home dashboard</a> | <a href="for-microsoft-365-administrators-and-tenant-owners.html">Next: For Microsoft 365 Administrators and Tenant Owners</a></div>
 </body>
 </html>

@@ -14,8 +14,16 @@ let listRequest = 0;
 
 function status(message) { el('status').textContent = message || ''; }
 function showView(view) {
-  for (const id of ['listing', 'reader', 'compose']) el(id).hidden = id !== view;
+  // Compose is a dialog over the current view; listing and reader replace each other.
+  if (view === 'compose') { el('compose').hidden = false; return; }
+  for (const id of ['listing', 'reader']) el(id).hidden = id !== view;
+  el('compose').hidden = true;
 }
+function splitAddress(value) {
+  const match = /^\s*"?([^"<]*?)"?\s*<([^<>]+)>\s*$/.exec(value || '');
+  return match ? { name: match[1].trim(), email: match[2].trim() } : { name: (value || '').trim(), email: '' };
+}
+function clipIcon() { return el('clip-icon').content.firstElementChild.cloneNode(true); }
 function formatDate(value, options) {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? '' : new Intl.DateTimeFormat('es-ES', options).format(date);
@@ -112,11 +120,13 @@ function messageRow(message) {
   button.className = `message-row${message.unread ? ' unread' : ''}`;
   const dot = document.createElement('span'); dot.className = 'unread-dot'; dot.setAttribute('aria-hidden', 'true');
   const correspondent = document.createElement('span'); correspondent.className = 'correspondent';
-  correspondent.textContent = message.outgoing ? `Para: ${message.to || '(sin destinatario)'}` : message.from || '(sin remitente)';
+  const sender = splitAddress(message.from);
+  correspondent.textContent = message.outgoing ? `Para: ${message.to || '(sin destinatario)'}`
+    : sender.name && sender.email ? `${sender.name} (${sender.email})` : sender.name || sender.email || '(sin remitente)';
   const summary = document.createElement('span'); summary.className = 'summary';
   const subject = document.createElement('span'); subject.className = 'subject-line';
   subject.textContent = message.subject || '(sin asunto)';
-  if (message.hasAttachments) subject.textContent += ' 📎';
+  if (message.hasAttachments) subject.append(clipIcon());
   const snippet = document.createElement('span'); snippet.className = 'snippet';
   snippet.textContent = message.preview || '';
   summary.append(subject, snippet);
@@ -162,7 +172,9 @@ async function openMessage(message) {
   message.unread = false;
   selected = message;
   el('reader-subject').textContent = data.subject || '(sin asunto)';
-  el('reader-from').textContent = data.from || '(sin remitente)';
+  const from = splitAddress(data.from);
+  el('reader-from').textContent = from.name || from.email || '(sin remitente)';
+  el('reader-email').textContent = from.name && from.email ? `<${from.email}>` : '';
   el('reader-to').textContent = `Para: ${data.to || ''}`;
   el('reader-date').textContent = formatDate(data.date, { dateStyle: 'full', timeStyle: 'short' });
   const sender = (data.from || '').split('<')[0].replace(/["']/g, '').trim();
@@ -176,7 +188,8 @@ async function openMessage(message) {
   if (data.hasAttachments) {
     for (const [index, name] of data.attachments.entries()) {
       const chip = document.createElement('button'); chip.type = 'button'; chip.className = 'attachment';
-      chip.textContent = `📎 ${name}`;
+      const label = document.createElement('span'); label.textContent = name;
+      chip.append(clipIcon(), label);
       chip.title = `Abrir ${name}`;
       chip.addEventListener('click', () => openAttachment(message, index, name));
       attachments.append(chip);
@@ -230,6 +243,7 @@ async function prepareCompose(kind) {
   el('compose-title').textContent = kind === 'new' ? 'Nuevo mensaje' : kind === 'reply' ? 'Responder' : 'Reenviar';
   el('compose-form').reset();
   el('attachment-warning').hidden = true;
+  el('compose-error').hidden = true;
   if (kind === 'new') {
     el('from-account').value = el('account-filter').value || accounts[0]?.id || '';
   } else {
@@ -281,9 +295,8 @@ el('search').addEventListener('search', () => {
 el('density').addEventListener('click', () => {
   const compact = el('messages').classList.toggle('compact');
   el('messages').classList.toggle('comfortable', !compact);
-  el('density').classList.toggle('active', compact);
   el('density').setAttribute('aria-pressed', String(compact));
-  el('density').textContent = compact ? '▤ Compacta' : '▤ Cómoda';
+  el('density-label').textContent = compact ? 'Compacta' : 'Cómoda';
 });
 el('newer').addEventListener('click', () => {
   offset = Math.max(0, offset - pageSize); loadMessages().catch(error => status(error.message));
@@ -302,7 +315,11 @@ el('back').addEventListener('click', () => {
 });
 el('reply').addEventListener('click', () => prepareCompose('reply').catch(error => status(error.message)));
 el('forward').addEventListener('click', () => prepareCompose('forward').catch(error => status(error.message)));
-el('cancel-compose').addEventListener('click', () => showView(selected && composeKind !== 'new' ? 'reader' : 'listing'));
+for (const id of ['cancel-compose', 'close-compose'])
+  el(id).addEventListener('click', () => { el('compose').hidden = true; });
+el('compose').addEventListener('keydown', event => {
+  if (event.key === 'Escape') el('compose').hidden = true;
+});
 el('logout').addEventListener('click', async () => {
   try { await api('/api/logout', { method: 'POST', body: '{}' }); }
   finally { bearerToken = null; el('mail').hidden = true; el('login').hidden = false; }
@@ -322,7 +339,10 @@ el('compose-form').addEventListener('submit', async event => {
     showView('listing');
     status(`Mensaje puesto en cola en EQM (${result.queueId}). Consulta Scheduled o Sent para confirmar el envío.`);
   } catch (error) {
-    status(`El envío no se ha confirmado. Consulta Scheduled y Sent en EQM antes de reintentarlo. ${error.message}`);
+    const message = `El envío no se ha confirmado. Consulta Scheduled y Sent en EQM antes de reintentarlo. ${error.message}`;
+    status(message);
+    el('compose-error').textContent = message;
+    el('compose-error').hidden = false;
   } finally { button.disabled = false; }
 });
 

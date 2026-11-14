@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Home dashboard - QuickMail User Guide</title>
+  <style>
+  body { max-width: 860px; margin: 0 auto; padding: 1rem 2rem; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; line-height: 1.6; color: #222; }
+  h1 { border-bottom: 2px solid #ddd; padding-bottom: 0.3em; }
+  h2 { border-bottom: 1px solid #eee; padding-bottom: 0.2em; margin-top: 2em; }
+  table { border-collapse: collapse; width: 100%; margin: 1em 0; }
+  th, td { border: 1px solid #ccc; padding: 0.5rem 0.75rem; text-align: left; }
+  th { background: #f5f5f5; font-weight: 600; }
+  code { background: #f0f0f0; padding: 0.15em 0.35em; border-radius: 3px; font-size: 0.88em; font-family: "Cascadia Code", "Consolas", monospace; }
+  pre { background: #f0f0f0; padding: 1rem; border-radius: 4px; overflow-x: auto; }
+  pre code { background: none; padding: 0; }
+  a { color: #0969da; }
+  hr { border: none; border-top: 1px solid #ddd; margin: 2rem 0; }
+  blockquote { border-left: 3px solid #ddd; margin-left: 0; padding-left: 1rem; color: #555; }
+  .nav { margin-bottom: 2em; padding-bottom: 0.75em; border-bottom: 1px solid #ddd; font-size: 0.9em; }
+  .nav a { margin-right: 1em; color: #0969da; text-decoration: none; }
+  .nav a:hover { text-decoration: underline; }
+  .version { color: #666; font-size: 0.85em; margin-top: -1em; margin-bottom: 2em; }
+</style>
+
+</head>
+<body>
+  <div class="nav"><a href="index.html">Contents</a> | <a href="full.html">Single Page</a> | <a href="installing-and-updating-quickmail.html">Previous: Installing and Updating QuickMail</a> | <a href="accounts.html">Next: Accounts</a></div>
+  <h1 id="home-dashboard">Home dashboard</h1>
+<p>The fixed <strong>Home</strong> tab summarizes account health,
+backups, pending mail and local mail activity. Receiving and sending are
+tracked separately. Errors remain visible until a successful operation
+or connection test for that channel. Unknown or old results are not a
+guarantee that a server is available. This history begins with the first
+version supporting the dashboard; it does not infer past SMTP success
+from a stored password. Double-click an account to edit it or test its
+connection.</p>
+<p>Backup information comes only from local receipts: opening Home never
+connects to the NAS or changes network credentials. An external backup
+window is not proof that the external backup succeeded. <strong>Backup
+settings</strong> and <strong>History</strong> open the corresponding
+backup-agent tab. Restore-test warnings offer a direct link to the
+Restore test settings.</p>
+<p>The attention panel groups problems with an action beside each
+warning. <strong>Test</strong> checks one account; <strong>Test
+all</strong> checks active network accounts with progress and
+cancellation. <strong>Test sending on all accounts</strong>
+connects/authenticates without sending an email (Graph sending
+permissions cannot be verified this way). <strong>Check these accounts
+now</strong> downloads mail for accounts with no receive check recorded.
+These checks run only when explicitly requested, not when Home
+opens.</p>
+<p>Activity counts use stored message dates, not download dates. Gmail
+label copies with the same Message-ID are grouped within each account.
+Drafts and scheduled messages are excluded from activity; pending unread
+also excludes Trash, Junk and RecoveryDeleted. Counts describe local
+data, so unsynchronized mail and messages with unknown direction may not
+be represented. The account selector scopes the statistics; the shortcut
+search buttons explicitly search all accounts; the unread shortcut
+excludes Trash, Junk and RecoveryDeleted to match the pending count.
+Changing the account selector reuses the loaded statistics without
+another database query. The daily comparison uses elapsed calendar days
+this week/month, including today. <strong>Folders to review</strong>
+lists local unread counts and drafts, with buttons to open those
+folders. Today’s events retain their calendar account colors and
+<strong>New appointment</strong> opens the existing event editor.</p>
+<p><strong>Google Calendar</strong> shows each configured Google
+calendar account, whether calendar sync is enabled, its last successful
+synchronization and any recorded failure. <strong>Sync now</strong>
+retries that account only, with progress and cancellation; it does not
+send or receive mail. Offline/Focus mode and ongoing maintenance block
+this action. Opening Home itself only reloads cached events. Calendar
+health starts being recorded with this feature; older successful
+synchronizations cannot be inferred from existing appointments. Today’s
+agenda includes all calendar sources regardless of the Calendar tab’s
+source filter, shows all-day events first, then timed events, and
+retains cached appointments with a warning when synchronization is
+unverified or stale. Double-click an appointment to use the same
+open/edit behavior as the calendar, including existing read-only
+restrictions and invitation handling.</p>
+<p>In <strong>Settings → General</strong>, <strong>Show Home after 15
+minutes of inactivity</strong> is enabled by default. It measures
+activity in QuickMail, waits while an editor/dialog/operation is open,
+and does not bring the application to the foreground. Your other tabs
+and list selection remain available. Home loads asynchronously and
+refreshes at most every five minutes while visible, unless you press
+<strong>Refresh</strong>. Statistics have a time limit and can be
+retried without blocking mail use.</p>
+
+  <div class="nav"><a href="index.html">Contents</a> | <a href="full.html">Single Page</a> | <a href="installing-and-updating-quickmail.html">Previous: Installing and Updating QuickMail</a> | <a href="accounts.html">Next: Accounts</a></div>
+</body>
+</html>

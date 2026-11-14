@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Reliability and diagnostics - QuickMail User Guide</title>
+  <style>
+  body { max-width: 860px; margin: 0 auto; padding: 1rem 2rem; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; line-height: 1.6; color: #222; }
+  h1 { border-bottom: 2px solid #ddd; padding-bottom: 0.3em; }
+  h2 { border-bottom: 1px solid #eee; padding-bottom: 0.2em; margin-top: 2em; }
+  table { border-collapse: collapse; width: 100%; margin: 1em 0; }
+  th, td { border: 1px solid #ccc; padding: 0.5rem 0.75rem; text-align: left; }
+  th { background: #f5f5f5; font-weight: 600; }
+  code { background: #f0f0f0; padding: 0.15em 0.35em; border-radius: 3px; font-size: 0.88em; font-family: "Cascadia Code", "Consolas", monospace; }
+  pre { background: #f0f0f0; padding: 1rem; border-radius: 4px; overflow-x: auto; }
+  pre code { background: none; padding: 0; }
+  a { color: #0969da; }
+  hr { border: none; border-top: 1px solid #ddd; margin: 2rem 0; }
+  blockquote { border-left: 3px solid #ddd; margin-left: 0; padding-left: 1rem; color: #555; }
+  .nav { margin-bottom: 2em; padding-bottom: 0.75em; border-bottom: 1px solid #ddd; font-size: 0.9em; }
+  .nav a { margin-right: 1em; color: #0969da; text-decoration: none; }
+  .nav a:hover { text-decoration: underline; }
+  .version { color: #666; font-size: 0.85em; margin-top: -1em; margin-bottom: 2em; }
+</style>
+
+</head>
+<body>
+  <div class="nav"><a href="index.html">Contents</a> | <a href="full.html">Single Page</a> | <a href="private-notes-and-message-investigation.html">Previous: Private Notes and message investigation</a></div>
+  <h1 id="reliability-and-diagnostics">Reliability and diagnostics</h1>
+<p>If delivery succeeds but EQM cannot save the sent copy, the message
+stays in Scheduled as <strong>Sent — archival pending</strong>. It
+retries saving the copy without sending the email again. An already-sent
+message cannot be edited or replaced as an unsent scheduled message.
+Switching to Offline allows an active send to finish but stops
+subsequent queued sends.</p>
+<p>Advanced searches run without blocking the interface. Long searches
+show <strong>Cancel search</strong>; cancellation keeps the previous
+results rather than substituting incomplete results. <strong>Help &gt;
+Check for updates</strong> reports its result explicitly, including
+disabled checks and failures.</p>
+<p>Damaged or unreadable <code>accounts.json</code>,
+<code>rules.json</code> or <code>views.json</code> is reported rather
+than silently replaced with an empty configuration. Close EQM and
+restore a known-good backup; the <code>.previous</code> sibling file
+contains the previous valid saved version when available. Do not assume
+that an older configuration includes your latest account/rule
+changes.</p>
+<p>Each diagnostic log (<code>quickmail.log</code>,
+<code>performance.log</code>) keeps up to three rotated files
+(<code>.1</code> newest through <code>.3</code> oldest), in addition to
+the current file, with a 10 MiB limit per file for newly generated logs.
+Existing oversized logs rotate on the next write. When reporting an
+issue, include the relevant rotated files if the operation is no longer
+in the current log.</p>
+
+  <div class="nav"><a href="index.html">Contents</a> | <a href="full.html">Single Page</a> | <a href="private-notes-and-message-investigation.html">Previous: Private Notes and message investigation</a></div>
+</body>
+</html>

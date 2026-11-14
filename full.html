@@ -60,6 +60,10 @@
     img {
       max-width: 100%;
     }
+    svg {
+      height: auto;
+      max-width: 100%;
+    }
     h1, h2, h3, h4, h5, h6 {
       margin-top: 1.4em;
     }
@@ -103,8 +107,8 @@
      overflow: visible;
     }
     hr {
-      background-color: #1a1a1a;
       border: none;
+      border-top: 1px solid #1a1a1a;
       height: 1px;
       margin: 1em 0;
     }
@@ -163,8 +167,9 @@
     }
     .display.math{display: block; text-align: center; margin: 0.5rem auto;}
     /* CSS for syntax highlighting */
+    html { -webkit-text-size-adjust: 100%; }
     pre > code.sourceCode { white-space: pre; position: relative; }
-    pre > code.sourceCode > span { line-height: 1.25; }
+    pre > code.sourceCode > span { display: inline-block; line-height: 1.25; }
     pre > code.sourceCode > span:empty { height: 1.2em; }
     .sourceCode { overflow: visible; }
     code.sourceCode > span { color: inherit; text-decoration: inherit; }
@@ -248,7 +253,7 @@
 </head>
 <body>
 <header id="title-block-header">
-<h1 class="title">QuickMail User Guide</h1><p class="version">Version 0.8.85</p>
+<h1 class="title">QuickMail User Guide</h1><p class="version">Version 0.8.86</p>
 </header>
 <h1 id="quickmail-user-guide">QuickMail User Guide</h1>
 <p>QuickMail is a keyboard and screen reader friendly email program for
@@ -257,6 +262,7 @@ providers in general are all supported.</p>
 <hr />
 <h2 id="contents">Contents</h2>
 <ul>
+<li><a href="#home-dashboard">Home dashboard</a></li>
 <li><a href="#system-requirements">System Requirements</a></li>
 <li><a href="#installing-and-updating-quickmail">Installing and Updating
 QuickMail</a></li>
@@ -466,6 +472,66 @@ cached mail, and saved passwords. Choose <strong>No</strong> (the
 default) to keep everything, so reinstalling later picks up exactly
 where you left off; choose <strong>Yes</strong> to remove it all.</p>
 <hr />
+<h2 id="home-dashboard">Home dashboard</h2>
+<p>The fixed <strong>Home</strong> tab summarizes account health,
+backups, pending mail and local mail activity. Receiving and sending are
+tracked separately. Errors remain visible until a successful operation
+or connection test for that channel. Unknown or old results are not a
+guarantee that a server is available. This history begins with the first
+version supporting the dashboard; it does not infer past SMTP success
+from a stored password. Double-click an account to edit it or test its
+connection.</p>
+<p>Backup information comes only from local receipts: opening Home never
+connects to the NAS or changes network credentials. An external backup
+window is not proof that the external backup succeeded. <strong>Backup
+settings</strong> and <strong>History</strong> open the corresponding
+backup-agent tab. Restore-test warnings offer a direct link to the
+Restore test settings.</p>
+<p>The attention panel groups problems with an action beside each
+warning. <strong>Test</strong> checks one account; <strong>Test
+all</strong> checks active network accounts with progress and
+cancellation. <strong>Test sending on all accounts</strong>
+connects/authenticates without sending an email (Graph sending
+permissions cannot be verified this way). <strong>Check these accounts
+now</strong> downloads mail for accounts with no receive check recorded.
+These checks run only when explicitly requested, not when Home
+opens.</p>
+<p>Activity counts use stored message dates, not download dates. Gmail
+label copies with the same Message-ID are grouped within each account.
+Drafts and scheduled messages are excluded from activity; pending unread
+also excludes Trash, Junk and RecoveryDeleted. Counts describe local
+data, so unsynchronized mail and messages with unknown direction may not
+be represented. The account selector scopes the statistics; the shortcut
+search buttons explicitly search all accounts; the unread shortcut
+excludes Trash, Junk and RecoveryDeleted to match the pending count.
+Changing the account selector reuses the loaded statistics without
+another database query. The daily comparison uses elapsed calendar days
+this week/month, including today. <strong>Folders to review</strong>
+lists local unread counts and drafts, with buttons to open those
+folders. Today’s events retain their calendar account colors and
+<strong>New appointment</strong> opens the existing event editor.</p>
+<p><strong>Google Calendar</strong> shows each configured Google
+calendar account, whether calendar sync is enabled, its last successful
+synchronization and any recorded failure. <strong>Sync now</strong>
+retries that account only, with progress and cancellation; it does not
+send or receive mail. Offline/Focus mode and ongoing maintenance block
+this action. Opening Home itself only reloads cached events. Calendar
+health starts being recorded with this feature; older successful
+synchronizations cannot be inferred from existing appointments. Today’s
+agenda includes all calendar sources regardless of the Calendar tab’s
+source filter, shows all-day events first, then timed events, and
+retains cached appointments with a warning when synchronization is
+unverified or stale. Double-click an appointment to use the same
+open/edit behavior as the calendar, including existing read-only
+restrictions and invitation handling.</p>
+<p>In <strong>Settings → General</strong>, <strong>Show Home after 15
+minutes of inactivity</strong> is enabled by default. It measures
+activity in QuickMail, waits while an editor/dialog/operation is open,
+and does not bring the application to the foreground. Your other tabs
+and list selection remain available. Home loads asynchronously and
+refreshes at most every five minutes while visible, unless you press
+<strong>Refresh</strong>. Statistics have a time limit and can be
+retried without blocking mail use.</p>
 <h2 id="accounts">Accounts</h2>
 <p>Adding an account, changing one, testing it, and removing it all
 happen in <strong>Manage Accounts</strong>. Open it from <strong>File →
@@ -672,6 +738,16 @@ need to enter the address.</p>
 and Manage Accounts, so it is as useful on an account that has stopped
 working as on one you are still setting up. In Manage Accounts it
 appears as soon as an account is selected.</p>
+<p>The test displays a progress window with the current protocol/phase,
+elapsed time and <strong>Cancel test</strong>. No email is sent. SMTP
+and IMAP identify connection/TLS negotiation, OAuth authorization and
+authentication; POP3 also checks UIDL. Errors show the configured host,
+port, transport mode, failing phase, elapsed time and underlying
+socket/server error when available. A connection timeout does not by
+itself mean the password is wrong. Per-phase timing is recorded in
+<code>performance.log</code>; diagnostic failures are recorded in
+<code>quickmail.log</code> with the entered password redacted and
+without a protocol transcript.</p>
 <p>QuickMail checks <strong>incoming and outgoing mail
 separately</strong> and reports both — “IMAP: OK. SMTP: OK.” A failure
 names its own side and gives the reason, so a working inbox with a
@@ -943,19 +1019,19 @@ MFA policies.</li>
 <h3 id="app-registration-details">App registration details</h3>
 <table>
 <tbody>
-<tr class="odd">
+<tr>
 <td><strong>Application (client) ID</strong></td>
 <td><code>bcdc84f1-d37c-4581-b14a-a01f7b3a1312</code></td>
 </tr>
-<tr class="even">
+<tr>
 <td><strong>Name in Enterprise applications</strong></td>
 <td>QuickMail</td>
 </tr>
-<tr class="odd">
+<tr>
 <td><strong>Publisher</strong></td>
 <td>Kelly Ford (the QuickMail project)</td>
 </tr>
-<tr class="even">
+<tr>
 <td><strong>Supported accounts</strong></td>
 <td>Work/school and personal Microsoft accounts</td>
 </tr>
@@ -971,32 +1047,32 @@ their own mailbox):</p>
 <col style="width: 50%" />
 </colgroup>
 <thead>
-<tr class="header">
+<tr>
 <th>Permission</th>
 <th>Why</th>
 </tr>
 </thead>
 <tbody>
-<tr class="odd">
+<tr>
 <td><code>Mail.ReadWrite</code>, <code>Mail.Send</code></td>
 <td>Read, organize, delete, draft, and send the user’s mail</td>
 </tr>
-<tr class="even">
+<tr>
 <td><code>Calendars.ReadWrite</code></td>
 <td>Read and update the user’s own calendar (only if they enable
 calendar sync)</td>
 </tr>
-<tr class="odd">
+<tr>
 <td><code>Contacts.Read</code>, <code>People.Read</code></td>
 <td>Read the user’s own contacts and frequent correspondents (only if
 they enable contact sync)</td>
 </tr>
-<tr class="even">
+<tr>
 <td><code>MailboxSettings.ReadWrite</code></td>
 <td>The user’s own mailbox settings, for a planned server-side rules
 feature</td>
 </tr>
-<tr class="odd">
+<tr>
 <td><code>User.Read</code>, <code>User.ReadBasic.All</code></td>
 <td>Resolve the signed-in user and display recipient names</td>
 </tr>
@@ -1087,25 +1163,25 @@ all accounts in unified view</li>
 <p>You can also jump directly to any pane:</p>
 <table>
 <thead>
-<tr class="header">
+<tr>
 <th>Shortcut</th>
 <th>Destination</th>
 </tr>
 </thead>
 <tbody>
-<tr class="odd">
+<tr>
 <td><code>Ctrl+1</code></td>
 <td>Account list</td>
 </tr>
-<tr class="even">
+<tr>
 <td><code>Ctrl+2</code></td>
 <td>Folder tree</td>
 </tr>
-<tr class="odd">
+<tr>
 <td><code>Ctrl+3</code></td>
 <td>Message list</td>
 </tr>
-<tr class="even">
+<tr>
 <td><code>Ctrl+9</code></td>
 <td>Status bar</td>
 </tr>
@@ -1429,27 +1505,27 @@ suspicious message’s raw text.</p>
 <col style="width: 38%" />
 </colgroup>
 <thead>
-<tr class="header">
+<tr>
 <th>Method</th>
 <th>How</th>
 </tr>
 </thead>
 <tbody>
-<tr class="odd">
+<tr>
 <td><strong>Command Palette</strong></td>
 <td>Press <code>Ctrl+Shift+P</code>, type “Toggle Plain Text View”,
 press Enter</td>
 </tr>
-<tr class="even">
+<tr>
 <td><strong>View menu</strong></td>
 <td>Open the <strong>View</strong> menu and activate the <strong>Plain
 Text View</strong> item (a checkable toggle)</td>
 </tr>
-<tr class="odd">
+<tr>
 <td><strong>Keyboard shortcut</strong></td>
 <td>Press <strong>Ctrl+Shift+H</strong></td>
 </tr>
-<tr class="even">
+<tr>
 <td><strong>Settings</strong></td>
 <td>Open Settings (Ctrl+,), navigate to the General tab, and check
 <strong>Read messages as plain text</strong></td>
@@ -1468,45 +1544,45 @@ Message, Navigate</strong>), a toolbar, and a command palette. Shortcuts
 work the same as in the main window:</p>
 <table>
 <thead>
-<tr class="header">
+<tr>
 <th>Shortcut</th>
 <th>Action</th>
 </tr>
 </thead>
 <tbody>
-<tr class="odd">
+<tr>
 <td><code>Ctrl+R</code></td>
 <td>Reply</td>
 </tr>
-<tr class="even">
+<tr>
 <td><code>Ctrl+Shift+R</code></td>
 <td>Reply All</td>
 </tr>
-<tr class="odd">
+<tr>
 <td><code>Ctrl+F</code></td>
 <td>Forward</td>
 </tr>
-<tr class="even">
+<tr>
 <td><code>Delete</code></td>
 <td>Delete</td>
 </tr>
-<tr class="odd">
+<tr>
 <td><code>Ctrl+Shift+M</code></td>
 <td>Move to Archive</td>
 </tr>
-<tr class="even">
+<tr>
 <td><code>Ctrl+Q</code></td>
 <td>Mark as Read</td>
 </tr>
-<tr class="odd">
+<tr>
 <td><code>Ctrl+Shift+G</code></td>
 <td>Grab Addresses</td>
 </tr>
-<tr class="even">
+<tr>
 <td><code>Ctrl+Shift+W</code></td>
 <td>Watch or unwatch this message’s conversation</td>
 </tr>
-<tr class="odd">
+<tr>
 <td><code>Alt+A</code></td>
 <td>Focus the attachment list</td>
 </tr>
@@ -1536,21 +1612,21 @@ the attachment list.</li>
 <col style="width: 44%" />
 </colgroup>
 <thead>
-<tr class="header">
+<tr>
 <th>Shortcut</th>
 <th>Action</th>
 </tr>
 </thead>
 <tbody>
-<tr class="odd">
+<tr>
 <td><code>Enter</code></td>
 <td>Open the selected attachment</td>
 </tr>
-<tr class="even">
+<tr>
 <td><code>Alt+Enter</code></td>
 <td>Show the attachment’s properties</td>
 </tr>
-<tr class="odd">
+<tr>
 <td><code>Shift+F10</code> (or the Menu key)</td>
 <td>Open the context menu: <strong>Save…</strong>, <strong>Save
 All…</strong>, <strong>Open</strong></td>
@@ -1624,29 +1700,29 @@ All Mail <em>is</em> the archive.</p>
 visible at once.</p>
 <table>
 <thead>
-<tr class="header">
+<tr>
 <th>Shortcut</th>
 <th>Action</th>
 </tr>
 </thead>
 <tbody>
-<tr class="odd">
+<tr>
 <td><code>Ctrl+Tab</code></td>
 <td>Next tab</td>
 </tr>
-<tr class="even">
+<tr>
 <td><code>Ctrl+Shift+Tab</code></td>
 <td>Previous tab</td>
 </tr>
-<tr class="odd">
+<tr>
 <td><code>Ctrl+W</code></td>
 <td>Close tab</td>
 </tr>
-<tr class="even">
+<tr>
 <td><code>Ctrl+Shift+``</code></td>
 <td>Tab list (navigate by name)</td>
 </tr>
-<tr class="odd">
+<tr>
 <td><code>Ctrl+Shift+T</code></td>
 <td>Focus tab strip</td>
 </tr>
@@ -1657,25 +1733,25 @@ visible at once.</p>
 <h3 id="opening-a-compose-window">Opening a Compose Window</h3>
 <table>
 <thead>
-<tr class="header">
+<tr>
 <th>Shortcut</th>
 <th>Action</th>
 </tr>
 </thead>
 <tbody>
-<tr class="odd">
+<tr>
 <td><code>Ctrl+N</code></td>
 <td>New message</td>
 </tr>
-<tr class="even">
+<tr>
 <td><code>Ctrl+R</code></td>
 <td>Reply</td>
 </tr>
-<tr class="odd">
+<tr>
 <td><code>Ctrl+Shift+R</code></td>
 <td>Reply All</td>
 </tr>
-<tr class="even">
+<tr>
 <td><code>Ctrl+F</code></td>
 <td>Forward</td>
 </tr>
@@ -1687,21 +1763,21 @@ Cc, Bcc), the subject, and the message body. You can also jump directly
 to a field:</p>
 <table>
 <thead>
-<tr class="header">
+<tr>
 <th>Shortcut</th>
 <th>Destination</th>
 </tr>
 </thead>
 <tbody>
-<tr class="odd">
+<tr>
 <td><code>Alt+U</code></td>
 <td>Subject field</td>
 </tr>
-<tr class="even">
+<tr>
 <td><code>Alt+M</code></td>
 <td>From account</td>
 </tr>
-<tr class="odd">
+<tr>
 <td><code>Alt+Y</code></td>
 <td>Message body</td>
 </tr>
@@ -1731,24 +1807,24 @@ without accepting.</p>
 <code>Ctrl+Shift+1/2/3</code> or the <strong>View</strong> menu:</p>
 <table>
 <thead>
-<tr class="header">
+<tr>
 <th>Mode</th>
 <th>Shortcut</th>
 <th>Description</th>
 </tr>
 </thead>
 <tbody>
-<tr class="odd">
+<tr>
 <td>Plain Text</td>
 <td><code>Ctrl+Shift+1</code></td>
 <td>Unformatted text</td>
 </tr>
-<tr class="even">
+<tr>
 <td>Markdown</td>
 <td><code>Ctrl+Shift+2</code></td>
 <td>Write Markdown; sent as formatted HTML</td>
 </tr>
-<tr class="odd">
+<tr>
 <td>HTML</td>
 <td><code>Ctrl+Shift+3</code></td>
 <td>Rich text editor with real formatting</td>
@@ -1763,54 +1839,54 @@ and a plain text part.</p>
 HTML Modes)</h3>
 <table>
 <thead>
-<tr class="header">
+<tr>
 <th>Command</th>
 <th>Shortcut</th>
 </tr>
 </thead>
 <tbody>
-<tr class="odd">
+<tr>
 <td>Bold</td>
 <td><code>Ctrl+B</code></td>
 </tr>
-<tr class="even">
+<tr>
 <td>Italic</td>
 <td><code>Ctrl+I</code></td>
 </tr>
-<tr class="odd">
+<tr>
 <td>Underline (HTML only)</td>
 <td><code>Ctrl+U</code></td>
 </tr>
-<tr class="even">
+<tr>
 <td>Strikethrough</td>
 <td><code>Ctrl+Shift+X</code></td>
 </tr>
-<tr class="odd">
+<tr>
 <td>Heading 1 / 2 / 3</td>
 <td><code>Ctrl+Alt+1</code> / <code>Ctrl+Alt+2</code> /
 <code>Ctrl+Alt+3</code></td>
 </tr>
-<tr class="even">
+<tr>
 <td>Bullet list</td>
 <td><code>Ctrl+Shift+L</code></td>
 </tr>
-<tr class="odd">
+<tr>
 <td>Numbered list</td>
 <td><code>Ctrl+Shift+N</code></td>
 </tr>
-<tr class="even">
+<tr>
 <td>Insert link</td>
 <td><code>Ctrl+L</code></td>
 </tr>
-<tr class="odd">
+<tr>
 <td>Clear formatting</td>
 <td><code>Ctrl+Space</code></td>
 </tr>
-<tr class="even">
+<tr>
 <td>Announce formatting at cursor</td>
 <td><code>Ctrl+T</code></td>
 </tr>
-<tr class="odd">
+<tr>
 <td>Show formatting in browsable list</td>
 <td><code>Ctrl+Shift+T</code></td>
 </tr>
@@ -1855,45 +1931,45 @@ correction.</p>
 <col style="width: 61%" />
 </colgroup>
 <thead>
-<tr class="header">
+<tr>
 <th>Key</th>
 <th>Action</th>
 </tr>
 </thead>
 <tbody>
-<tr class="odd">
+<tr>
 <td><code>Alt+C</code> or <code>Enter</code></td>
 <td>Change — replace the word with the Change to text</td>
 </tr>
-<tr class="even">
+<tr>
 <td><code>Alt+L</code></td>
 <td>Change All — also fix every later occurrence this session</td>
 </tr>
-<tr class="odd">
+<tr>
 <td><code>Alt+I</code></td>
 <td>Ignore this occurrence</td>
 </tr>
-<tr class="even">
+<tr>
 <td><code>Alt+G</code></td>
 <td>Ignore All — skip this word for the rest of the check</td>
 </tr>
-<tr class="odd">
+<tr>
 <td><code>Alt+A</code></td>
 <td>Add to Dictionary — never flag this word again</td>
 </tr>
-<tr class="even">
+<tr>
 <td><code>Alt+R</code></td>
 <td>Read the line containing the word</td>
 </tr>
-<tr class="odd">
+<tr>
 <td><code>Alt+T</code> / <code>Alt+S</code> / <code>Alt+N</code></td>
 <td>Move to the Change to box / Suggestions list / context</td>
 </tr>
-<tr class="even">
+<tr>
 <td><code>F6</code> / <code>Shift+F6</code></td>
 <td>Cycle between the context, suggestions, and buttons</td>
 </tr>
-<tr class="odd">
+<tr>
 <td><code>Escape</code></td>
 <td>Close the dialog and return to the message</td>
 </tr>
@@ -1914,21 +1990,21 @@ place.</p>
 <col style="width: 44%" />
 </colgroup>
 <thead>
-<tr class="header">
+<tr>
 <th>Shortcut</th>
 <th>Action</th>
 </tr>
 </thead>
 <tbody>
-<tr class="odd">
+<tr>
 <td><code>Ctrl+F7</code></td>
 <td>Jump to next misspelling</td>
 </tr>
-<tr class="even">
+<tr>
 <td><code>Ctrl+Shift+F7</code></td>
 <td>Jump to previous misspelling</td>
 </tr>
-<tr class="odd">
+<tr>
 <td><code>Alt+1</code> / <code>Alt+2</code> / <code>Alt+3</code></td>
 <td>Accept first / second / third spelling suggestion</td>
 </tr>
@@ -1996,15 +2072,22 @@ automatically. Addresses that are not valid and cannot be resolved are
 flagged as invalid. A screen reader announces how many addresses were
 resolved and how many are invalid.</p>
 <h3 id="sending">Sending</h3>
+<p>In <strong>Scheduled</strong>, select one or more messages and choose
+<strong>Send immediately</strong> from the message context menu to
+request background sending now. Other scheduled messages keep their
+dates. Repeated messages keep their original recurrence calendar for
+subsequent deliveries. Offline mode and backup maintenance still block
+sending, and a message already being sent or accepted by SMTP cannot be
+resent through this option.</p>
 <table>
 <thead>
-<tr class="header">
+<tr>
 <th>Shortcut</th>
 <th>Action</th>
 </tr>
 </thead>
 <tbody>
-<tr class="odd">
+<tr>
 <td><code>Alt+S</code> or <code>Ctrl+Enter</code></td>
 <td>Send</td>
 </tr>
@@ -2300,15 +2383,54 @@ the text to look for; the match is not case sensitive and looks for your
 text anywhere in the field. A message must satisfy
 <strong>every</strong> condition you checked, so leaving a condition
 unchecked is how you say “don’t care”.</li>
-<li><strong>Action</strong> — one of <strong>Mark as read</strong>,
-<strong>Mark as unread</strong>, <strong>Move to folder</strong>, or
-<strong>Delete</strong>. Choosing Move to folder adds a <strong>Choose
-Folder…</strong> button; the button then shows the folder you picked.
-The picker is the same folder tree used everywhere else you choose a
-destination, showing the folders of the rule’s own account — a rule
-files mail within one mailbox. It opens on the folder the rule already
-files into, or on the first folder for a new rule.</li>
+<li><strong>Actions</strong> — all actions appear as directly editable
+blocks, separated by horizontal lines. Use <strong>Add action</strong>
+to combine <strong>Forward</strong>, <strong>Reply template</strong>,
+<strong>Flag</strong>, <strong>Execute</strong>, <strong>Move to
+folder</strong>, <strong>Delete</strong>, or read/unread changes. The
+last option in each action dropdown, <strong>Remove action</strong>,
+removes that block. Move/Delete automatically sort last; only one
+Move/Delete action is supported. Only parameters relevant to that action
+appear.</li>
+<li><strong>Mark as read</strong> is the first block, an independent
+checkbox enabled by default. There is no need to add a separate read
+action to ordinary filters. Removing all other actions leaves a
+read-only rule; unchecking Mark as read then requires adding an action
+before saving.</li>
+<li><strong>Forward</strong> accepts one address per action. Multiple
+recipients display a warning: use a separate Forward action for each
+recipient.</li>
+<li><strong>Execute</strong> runs a trusted local <code>.exe</code>
+command once per matching message, as your Windows user, without
+elevation or sandboxing. Quote executable paths containing spaces. For
+scripts, use an explicit interpreter, for example
+<code>powershell.exe -NoProfile -File "C:\Scripts\lights.ps1"</code>.
+<strong>Add subject to command line</strong> appends the subject as one
+final literal argument; the script must treat it as data, never evaluate
+it as code. This option rejects <code>cmd.exe</code> and requires
+<code>-File</code> with PowerShell. Commands time out after 60 seconds;
+cancellation stops the process tree. A nonzero exit code fails the
+action and stops later actions. Effects already performed cannot be
+undone; manually applying a rule again runs the command again. Use
+narrow conditions and remember that a sender address can be forged. Test
+Rule/Preview never executes commands.</li>
 </ul>
+<p>For <strong>Forward + Move</strong>, EQM first durably queues
+forwarding, then marks the original read if requested, then moves it.
+This does not wait for SMTP delivery: if sending later fails, its queued
+copy remains managed by Scheduled. Forward/reply duplicate and loop
+protections still apply. <strong>Move or Delete always runs
+last</strong>, with at most one destination action per rule. There may
+be only one Reply template action, consistent with its per-sender
+protection. Combining Mark as unread with other actions requires
+clearing Also mark as read.</p>
+<p>If a step fails, remaining actions stop and the error lists completed
+steps. Earlier work is not rolled back, and a failed step may have
+processed part of a multi-message selection. Cancellation also does not
+undo queued forwards or earlier changes. Test Rule/Preview lists the
+planned actions. SPAM filters remain specialized single-action rules.
+Cleanup does not remove multi-action rules merely because their
+destination is In or missing; review those rules manually.</p>
 <p><strong>Test Rule</strong> runs the rule against the messages
 currently in your list and tells you how many it would match, so you can
 check a rule before letting it loose. <strong>Save</strong> stores the
@@ -2334,12 +2456,13 @@ expiration. Changing the date does not retroactively undo earlier
 actions.</p>
 <p>The <strong>Reply template</strong> action selects an existing
 template and sends its text from the receiving account to Reply-To (or
-From if Reply-To is absent). It preserves the original message, uses the
-template subject when supplied (otherwise <code>Re:</code> plus the
-original subject), and does not attach the original attachments. The
-existing <code>{sender}</code>, <code>{date}</code> and
-<code>{time}</code> template substitutions are supported. Create/edit
-templates from the composer before choosing them in Rule Manager.</p>
+From if Reply-To is absent). It preserves the original unless another
+action moves it, uses the template subject when supplied (otherwise
+<code>Re:</code> plus the original subject), and does not attach the
+original attachments. The existing <code>{sender}</code>,
+<code>{date}</code> and <code>{time}</code> template substitutions are
+supported. Create/edit templates from the composer before choosing them
+in Rule Manager.</p>
 <p>For vacation replies, choose the account, template and expiration
 date, enable automatic processing, and leave conditions empty if the
 reply should cover all eligible incoming senders. There is at most one
@@ -2738,25 +2861,25 @@ the arrow keys without typing anything.</p>
 <p>In a <strong>date</strong> field:</p>
 <table>
 <thead>
-<tr class="header">
+<tr>
 <th>Key</th>
 <th>Moves by</th>
 </tr>
 </thead>
 <tbody>
-<tr class="odd">
+<tr>
 <td>Up / Down arrow</td>
 <td>One day</td>
 </tr>
-<tr class="even">
+<tr>
 <td>Shift+Up / Shift+Down</td>
 <td>One week</td>
 </tr>
-<tr class="odd">
+<tr>
 <td>Page Up / Page Down</td>
 <td>One month</td>
 </tr>
-<tr class="even">
+<tr>
 <td>Ctrl+Page Up / Ctrl+Page Down</td>
 <td>One year</td>
 </tr>
@@ -2765,29 +2888,29 @@ the arrow keys without typing anything.</p>
 <p>In a <strong>time</strong> field:</p>
 <table>
 <thead>
-<tr class="header">
+<tr>
 <th>Key</th>
 <th>Moves by</th>
 </tr>
 </thead>
 <tbody>
-<tr class="odd">
+<tr>
 <td>Up / Down arrow</td>
 <td>15 minutes, landing on the quarter hour</td>
 </tr>
-<tr class="even">
+<tr>
 <td>Ctrl+Up / Ctrl+Down</td>
 <td>One minute</td>
 </tr>
-<tr class="odd">
+<tr>
 <td>Shift+Up / Shift+Down</td>
 <td>One hour</td>
 </tr>
-<tr class="even">
+<tr>
 <td>Page Up / Page Down</td>
 <td>One hour</td>
 </tr>
-<tr class="odd">
+<tr>
 <td>Ctrl+Page Up / Ctrl+Page Down</td>
 <td>One day</td>
 </tr>
@@ -2944,7 +3067,7 @@ providers QuickMail can read:</p>
 <col style="width: 9%" />
 </colgroup>
 <thead>
-<tr class="header">
+<tr>
 <th>Provider</th>
 <th>See your events</th>
 <th>Create / edit / delete from QuickMail</th>
@@ -2952,27 +3075,27 @@ providers QuickMail can read:</p>
 </tr>
 </thead>
 <tbody>
-<tr class="odd">
+<tr>
 <td><strong>Local Calendar</strong></td>
 <td>— (they live here)</td>
 <td>Full</td>
 <td>Nothing to set up; it is always there.</td>
 </tr>
-<tr class="even">
+<tr>
 <td><strong>Microsoft</strong> (Outlook.com, Microsoft 365)</td>
 <td>Yes</td>
 <td>Yes, for single (non-repeating) events</td>
 <td>Check <strong>Sync calendar from this account</strong>. Microsoft
 asks once for calendar permission.</td>
 </tr>
-<tr class="odd">
+<tr>
 <td><strong>Google</strong></td>
 <td>Yes</td>
 <td>Yes, for single (non-repeating) events</td>
 <td>Check <strong>Sync calendar from this account</strong>. Permission
 was granted when you signed in for mail.</td>
 </tr>
-<tr class="even">
+<tr>
 <td><strong>iCloud</strong></td>
 <td>Yes</td>
 <td>Yes, for single (non-repeating) events</td>
@@ -3049,65 +3172,65 @@ has focus:</p>
 <col style="width: 44%" />
 </colgroup>
 <thead>
-<tr class="header">
+<tr>
 <th>Shortcut</th>
 <th>Action</th>
 </tr>
 </thead>
 <tbody>
-<tr class="odd">
+<tr>
 <td><code>Ctrl+Shift+C</code></td>
 <td>Open the Calendar</td>
 </tr>
-<tr class="even">
+<tr>
 <td><code>A</code> / <code>D</code> / <code>W</code> /
 <code>M</code></td>
 <td>Agenda / Day / Week / Month view</td>
 </tr>
-<tr class="odd">
+<tr>
 <td><code>T</code></td>
 <td>Today (filter to today in Agenda; jump to today in
 Day/Week/Month)</td>
 </tr>
-<tr class="even">
+<tr>
 <td><code>Ctrl+Left</code> / <code>Ctrl+Right</code></td>
 <td>Previous / next day, week, or month</td>
 </tr>
-<tr class="odd">
+<tr>
 <td><code>Ctrl+G</code></td>
 <td>Go to Date</td>
 </tr>
-<tr class="even">
+<tr>
 <td><code>Enter</code></td>
 <td>Respond to a pending invitation (Accept / Tentative / Decline menu);
 or edit your own appointment; or open an answered invitation’s source
 email; or (in Month view) open the selected day</td>
 </tr>
-<tr class="odd">
+<tr>
 <td><code>N</code></td>
 <td>New appointment</td>
 </tr>
-<tr class="even">
+<tr>
 <td><code>E</code></td>
 <td>Edit appointment</td>
 </tr>
-<tr class="odd">
+<tr>
 <td><code>Delete</code></td>
 <td>Delete appointment</td>
 </tr>
-<tr class="even">
+<tr>
 <td><code>Ctrl+Shift+S</code></td>
 <td>Search appointments</td>
 </tr>
-<tr class="odd">
+<tr>
 <td><code>Escape</code></td>
 <td>Clear search / leave the calendar</td>
 </tr>
-<tr class="even">
+<tr>
 <td><code>F5</code></td>
 <td>Refresh</td>
 </tr>
-<tr class="odd">
+<tr>
 <td><code>F6</code></td>
 <td>Move to the next pane</td>
 </tr>
@@ -3140,32 +3263,32 @@ over.</p>
 <col style="width: 60%" />
 </colgroup>
 <thead>
-<tr class="header">
+<tr>
 <th>What</th>
 <th>Direction</th>
 <th>What that means for you</th>
 </tr>
 </thead>
 <tbody>
-<tr class="odd">
+<tr>
 <td><strong>Messages</strong></td>
 <td>Two-way</td>
 <td>Read and unread, moving between folders, deleting, and sending all
 go to the server. Another program sees the same state.</td>
 </tr>
-<tr class="even">
+<tr>
 <td><strong>The built-in flag</strong></td>
 <td>Two-way</td>
 <td>Set or cleared in QuickMail, it shows up everywhere else, and a
 message flagged elsewhere arrives here already flagged.</td>
 </tr>
-<tr class="odd">
+<tr>
 <td><strong>Named flags you create</strong></td>
 <td>This computer only</td>
 <td>The name and color exist in QuickMail alone. Other programs, and
 QuickMail on another computer, will not see them.</td>
 </tr>
-<tr class="even">
+<tr>
 <td><strong>Contacts</strong></td>
 <td>Download only</td>
 <td>QuickMail reads your Microsoft, Google, and iCloud contacts and
@@ -3173,7 +3296,7 @@ never writes back. Synced contacts cannot be edited or deleted in the
 address book — <a href="#changing-or-deleting-a-synced-contact">make the
 change at the account and re-sync</a>.</td>
 </tr>
-<tr class="odd">
+<tr>
 <td><strong>Calendar events</strong></td>
 <td>Mostly two-way</td>
 <td>Single (non-repeating) events on a connected calendar can be
@@ -3182,20 +3305,20 @@ invitations, and the events your provider manages for you are <a
 href="#events-your-account-will-not-let-quickmail-change">download
 only</a>.</td>
 </tr>
-<tr class="even">
+<tr>
 <td><strong>Meeting responses</strong></td>
 <td>Two-way</td>
 <td>Accept, Tentative, and Decline are emailed to the organizer and
 update your calendar.</td>
 </tr>
-<tr class="odd">
+<tr>
 <td><strong>Mail rules</strong></td>
 <td>This computer only</td>
 <td>Rules run inside QuickMail as mail arrives. They are not server
 rules — your provider does not know about them, and they do nothing
 while QuickMail is closed.</td>
 </tr>
-<tr class="even">
+<tr>
 <td><strong>Everything else in QuickMail</strong></td>
 <td>This computer only</td>
 <td>Settings, themes, keyboard customizations, signatures, message
@@ -3392,7 +3515,7 @@ follow-up</strong>. Pick whichever fits.</p>
 <col style="width: 32%" />
 </colgroup>
 <thead>
-<tr class="header">
+<tr>
 <th>Way</th>
 <th>Where</th>
 <th>Follow-up?</th>
@@ -3400,20 +3523,20 @@ follow-up</strong>. Pick whichever fits.</p>
 </tr>
 </thead>
 <tbody>
-<tr class="odd">
+<tr>
 <td><strong>1. Report a Bug → Send</strong></td>
 <td>Help menu, in QuickMail</td>
 <td>No</td>
 <td>You want to report a problem but don’t want any follow-up.</td>
 </tr>
-<tr class="even">
+<tr>
 <td><strong>2. Report a Bug → Copy report and open GitHub</strong></td>
 <td>Help menu, in QuickMail</td>
 <td>Yes (via GitHub)</td>
 <td>You have a GitHub account and want automatic filing plus direct
 contact.</td>
 </tr>
-<tr class="odd">
+<tr>
 <td><strong>3. Email</strong></td>
 <td><code>quickmailissues@theideaplace.net</code></td>
 <td>Yes (by email)</td>
@@ -3610,67 +3733,67 @@ description of each built-in theme.</p>
 <col style="width: 65%" />
 </colgroup>
 <thead>
-<tr class="header">
+<tr>
 <th>Setting</th>
 <th>What it controls</th>
 </tr>
 </thead>
 <tbody>
-<tr class="odd">
+<tr>
 <td>Custom Announcements</td>
 <td>Master on/off for all programmatic announcements</td>
 </tr>
-<tr class="even">
+<tr>
 <td>Announce hints</td>
 <td>Instructional tips (“Press Escape to return”)</td>
 </tr>
-<tr class="odd">
+<tr>
 <td>Announce status</td>
 <td>Background progress (sync, loading, connection state)</td>
 </tr>
-<tr class="even">
+<tr>
 <td>Announce results</td>
 <td>Action outcomes (messages moved, addresses saved, flag changes)</td>
 </tr>
-<tr class="odd">
+<tr>
 <td>Announce delete and archive actions</td>
 <td>Delete and archive outcomes (“1 message archived”). Turn off to stop
 these from interrupting the screen reader as it reads the next message;
 failures are still announced</td>
 </tr>
-<tr class="even">
+<tr>
 <td>Announce formatting while navigating</td>
 <td>Block type announced when caret enters a new paragraph type in HTML
 compose</td>
 </tr>
-<tr class="odd">
+<tr>
 <td>Announce spelling errors when typing</td>
 <td>Misspellings called out as you type them</td>
 </tr>
-<tr class="even">
+<tr>
 <td>Announce spelling errors while navigating</td>
 <td>Misspellings called out as you move the cursor through the
 message</td>
 </tr>
-<tr class="odd">
+<tr>
 <td>Announce spelling suggestions</td>
 <td>Suggestions included when a misspelling is announced</td>
 </tr>
-<tr class="even">
+<tr>
 <td>Spelling Suggestions Verbosity</td>
 <td>Numbers with suggestions (default) or just suggestions</td>
 </tr>
-<tr class="odd">
+<tr>
 <td>Show field labels in the contact list</td>
 <td>When on, address-book rows speak field names (“Name … email …
 account …”); when off, they speak concise field data only</td>
 </tr>
-<tr class="even">
+<tr>
 <td>Show field labels in the calendar event list</td>
 <td>When on, calendar rows speak field names (“Subject … when … location
 …”)</td>
 </tr>
-<tr class="odd">
+<tr>
 <td>Show field labels in the rules list</td>
 <td>When on, rules-list rows speak field names (“Name … account …”)</td>
 </tr>
@@ -3830,42 +3953,42 @@ and move it to change where it falls in the line.</p>
 <col style="width: 61%" />
 </colgroup>
 <thead>
-<tr class="header">
+<tr>
 <th>Key</th>
 <th>Action</th>
 </tr>
 </thead>
 <tbody>
-<tr class="odd">
+<tr>
 <td><code>Up</code> / <code>Down</code></td>
 <td>Move between fields; stops at the first and last one</td>
 </tr>
-<tr class="even">
+<tr>
 <td><code>Space</code></td>
 <td>Turn the focused field on or off</td>
 </tr>
-<tr class="odd">
+<tr>
 <td><code>Alt+Up</code> / <code>Alt+Down</code></td>
 <td>Move the focused field earlier or later in the spoken order</td>
 </tr>
-<tr class="even">
+<tr>
 <td><code>Home</code> / <code>End</code></td>
 <td>First / last field</td>
 </tr>
-<tr class="odd">
+<tr>
 <td><em>a letter</em></td>
 <td>Jump to the next field starting with that letter; press again to
 reach the next match</td>
 </tr>
-<tr class="even">
+<tr>
 <td><code>F6</code> / <code>Shift+F6</code></td>
 <td>Cycle: Row type, Fields, Field options, Spoken preview, buttons</td>
 </tr>
-<tr class="odd">
+<tr>
 <td><code>Ctrl+Shift+P</code></td>
 <td>This window’s own command palette</td>
 </tr>
-<tr class="even">
+<tr>
 <td><code>Escape</code></td>
 <td>Close</td>
 </tr>
@@ -3900,38 +4023,38 @@ the From and To views.</li>
 <col style="width: 53%" />
 </colgroup>
 <thead>
-<tr class="header">
+<tr>
 <th>Field</th>
 <th>Speaks</th>
 </tr>
 </thead>
 <tbody>
-<tr class="odd">
+<tr>
 <td>Flag</td>
 <td>The flag’s name, when the message is flagged</td>
 </tr>
-<tr class="even">
+<tr>
 <td>Status (combined)</td>
 <td>One word: “replied”, “forwarded”, “unread”, or “read”</td>
 </tr>
-<tr class="odd">
+<tr>
 <td>Attachments</td>
 <td>“attachments”</td>
 </tr>
-<tr class="even">
+<tr>
 <td>From, Subject, Preview, Date, To</td>
 <td>The field’s text</td>
 </tr>
-<tr class="odd">
+<tr>
 <td>Source folder</td>
 <td>Where the message lives — only in aggregate views such as All
 Archive, where it is account-qualified when the view spans accounts</td>
 </tr>
-<tr class="even">
+<tr>
 <td>Unread, Replied, Forwarded</td>
 <td>Each state on its own, so you can arrange them separately</td>
 </tr>
-<tr class="odd">
+<tr>
 <td>Mailing list</td>
 <td>“mailing list”</td>
 </tr>
@@ -3998,137 +4121,137 @@ box with any screen reader.</p>
 <h3 id="main-window-1">Main Window</h3>
 <table>
 <thead>
-<tr class="header">
+<tr>
 <th>Shortcut</th>
 <th>Action</th>
 </tr>
 </thead>
 <tbody>
-<tr class="odd">
+<tr>
 <td><code>F6</code> / <code>Shift+F6</code></td>
 <td>Cycle panes forward / backward</td>
 </tr>
-<tr class="even">
+<tr>
 <td><code>Ctrl+1</code></td>
 <td>Focus account list</td>
 </tr>
-<tr class="odd">
+<tr>
 <td><code>Ctrl+2</code></td>
 <td>Focus folder tree</td>
 </tr>
-<tr class="even">
+<tr>
 <td><code>Ctrl+3</code></td>
 <td>Focus message list</td>
 </tr>
-<tr class="odd">
+<tr>
 <td><code>Ctrl+9</code></td>
 <td>Focus status bar</td>
 </tr>
-<tr class="even">
+<tr>
 <td><code>Ctrl+Shift+P</code></td>
 <td>Command palette</td>
 </tr>
-<tr class="odd">
+<tr>
 <td><code>Ctrl+N</code></td>
 <td>New message</td>
 </tr>
-<tr class="even">
+<tr>
 <td><code>Ctrl+R</code></td>
 <td>Reply</td>
 </tr>
-<tr class="odd">
+<tr>
 <td><code>Ctrl+Shift+R</code></td>
 <td>Reply All</td>
 </tr>
-<tr class="even">
+<tr>
 <td><code>Ctrl+F</code></td>
 <td>Forward</td>
 </tr>
-<tr class="odd">
+<tr>
 <td><code>Delete</code></td>
 <td>Delete</td>
 </tr>
-<tr class="even">
+<tr>
 <td><code>Ctrl+Shift+M</code></td>
 <td>Move to Archive (the account’s Archive folder)</td>
 </tr>
-<tr class="odd">
+<tr>
 <td><code>Ctrl+Q</code></td>
 <td>Mark as Read</td>
 </tr>
-<tr class="even">
+<tr>
 <td><code>Ctrl+A</code></td>
 <td>Select all messages (message list)</td>
 </tr>
-<tr class="odd">
+<tr>
 <td><code>Alt+Enter</code></td>
 <td>Message properties</td>
 </tr>
-<tr class="even">
+<tr>
 <td><code>F5</code></td>
 <td>Refresh</td>
 </tr>
-<tr class="odd">
+<tr>
 <td><code>Ctrl+Shift+E</code></td>
 <td>Empty Trash</td>
 </tr>
-<tr class="even">
+<tr>
 <td><code>Ctrl+Shift+W</code></td>
 <td>Watch / unwatch the selected message’s conversation</td>
 </tr>
-<tr class="odd">
+<tr>
 <td><code>K</code></td>
 <td>Toggle flag</td>
 </tr>
-<tr class="even">
+<tr>
 <td><code>Ctrl+Shift+K</code></td>
 <td>Pick flag</td>
 </tr>
-<tr class="odd">
+<tr>
 <td><code>Ctrl+Shift+S</code></td>
 <td>Search messages</td>
 </tr>
-<tr class="even">
+<tr>
 <td><code>Ctrl+Shift+F</code></td>
 <td>Search folders</td>
 </tr>
-<tr class="odd">
+<tr>
 <td><code>Ctrl+Shift+V</code></td>
 <td>View menu</td>
 </tr>
-<tr class="even">
+<tr>
 <td><code>Ctrl+Shift+H</code></td>
 <td>Toggle Plain Text View</td>
 </tr>
-<tr class="odd">
+<tr>
 <td><code>Ctrl+Shift+G</code></td>
 <td>Grab Addresses from Message</td>
 </tr>
-<tr class="even">
+<tr>
 <td><code>Ctrl+Shift+B</code></td>
 <td>Address Book</td>
 </tr>
-<tr class="odd">
+<tr>
 <td><code>Ctrl+Shift+L</code></td>
 <td>Rules Manager</td>
 </tr>
-<tr class="even">
+<tr>
 <td><code>Ctrl+,</code></td>
 <td>Settings</td>
 </tr>
-<tr class="odd">
+<tr>
 <td><code>F1</code></td>
 <td>User Guide</td>
 </tr>
-<tr class="even">
+<tr>
 <td><code>Shift+,</code></td>
 <td>First message in group</td>
 </tr>
-<tr class="odd">
+<tr>
 <td><code>Shift+.</code></td>
 <td>Last message in group</td>
 </tr>
-<tr class="even">
+<tr>
 <td><code>Escape</code></td>
 <td>Close contact mail results (message list focus)</td>
 </tr>
@@ -4162,33 +4285,33 @@ href="#calendar">Calendar</a> section for the full list.</p>
 <h3 id="tabs-1">Tabs</h3>
 <table>
 <thead>
-<tr class="header">
+<tr>
 <th>Shortcut</th>
 <th>Action</th>
 </tr>
 </thead>
 <tbody>
-<tr class="odd">
+<tr>
 <td><code>Ctrl+Enter</code></td>
 <td>Open message in new tab</td>
 </tr>
-<tr class="even">
+<tr>
 <td><code>Ctrl+Tab</code></td>
 <td>Next tab</td>
 </tr>
-<tr class="odd">
+<tr>
 <td><code>Ctrl+Shift+Tab</code></td>
 <td>Previous tab</td>
 </tr>
-<tr class="even">
+<tr>
 <td><code>Ctrl+W</code></td>
 <td>Close tab</td>
 </tr>
-<tr class="odd">
+<tr>
 <td><code>Ctrl+Shift+T</code></td>
 <td>Focus tab strip</td>
 </tr>
-<tr class="even">
+<tr>
 <td><code>Ctrl+Shift+``</code></td>
 <td>Tab list</td>
 </tr>
@@ -4201,113 +4324,113 @@ href="#calendar">Calendar</a> section for the full list.</p>
 <col style="width: 44%" />
 </colgroup>
 <thead>
-<tr class="header">
+<tr>
 <th>Shortcut</th>
 <th>Action</th>
 </tr>
 </thead>
 <tbody>
-<tr class="odd">
+<tr>
 <td><code>F6</code> / <code>Shift+F6</code></td>
 <td>Cycle between address fields, subject, and body</td>
 </tr>
-<tr class="even">
+<tr>
 <td><code>Alt+U</code></td>
 <td>Focus Subject field</td>
 </tr>
-<tr class="odd">
+<tr>
 <td><code>Alt+M</code></td>
 <td>Focus From account</td>
 </tr>
-<tr class="even">
+<tr>
 <td><code>Alt+Y</code></td>
 <td>Focus message body</td>
 </tr>
-<tr class="odd">
+<tr>
 <td><code>Alt+S</code> or <code>Ctrl+Enter</code></td>
 <td>Send</td>
 </tr>
-<tr class="even">
+<tr>
 <td><code>Ctrl+Shift+1/2/3</code></td>
 <td>Switch to Plain Text / Markdown / HTML mode</td>
 </tr>
-<tr class="odd">
+<tr>
 <td><code>F7</code></td>
 <td>Check Spelling (full dialog)</td>
 </tr>
-<tr class="even">
+<tr>
 <td><code>Ctrl+F7</code> / <code>Ctrl+Shift+F7</code></td>
 <td>Next / previous misspelling (inline)</td>
 </tr>
-<tr class="odd">
+<tr>
 <td><code>Alt+1</code> / <code>Alt+2</code> / <code>Alt+3</code></td>
 <td>Accept first / second / third spelling suggestion</td>
 </tr>
-<tr class="even">
+<tr>
 <td><code>F8</code></td>
 <td>Open preview (Markdown and HTML)</td>
 </tr>
-<tr class="odd">
+<tr>
 <td><code>Ctrl+B</code></td>
 <td>Bold</td>
 </tr>
-<tr class="even">
+<tr>
 <td><code>Ctrl+I</code></td>
 <td>Italic</td>
 </tr>
-<tr class="odd">
+<tr>
 <td><code>Ctrl+U</code></td>
 <td>Underline (HTML only)</td>
 </tr>
-<tr class="even">
+<tr>
 <td><code>Ctrl+Shift+X</code></td>
 <td>Strikethrough</td>
 </tr>
-<tr class="odd">
+<tr>
 <td><code>Ctrl+Alt+1/2/3</code></td>
 <td>Heading 1 / 2 / 3</td>
 </tr>
-<tr class="even">
+<tr>
 <td><code>Ctrl+Shift+L</code></td>
 <td>Bullet list</td>
 </tr>
-<tr class="odd">
+<tr>
 <td><code>Ctrl+Shift+N</code></td>
 <td>Numbered list</td>
 </tr>
-<tr class="even">
+<tr>
 <td><code>Ctrl+L</code></td>
 <td>Insert link</td>
 </tr>
-<tr class="odd">
+<tr>
 <td><code>Ctrl+Space</code></td>
 <td>Clear formatting</td>
 </tr>
-<tr class="even">
+<tr>
 <td><code>Ctrl+T</code></td>
 <td>Announce formatting at cursor</td>
 </tr>
-<tr class="odd">
+<tr>
 <td><code>Ctrl+Shift+T</code></td>
 <td>Show formatting in browsable list</td>
 </tr>
-<tr class="even">
+<tr>
 <td><code>Ctrl+Shift+A</code></td>
 <td>Add attachment</td>
 </tr>
-<tr class="odd">
+<tr>
 <td><code>Alt+A</code></td>
 <td>Focus attachment list</td>
 </tr>
-<tr class="even">
+<tr>
 <td><code>Ctrl+K</code></td>
 <td>Check addresses</td>
 </tr>
-<tr class="odd">
+<tr>
 <td><code>Ctrl+Shift+P</code></td>
 <td>Command palette</td>
 </tr>
-<tr class="even">
+<tr>
 <td><code>Escape</code></td>
 <td>Close window (when no menu or dropdown is open)</td>
 </tr>
@@ -4318,6 +4441,23 @@ Template</strong> are available from the command palette; they have no
 default keyboard shortcut.</p>
 <h2 id="private-notes-and-message-investigation">Private Notes and
 message investigation</h2>
+<h3 id="search-punctuation-and-wildcards">Search punctuation and
+wildcards</h3>
+<p>When an F3 search contains an unquoted <code>*</code> or
+<code>?</code>, QuickMail asks how to interpret it: <strong>Yes</strong>
+enables wildcard matching (potentially a slow text scan; a single
+trailing <code>*</code> can use the prefix index), <strong>No</strong>
+searches literal text without wildcard expansion, and
+<strong>Cancel</strong> does not run the search. No is the default.
+Literal terms are stored in quotes in search history and saved views.
+You can also type quotes yourself, for example
+<code>S:"Annual report?"</code>. The word index ignores punctuation:
+this finds the words, not necessarily the question-mark character.
+Attachment-name searches use literal filename matching instead of the
+word index. Searches run off the UI thread. If a search takes over two
+seconds, its progress window offers <strong>Cancel search</strong>; no
+percentage is shown because SQLite does not provide a reliable
+completion percentage.</p>
 <p><strong>Notes:</strong> beneath Subject in composition and the
 existing-message editor holds private keywords or annotations. It is
 stored locally and backed up with the database, never sent to
@@ -4347,13 +4487,36 @@ are not proof of server delivery or deletion. Events are retained up to
 90 days and 100,000 events per profile, with the latest 500 shown per
 message. Gmail labels sharing a Message-ID share the activity history
 within the account. # Attachment investigation tools</p>
+<p>Hover over an attachment for 750 ms to preview JPG/JPEG, PNG, GIF
+(first frame), BMP, PDF or TXT. This works in the reading pane and
+detached message windows. The floating preview does not select the
+attachment or take keyboard focus; right-click, double-click and drag
+remain available. Move onto the preview to scroll text or use
+Previous/Next page for PDFs. Move away or press Esc to close it.
+Clicking the attachment closes the preview before the normal attachment
+action. The preview opens beside the attachment label on the right, up
+to 900 × 1000 logical pixels, and shifts vertically to fit the monitor.
+Smaller screens use a reduced preview; the left side is used only when
+there is insufficient room on the right. Remote attachments require
+<strong>Download and preview</strong>; hovering never downloads them
+automatically. Previews are limited to 25 MB, text to 64K characters,
+and large images to 100 million source pixels. TXT preserves line breaks
+(UTF-8 and BOM-marked UTF-16/UTF-32); PDF pages are rendered by Windows,
+not a browser. Missing files show the original path. Disable
+<strong>Preview attachments on hover</strong> in Settings &gt; General
+&gt; display options if preferred (enabled by default).</p>
 <p><strong>Tools &gt; Attachment explorer</strong> lists cached
 attachments in the current folder, or throughout EQM with
 <strong>Everywhere</strong>. Search filenames, senders or subjects; sort
 the columns; save selected files without overwriting existing names; or
 use <strong>Go to message</strong>. Embedded images and messages whose
 attachment metadata has not been downloaded are excluded. A capped
-result asks you to refine the search.</p>
+result asks you to refine the search. The title counts displayed
+attachment rows. Sizes are shown in MB (1,048,576 bytes), with two
+decimal places and regional separators, right-aligned and sorted
+numerically. Search reads cached database metadata only; it does not
+scan directories. Directory scanning is a separate, explicit
+<strong>Locate missing attachment</strong> operation.</p>
 <p>For a missing file, select <strong>Locate missing
 attachment</strong>, choose a backup directory and inspect the
 candidates. <strong>Recover a copy</strong> copies into EQM; <strong>Use
@@ -4368,5 +4531,31 @@ rules remain visible. This is a read-only simulation, not execution or a
 guarantee of remote delivery.</p>
 <p>See <a href="ATTACHMENT-INVESTIGATION.md">Attachment
 investigation</a> for scope, keyboard navigation and limitations.</p>
+<h2 id="reliability-and-diagnostics">Reliability and diagnostics</h2>
+<p>If delivery succeeds but EQM cannot save the sent copy, the message
+stays in Scheduled as <strong>Sent — archival pending</strong>. It
+retries saving the copy without sending the email again. An already-sent
+message cannot be edited or replaced as an unsent scheduled message.
+Switching to Offline allows an active send to finish but stops
+subsequent queued sends.</p>
+<p>Advanced searches run without blocking the interface. Long searches
+show <strong>Cancel search</strong>; cancellation keeps the previous
+results rather than substituting incomplete results. <strong>Help &gt;
+Check for updates</strong> reports its result explicitly, including
+disabled checks and failures.</p>
+<p>Damaged or unreadable <code>accounts.json</code>,
+<code>rules.json</code> or <code>views.json</code> is reported rather
+than silently replaced with an empty configuration. Close EQM and
+restore a known-good backup; the <code>.previous</code> sibling file
+contains the previous valid saved version when available. Do not assume
+that an older configuration includes your latest account/rule
+changes.</p>
+<p>Each diagnostic log (<code>quickmail.log</code>,
+<code>performance.log</code>) keeps up to three rotated files
+(<code>.1</code> newest through <code>.3</code> oldest), in addition to
+the current file, with a 10 MiB limit per file for newly generated logs.
+Existing oversized logs rotate on the next write. When reporting an
+issue, include the relevant rotated files if the operation is no longer
+in the current log.</p>
 </body>
 </html>

@@ -49,15 +49,54 @@ the text to look for; the match is not case sensitive and looks for your
 text anywhere in the field. A message must satisfy
 <strong>every</strong> condition you checked, so leaving a condition
 unchecked is how you say “don’t care”.</li>
-<li><strong>Action</strong> — one of <strong>Mark as read</strong>,
-<strong>Mark as unread</strong>, <strong>Move to folder</strong>, or
-<strong>Delete</strong>. Choosing Move to folder adds a <strong>Choose
-Folder…</strong> button; the button then shows the folder you picked.
-The picker is the same folder tree used everywhere else you choose a
-destination, showing the folders of the rule’s own account — a rule
-files mail within one mailbox. It opens on the folder the rule already
-files into, or on the first folder for a new rule.</li>
+<li><strong>Actions</strong> — all actions appear as directly editable
+blocks, separated by horizontal lines. Use <strong>Add action</strong>
+to combine <strong>Forward</strong>, <strong>Reply template</strong>,
+<strong>Flag</strong>, <strong>Execute</strong>, <strong>Move to
+folder</strong>, <strong>Delete</strong>, or read/unread changes. The
+last option in each action dropdown, <strong>Remove action</strong>,
+removes that block. Move/Delete automatically sort last; only one
+Move/Delete action is supported. Only parameters relevant to that action
+appear.</li>
+<li><strong>Mark as read</strong> is the first block, an independent
+checkbox enabled by default. There is no need to add a separate read
+action to ordinary filters. Removing all other actions leaves a
+read-only rule; unchecking Mark as read then requires adding an action
+before saving.</li>
+<li><strong>Forward</strong> accepts one address per action. Multiple
+recipients display a warning: use a separate Forward action for each
+recipient.</li>
+<li><strong>Execute</strong> runs a trusted local <code>.exe</code>
+command once per matching message, as your Windows user, without
+elevation or sandboxing. Quote executable paths containing spaces. For
+scripts, use an explicit interpreter, for example
+<code>powershell.exe -NoProfile -File "C:\Scripts\lights.ps1"</code>.
+<strong>Add subject to command line</strong> appends the subject as one
+final literal argument; the script must treat it as data, never evaluate
+it as code. This option rejects <code>cmd.exe</code> and requires
+<code>-File</code> with PowerShell. Commands time out after 60 seconds;
+cancellation stops the process tree. A nonzero exit code fails the
+action and stops later actions. Effects already performed cannot be
+undone; manually applying a rule again runs the command again. Use
+narrow conditions and remember that a sender address can be forged. Test
+Rule/Preview never executes commands.</li>
 </ul>
+<p>For <strong>Forward + Move</strong>, EQM first durably queues
+forwarding, then marks the original read if requested, then moves it.
+This does not wait for SMTP delivery: if sending later fails, its queued
+copy remains managed by Scheduled. Forward/reply duplicate and loop
+protections still apply. <strong>Move or Delete always runs
+last</strong>, with at most one destination action per rule. There may
+be only one Reply template action, consistent with its per-sender
+protection. Combining Mark as unread with other actions requires
+clearing Also mark as read.</p>
+<p>If a step fails, remaining actions stop and the error lists completed
+steps. Earlier work is not rolled back, and a failed step may have
+processed part of a multi-message selection. Cancellation also does not
+undo queued forwards or earlier changes. Test Rule/Preview lists the
+planned actions. SPAM filters remain specialized single-action rules.
+Cleanup does not remove multi-action rules merely because their
+destination is In or missing; review those rules manually.</p>
 <p><strong>Test Rule</strong> runs the rule against the messages
 currently in your list and tells you how many it would match, so you can
 check a rule before letting it loose. <strong>Save</strong> stores the
@@ -83,12 +122,13 @@ expiration. Changing the date does not retroactively undo earlier
 actions.</p>
 <p>The <strong>Reply template</strong> action selects an existing
 template and sends its text from the receiving account to Reply-To (or
-From if Reply-To is absent). It preserves the original message, uses the
-template subject when supplied (otherwise <code>Re:</code> plus the
-original subject), and does not attach the original attachments. The
-existing <code>{sender}</code>, <code>{date}</code> and
-<code>{time}</code> template substitutions are supported. Create/edit
-templates from the composer before choosing them in Rule Manager.</p>
+From if Reply-To is absent). It preserves the original unless another
+action moves it, uses the template subject when supplied (otherwise
+<code>Re:</code> plus the original subject), and does not attach the
+original attachments. The existing <code>{sender}</code>,
+<code>{date}</code> and <code>{time}</code> template substitutions are
+supported. Create/edit templates from the composer before choosing them
+in Rule Manager.</p>
 <p>For vacation replies, choose the account, template and expiration
 date, enable automatic processing, and leave conditions empty if the
 reply should cover all eligible incoming senders. There is at most one

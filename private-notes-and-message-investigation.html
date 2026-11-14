@@ -25,9 +25,26 @@
 
 </head>
 <body>
-  <div class="nav"><a href="index.html">Contents</a> | <a href="full.html">Single Page</a> | <a href="keyboard-shortcuts.html">Previous: Keyboard Shortcuts</a></div>
+  <div class="nav"><a href="index.html">Contents</a> | <a href="full.html">Single Page</a> | <a href="keyboard-shortcuts.html">Previous: Keyboard Shortcuts</a> | <a href="reliability-and-diagnostics.html">Next: Reliability and diagnostics</a></div>
   <h1 id="private-notes-and-message-investigation">Private Notes and
 message investigation</h1>
+<h3 id="search-punctuation-and-wildcards">Search punctuation and
+wildcards</h3>
+<p>When an F3 search contains an unquoted <code>*</code> or
+<code>?</code>, QuickMail asks how to interpret it: <strong>Yes</strong>
+enables wildcard matching (potentially a slow text scan; a single
+trailing <code>*</code> can use the prefix index), <strong>No</strong>
+searches literal text without wildcard expansion, and
+<strong>Cancel</strong> does not run the search. No is the default.
+Literal terms are stored in quotes in search history and saved views.
+You can also type quotes yourself, for example
+<code>S:"Annual report?"</code>. The word index ignores punctuation:
+this finds the words, not necessarily the question-mark character.
+Attachment-name searches use literal filename matching instead of the
+word index. Searches run off the UI thread. If a search takes over two
+seconds, its progress window offers <strong>Cancel search</strong>; no
+percentage is shown because SQLite does not provide a reliable
+completion percentage.</p>
 <p><strong>Notes:</strong> beneath Subject in composition and the
 existing-message editor holds private keywords or annotations. It is
 stored locally and backed up with the database, never sent to
@@ -57,13 +74,36 @@ are not proof of server delivery or deletion. Events are retained up to
 90 days and 100,000 events per profile, with the latest 500 shown per
 message. Gmail labels sharing a Message-ID share the activity history
 within the account. # Attachment investigation tools</p>
+<p>Hover over an attachment for 750 ms to preview JPG/JPEG, PNG, GIF
+(first frame), BMP, PDF or TXT. This works in the reading pane and
+detached message windows. The floating preview does not select the
+attachment or take keyboard focus; right-click, double-click and drag
+remain available. Move onto the preview to scroll text or use
+Previous/Next page for PDFs. Move away or press Esc to close it.
+Clicking the attachment closes the preview before the normal attachment
+action. The preview opens beside the attachment label on the right, up
+to 900 × 1000 logical pixels, and shifts vertically to fit the monitor.
+Smaller screens use a reduced preview; the left side is used only when
+there is insufficient room on the right. Remote attachments require
+<strong>Download and preview</strong>; hovering never downloads them
+automatically. Previews are limited to 25 MB, text to 64K characters,
+and large images to 100 million source pixels. TXT preserves line breaks
+(UTF-8 and BOM-marked UTF-16/UTF-32); PDF pages are rendered by Windows,
+not a browser. Missing files show the original path. Disable
+<strong>Preview attachments on hover</strong> in Settings &gt; General
+&gt; display options if preferred (enabled by default).</p>
 <p><strong>Tools &gt; Attachment explorer</strong> lists cached
 attachments in the current folder, or throughout EQM with
 <strong>Everywhere</strong>. Search filenames, senders or subjects; sort
 the columns; save selected files without overwriting existing names; or
 use <strong>Go to message</strong>. Embedded images and messages whose
 attachment metadata has not been downloaded are excluded. A capped
-result asks you to refine the search.</p>
+result asks you to refine the search. The title counts displayed
+attachment rows. Sizes are shown in MB (1,048,576 bytes), with two
+decimal places and regional separators, right-aligned and sorted
+numerically. Search reads cached database metadata only; it does not
+scan directories. Directory scanning is a separate, explicit
+<strong>Locate missing attachment</strong> operation.</p>
 <p>For a missing file, select <strong>Locate missing
 attachment</strong>, choose a backup directory and inspect the
 candidates. <strong>Recover a copy</strong> copies into EQM; <strong>Use
@@ -79,6 +119,6 @@ guarantee of remote delivery.</p>
 <p>See <a href="ATTACHMENT-INVESTIGATION.md">Attachment
 investigation</a> for scope, keyboard navigation and limitations.</p>
 
-  <div class="nav"><a href="index.html">Contents</a> | <a href="full.html">Single Page</a> | <a href="keyboard-shortcuts.html">Previous: Keyboard Shortcuts</a></div>
+  <div class="nav"><a href="index.html">Contents</a> | <a href="full.html">Single Page</a> | <a href="keyboard-shortcuts.html">Previous: Keyboard Shortcuts</a> | <a href="reliability-and-diagnostics.html">Next: Reliability and diagnostics</a></div>
 </body>
 </html>
