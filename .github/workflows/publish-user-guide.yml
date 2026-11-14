@@ -69,6 +69,13 @@ jobs:
           # Inject version line after the h1
           sed -i "s|<h1 class=\"title\">QuickMail User Guide</h1>|<h1 class=\"title\">QuickMail User Guide</h1><p class=\"version\">Version $VERSION</p>|" build/docs/full.html
 
+      - name: Include the static private remote client
+        run: |
+          if [ -f QuickMail/Assets/Remote/index.html ]; then
+            mkdir -p build/docs/remote
+            cp QuickMail/Assets/Remote/index.html QuickMail/Assets/Remote/app.js build/docs/remote/
+          fi
+
       - name: Generate standalone articles
         run: |
           # Standalone pages that are not part of the user guide. Generated here so
@@ -190,3 +197,4 @@ jobs:
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./build/docs
+          keep_files: true
